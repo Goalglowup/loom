@@ -3,8 +3,10 @@ import fastifyStatic from '@fastify/static';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { readFileSync } from 'fs';
+import pg from 'pg';
 import { OpenAIProvider } from './providers/openai.js';
 import { ProxyRequest } from './types/openai.js';
+import { registerAuthMiddleware } from './auth.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -12,6 +14,13 @@ const __dirname = dirname(__filename);
 const fastify = Fastify({
   logger: true
 });
+
+// Database pool — used by auth middleware and (future) trace persistence
+const pool = new pg.Pool({
+  connectionString: process.env.DATABASE_URL,
+});
+
+registerAuthMiddleware(fastify, pool);
 
 // Serve dashboard at /dashboard
 fastify.register(fastifyStatic, {
