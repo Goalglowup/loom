@@ -20,9 +20,13 @@ export class OpenAIProvider extends BaseProvider {
       'Content-Type': 'application/json',
     };
 
-    // Remove host header to avoid conflicts
+    // Remove hop-by-hop headers that must not be forwarded
     delete headers['host'];
     delete headers['Host'];
+    delete headers['content-length'];
+    delete headers['Content-Length'];
+    delete headers['transfer-encoding'];
+    delete headers['Transfer-Encoding'];
 
     const response = await request(url, {
       method: proxyReq.method,
