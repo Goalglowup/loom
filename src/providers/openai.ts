@@ -34,10 +34,17 @@ export class OpenAIProvider extends BaseProvider {
     delete headers['referer'];
     delete headers['Referer'];
 
+    // When streaming, ask the upstream to include token usage in the final SSE chunk.
+    // OpenAI added stream_options.include_usage; Ollama supports it too.
+    let reqBody = proxyReq.body as Record<string, unknown> | undefined;
+    if (reqBody?.stream === true) {
+      reqBody = { ...reqBody, stream_options: { include_usage: true } };
+    }
+
     const response = await request(url, {
       method: proxyReq.method,
       headers,
-      body: proxyReq.body ? JSON.stringify(proxyReq.body) : undefined,
+      body: reqBody ? JSON.stringify(reqBody) : undefined,
     });
 
     const responseHeaders: Record<string, string> = {};

@@ -20,6 +20,8 @@ export interface StreamTraceContext {
   requestBody: unknown;
   model: string;
   provider: string;
+  /** HTTP status code from the upstream response. */
+  statusCode?: number;
   /** Epoch ms at the moment the gateway began proxying the request. */
   startTimeMs: number;
 }
@@ -116,6 +118,7 @@ export function createSSEProxy(options: StreamProxyOptions): Transform {
             usage: capture.usage,
           },
           latencyMs: Date.now() - tc.startTimeMs,
+          statusCode: tc.statusCode,
           promptTokens: capture.usage?.prompt_tokens,
           completionTokens: capture.usage?.completion_tokens,
           totalTokens: capture.usage?.total_tokens,

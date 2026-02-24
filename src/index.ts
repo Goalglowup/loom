@@ -96,6 +96,7 @@ fastify.post('/v1/chat/completions', async (request, reply) => {
               requestBody: reqBody,
               model: reqBody?.model ?? 'unknown',
               provider: provider.name,
+              statusCode: response.status,
               startTimeMs,
             }
           : undefined,
