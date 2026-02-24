@@ -21,13 +21,18 @@ export class OpenAIProvider extends BaseProvider {
       'Content-Type': 'application/json',
     };
 
-    // Remove hop-by-hop headers that must not be forwarded
+    // Remove hop-by-hop and browser-only headers that must not be forwarded
     delete headers['host'];
     delete headers['Host'];
     delete headers['content-length'];
     delete headers['Content-Length'];
     delete headers['transfer-encoding'];
     delete headers['Transfer-Encoding'];
+    // Strip Origin — browsers send "null" for file:// pages; upstream LLMs (e.g. Ollama) reject it
+    delete headers['origin'];
+    delete headers['Origin'];
+    delete headers['referer'];
+    delete headers['Referer'];
 
     const response = await request(url, {
       method: proxyReq.method,
