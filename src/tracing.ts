@@ -104,11 +104,13 @@ export class TraceRecorder {
         status_code: trace.statusCode ?? null,
       });
 
+      console.debug('[tracing] record() enqueued — batch size now', this.batch.length);
+
       if (this.batch.length >= BATCH_SIZE) {
         void this.flush();
       }
-    } catch {
-      // Trace errors must never crash the gateway.
+    } catch (err) {
+      console.error('[tracing] record() failed (encryption/serialization):', err);
     }
   }
 
@@ -125,6 +127,7 @@ export class TraceRecorder {
 
     try {
       for (const row of rows) {
+        console.debug('[tracing] flush() inserting row for tenant', row.tenant_id, 'model', row.model);
         await query(
           `INSERT INTO traces
              (tenant_id, request_id, model, provider, endpoint,
@@ -146,9 +149,10 @@ export class TraceRecorder {
             row.status_code,
           ],
         );
+        console.debug('[tracing] flush() INSERT succeeded for request_id', row.request_id);
       }
-    } catch {
-      // DB write failure is swallowed — gateway stability takes priority.
+    } catch (err) {
+      console.error('[tracing] flush() DB write failed:', err);
     }
   }
 

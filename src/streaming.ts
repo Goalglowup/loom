@@ -108,6 +108,7 @@ export function createSSEProxy(options: StreamProxyOptions): Transform {
       // Fire-and-forget trace persistence — never blocks the response path.
       if (options.traceContext) {
         const tc = options.traceContext;
+        console.debug('[streaming] flush() — usage:', capture.usage, 'content length:', capture.content.length);
         traceRecorder.record({
           tenantId: tc.tenantId,
           model: tc.model,
