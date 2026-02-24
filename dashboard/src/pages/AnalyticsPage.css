@@ -1,0 +1,31 @@
+.page {
+  background-color: white;
+  border-radius: 8px;
+  padding: 2rem;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.page-title {
+  font-size: 1.5rem;
+  font-weight: 600;
+  margin: 0 0 1.5rem 0;
+  color: #1a1a1a;
+}
+
+.placeholder-content {
+  padding: 3rem 2rem;
+  text-align: center;
+  color: #666;
+}
+
+.placeholder-content p {
+  margin: 0.5rem 0;
+  font-size: 1rem;
+}
+
+.placeholder-note {
+  margin-top: 1.5rem !important;
+  font-size: 0.875rem;
+  color: #999;
+  font-style: italic;
+}
