@@ -5,27 +5,114 @@
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
 }
 
+.page-header {
+  margin-bottom: 1.5rem;
+}
+
 .page-title {
   font-size: 1.5rem;
   font-weight: 600;
-  margin: 0 0 1.5rem 0;
+  margin: 0 0 0.25rem 0;
   color: #1a1a1a;
 }
 
-.placeholder-content {
-  padding: 3rem 2rem;
-  text-align: center;
-  color: #666;
-}
-
-.placeholder-content p {
-  margin: 0.5rem 0;
-  font-size: 1rem;
-}
-
-.placeholder-note {
-  margin-top: 1.5rem !important;
+.page-subtitle {
   font-size: 0.875rem;
-  color: #999;
-  font-style: italic;
+  color: #666;
+  margin: 0;
+}
+
+.traces-table-container {
+  overflow-x: auto;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+}
+
+.traces-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+}
+
+.traces-table thead {
+  background-color: #f9fafb;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.traces-table th {
+  padding: 0.75rem 1rem;
+  text-align: left;
+  font-weight: 600;
+  color: #374151;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.traces-table th.align-right {
+  text-align: right;
+}
+
+.traces-table tbody tr {
+  border-bottom: 1px solid #f3f4f6;
+  transition: background-color 0.15s ease;
+}
+
+.traces-table tbody tr:last-child {
+  border-bottom: none;
+}
+
+.traces-table tbody tr:hover {
+  background-color: #f9fafb;
+}
+
+.traces-table td {
+  padding: 0.875rem 1rem;
+  color: #1f2937;
+}
+
+.traces-table td.timestamp {
+  color: #6b7280;
+  font-variant-numeric: tabular-nums;
+}
+
+.traces-table td.tenant {
+  font-weight: 500;
+  color: #374151;
+}
+
+.traces-table td.model {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.8125rem;
+  color: #059669;
+}
+
+.traces-table td.provider {
+  color: #6b7280;
+}
+
+.traces-table td.align-right {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.traces-table td.cost {
+  font-weight: 500;
+  color: #1f2937;
+}
+
+@media (max-width: 768px) {
+  .page {
+    padding: 1rem;
+    border-radius: 0;
+  }
+
+  .traces-table {
+    font-size: 0.8125rem;
+  }
+
+  .traces-table th,
+  .traces-table td {
+    padding: 0.625rem 0.75rem;
+  }
 }

@@ -140,3 +140,57 @@ Key design implications from volume target:
 **Task:** Add encryption_key_version column to traces migration  
 **Mode:** Sync  
 **Coordination:** Part of 4-agent wave (Keaton sync, Fenster/McManus/Hockney background)
+
+## 2026-02-24T04:00:00Z: GitHub Issues Migration — Work Breakdown to Issues
+
+**Task:** Migrate approved architecture work items to GitHub issues for team visibility  
+**Outcome:** Created 17 GitHub issues (6 Backend/Fenster, 5 Frontend/McManus, 6 Testing/Hockney)
+
+### Issues Created
+
+**Backend (Fenster) — 6 items:**
+- F3: Tenant Auth Middleware (Wave 2)
+- F5: Azure OpenAI Adapter (Wave 2)
+- F6: SSE Streaming Proxy (Wave 2)
+- F7: Trace Recording & Persistence (Wave 3)
+- F8: Analytics Engine (Wave 3)
+- F9: Dashboard API Endpoints (Wave 3)
+- F10: Provider Configuration & Tenant Routing (Wave 3)
+
+**Frontend (McManus) — 5 items:**
+- M2: Traces Table Component (Wave 3)
+- M3: Trace Details Panel (Wave 3)
+- M4: Analytics Summary Card (Wave 3)
+- M5: Analytics Timeseries Charts (Wave 3)
+
+**Testing (Hockney) — 6 items:**
+- H2: Proxy Correctness Tests (Wave 2)
+- H3: Authentication Tests (Wave 2)
+- H4: Multi-Tenant Isolation Tests (Wave 3)
+- H5: Multi-Provider Tests (Wave 2)
+- H6: Streaming & Trace Recording Tests (Wave 3)
+- H7: Encryption-at-Rest Tests (Wave 3)
+
+### Issue Structure
+
+Each issue includes:
+- Clear acceptance criteria (what "done" means)
+- Dependencies (blocks/blocked-by relationships)
+- Performance targets where applicable
+- Reference to architecture decisions in .squad/decisions.md
+- Labels for squad assignment (squad:fenster, squad:mcmanus, squad:hockney)
+- Wave assignment for execution planning (Wave 2 parallel work, Wave 3+ follow-on)
+
+### Repository Details
+
+- **Repository:** Goalglowup/loom on GitHub
+- **Issues Platform:** GitHub Issues (not Jira)
+- **Labels System:** squad:* (agent assignment), wave:* (execution phase)
+- **Total Work Items in Phase 1:** 22 (5 completed in Wave 1, 17 remaining)
+
+### Lessons Learned
+
+1. **GitHub Labels Required Setup:** Had to create custom labels before bulk issue creation (squad:fenster, squad:mcmanus, squad:hockney, wave:2, wave:3)
+2. **Wave 2 Critical Path:** F3 → F6 → F7 (tenant auth → streaming → trace recording) must execute sequentially; H2/H3/H5 can run in parallel with F3-F6
+3. **Wave 3 Unblocking:** F7 and F8 are the critical unlocks for all frontend work (M2-M5) and remaining test coverage (H4, H6, H7)
+4. **Architecture Decisions Embedded:** Each issue references specific decisions from .squad/decisions.md to ensure team alignment; no decisions isolated in issue comments

@@ -17,6 +17,7 @@ exports.up = (pgm) => {
       completion_tokens integer,
       total_tokens integer,
       estimated_cost_usd numeric(10, 6),
+      encryption_key_version integer NOT NULL DEFAULT 1,
       created_at timestamptz NOT NULL DEFAULT now(),
       PRIMARY KEY (id, created_at)
     ) PARTITION BY RANGE (created_at);

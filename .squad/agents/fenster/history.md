@@ -103,3 +103,46 @@
 **Task:** Implement trace encryption module  
 **Mode:** Background  
 **Coordination:** Part of 4-agent wave (Keaton sync, Fenster/McManus/Hockney background)
+
+### 2026-02-24: Trace Encryption Module Implementation (F7)
+
+**Implementation:**
+- Created `/src/encryption.ts` with AES-256-GCM encryption/decryption functions
+- Per-tenant key derivation using HMAC-SHA256(masterKey, tenantId) pattern
+- Master key from `ENCRYPTION_MASTER_KEY` environment variable (32 bytes hex)
+- Unique 12-byte IV generated per encryption operation
+- 16-byte GCM authentication tag appended to ciphertext
+- Functions: `encryptTraceBody(tenantId, body)` returns `{ ciphertext, iv }`
+- Functions: `decryptTraceBody(tenantId, encryptedBody, iv)` returns plaintext
+- Comprehensive error handling for missing/invalid master key
+
+**Testing:**
+- Created `/tests/encryption.test.ts` with 16 unit tests
+- All tests passing (393ms execution time)
+- Coverage: encryption/decryption, tenant isolation, error cases, round-trip validation
+- Validated typical trace request/response bodies
+- Confirmed tamper-detection (GCM auth tag verification)
+
+**Key Design Decisions:**
+- AES-256-GCM: Industry-standard authenticated encryption (confidentiality + integrity)
+- HMAC-SHA256 for key derivation: Simple, deterministic, secure tenant isolation
+- IV stored alongside ciphertext: Standard practice (IV is not secret, must be unique)
+- Hex encoding for storage: Simple PostgreSQL VARCHAR compatibility
+- Node.js crypto module: Built-in, proven, no external dependencies
+
+**Security Properties:**
+- Tenant isolation: Each tenant has cryptographically isolated key
+- Authenticated encryption: GCM provides both confidentiality and integrity
+- Forward compatibility: `encryption_key_version` column ready for Phase 2 key rotation
+- Fail-secure: Decryption throws on auth failure (tampered/corrupted data)
+
+**Integration Points:**
+- Next: Update trace persistence to call `encryptTraceBody()` before INSERT
+- Next: Update dashboard API to call `decryptTraceBody()` on fetch
+- Next: Migration adds `request_iv`, `response_iv`, `encryption_key_version` columns
+
+**User Preferences Observed:**
+- Prefer Node.js built-ins over external libraries (crypto module)
+- Comprehensive inline documentation explaining cryptographic choices
+- Security reasoning documented in code comments
+- Test coverage for security properties (tenant isolation, tamper detection)

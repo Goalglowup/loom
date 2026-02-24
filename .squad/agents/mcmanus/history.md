@@ -50,6 +50,36 @@
 
 **Next Wave:** M2-M4 will integrate with Fenster's REST APIs for real trace/analytics data
 
+### 2024-12-25: M2 - Trace Viewer Page Complete
+
+**Implemented:**
+- Professional trace table in TracesPage component showing mock data
+- Table columns: timestamp, tenant, model, provider, latency, tokens, cost
+- Clean table styling with hover effects, proper typography, and responsive design
+- Formatted data display: localized timestamps, currency formatting, number formatting
+- Mock data structure matches expected trace schema (8 sample traces)
+- Monospace font for model names, right-aligned numeric columns, tabular numbers
+
+**Key Files:**
+- `/dashboard/src/pages/TracesPage.tsx` - Trace viewer component with mock data
+- `/dashboard/src/pages/TracesPage.css` - Table styling and responsive layout
+
+**Technical Patterns:**
+- TypeScript interface for Trace type with all required fields
+- Helper functions for formatting (timestamp, cost, latency)
+- Semantic CSS classes (timestamp, tenant, model, provider, cost)
+- Responsive table with mobile breakpoint at 768px
+- Table styling follows modern web UI patterns (hover states, proper borders)
+
+**Design Decisions:**
+- Used system fonts for consistency with dashboard layout
+- Monospace font for model names (developer-friendly)
+- Right-aligned numeric columns for easier scanning
+- Subtle hover effect for row highlighting
+- Clean border treatment with rounded container
+
+**Ready for:** Wave 3 API integration — component structure ready to swap mock data with REST API calls
+
 
 ## 2026-02-24T03:31:15Z: Wave 1 Encryption Launch Spawn
 
