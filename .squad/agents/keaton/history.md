@@ -91,8 +91,39 @@ Key design implications from volume target:
 - Critical path: F1 → F4 → F6 → F7 → H6
 - 4 execution waves identified for parallel work
 
+### Security Architecture (2026-02-24)
+
+**Tenant Data Encryption Decision:**
+- Use encryption-at-rest for all tenant data (request_body, response_body columns in traces table)
+- Application-level column encryption using AES-256-GCM (authenticated encryption)
+- Envelope encryption pattern: master key + tenant_id derives per-tenant DEKs
+- Threat model: Unauthorized database console access (compromised admin, insider threat)
+- ETL workaround deferred — dashboard lag acceptable for Phase 1 observability use case
+
+**Key Management Strategy:**
+- Phase 1: Master key in environment variable, deterministic tenant key derivation
+- Phase 2: External KMS (AWS KMS), key rotation with grace period
+- Schema includes encryption_key_version column now to avoid backfill migration later
+
+**Implementation Pattern:**
+- Encrypt at trace persistence (off hot path, no gateway latency impact)
+- Decrypt on dashboard API reads (~0.01ms per trace, negligible for human-scale UI)
+- Store IV (initialization vector) in separate columns (request_iv, response_iv)
+- Tenant isolation: one tenant's key compromise doesn't expose others
+
+**Performance Impact:**
+- Encryption overhead: <0.01ms per trace (unmeasurable at 1000 req/sec)
+- Dashboard analytics lag: ~10ms for 1000-trace page (acceptable for observability)
+
+**Alternatives Rejected:**
+- PostgreSQL TDE: Too coarse-grained, limited key rotation
+- No encryption: Fails to address unauthorized DB console access threat
+- Selective encryption: Too complex to determine what's sensitive in prompts
+
 ### Key File Paths
 - PRD: /Users/michaelbrown/projects/loom/Loom_PRD_v0.1.pdf
 - Team decisions: /Users/michaelbrown/projects/loom/.squad/decisions.md
 - Architecture proposal (original): /Users/michaelbrown/projects/loom/.squad/decisions/inbox/keaton-architecture-proposal.md
 - Architecture decision (approved): /Users/michaelbrown/projects/loom/.squad/decisions/inbox/keaton-architecture-approved.md
+- Security architecture (encryption): /Users/michaelbrown/projects/loom/.squad/decisions/inbox/keaton-tenant-encryption.md
+- Database migrations: /Users/michaelbrown/projects/loom/migrations/

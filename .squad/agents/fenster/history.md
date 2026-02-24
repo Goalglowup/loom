@@ -60,3 +60,39 @@
 - F1 (Project scaffold) ✅ Complete - Server runs, health endpoint works
 - F2 (Database schema) ✅ Complete - Migrations created, schema designed per spec
 - F4 (OpenAI adapter) ✅ Complete - Proxy endpoint implemented, tested without real API key
+
+### 2026-02-24: Security Architecture — Tenant Data Encryption (Keaton approval)
+
+**Impact on Backend (Fenster):**
+
+**New Requirements for F2 Schema:**
+- Add `request_iv` column (varchar(32)) to store initialization vector for request_body encryption
+- Add `response_iv` column (varchar(32)) to store initialization vector for response_body encryption
+- Add `encryption_key_version` column (integer DEFAULT 1) for Phase 2 key rotation support
+
+**New Work for F7 (Encryption Implementation):**
+- Create encryption utility module (`src/utils/encryption.ts`):
+  - `encryptTraceBody(plaintext: string, tenantId: string): { ciphertext: string, iv: string }`
+  - `decryptTraceBody(ciphertext: string, iv: string, tenantId: string): string`
+  - Use node:crypto with AES-256-GCM (authenticated encryption)
+  - Per-tenant key derivation from master key + tenant_id
+  - Master key from environment variable (Phase 1); KMS integration deferred to Phase 2
+
+- Update trace persistence path:
+  - Encrypt request_body and response_body at INSERT time
+  - Store ciphertext + IV in database
+  - Off hot path — does not affect gateway latency (encryption overhead <0.01ms per trace)
+
+- Update dashboard API read path:
+  - Decrypt trace bodies on fetch for analytics/visualization
+  - Decryption overhead ~0.01ms per trace; ~10ms for 1000-trace page load (acceptable for observability)
+
+**Key Management Strategy (document in README or docs/security.md):**
+- Phase 1: Application-level envelope encryption, environment variable master key
+- Phase 2: Migrate to external KMS (AWS KMS recommended for Goal Glowup deployment)
+- Phase 2: Implement key rotation with grace period for re-encryption
+- Audit logging for all key access (Phase 2+)
+
+**Performance Impact:** Negligible. AES-256-GCM on modern CPU: ~1-2 GB/sec; average trace: ~2KB; overhead <0.01ms per trace.
+
+**Risk Assessment:** LOW. Standard encryption pattern, negligible performance impact, no identified blockers for Phase 1.

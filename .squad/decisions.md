@@ -69,3 +69,13 @@
 **What:** Implemented observability dashboard as React 19 + Vite SPA in dashboard/ subdirectory, served by Fastify at /dashboard via @fastify/static plugin  
 **Why:** Fast development, modern tooling, TypeScript support; SPA architecture with client-side routing; keeps frontend code isolated  
 **Impact:** Build output at dashboard/dist/ served statically; base path /dashboard/ configured; routes for Traces and Analytics; ready for REST API consumption in Wave 3
+
+## 2026-02-24: Security Architecture — Tenant Data Encryption-at-Rest
+
+**By:** Keaton (Lead), approved by Michael Brown  
+**What:** Use encryption-at-rest for all tenant data in PostgreSQL (request_body and response_body columns). Application-level AES-256-GCM encryption with per-tenant key derivation. Dashboard analytics lag is acceptable for Phase 1 observability use case.  
+**Why:** Protect against unauthorized database console access (insider threat, compromised admin credentials). Phase 1 threat model focuses on DB access boundary; full KMS migration deferred to Phase 2.  
+**Impact:** Fenster adds encryption utility module and IV columns to traces migration; Hockney adds encrypted storage validation tests; schema includes encryption_key_version column for Phase 2 key rotation; key management strategy documented for GA compliance planning. Performance impact negligible (<0.01ms per trace encryption). No blockers identified.  
+**Alternatives Considered:** PostgreSQL TDE (rejected: all-or-nothing, limited tenant isolation); no encryption + access controls (rejected: fails threat model); selective field encryption (rejected: complex PII detection logic).  
+**Risk:** LOW. Standard encryption pattern, negligible performance impact, proven libraries.  
+**Deferred to Phase 2:** External KMS integration, key rotation implementation, PII detection layer, ETL pipeline for real-time analytics.

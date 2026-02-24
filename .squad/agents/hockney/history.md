@@ -56,3 +56,48 @@
 **User Preferences:**
 - Prefer tests that work out-of-box without external dependencies
 - Skip database tests by default, enable via environment variable
+
+### 2026-02-24: Security Architecture — Tenant Data Encryption (Keaton approval)
+
+**Impact on Testing (Hockney):**
+
+**New Test Requirements for H3 (Encryption Tests):**
+
+1. **Test Encrypted Storage Validation:**
+   - Verify raw database query (direct SQL) returns ciphertext in request_body and response_body columns, NOT plaintext
+   - Verify ciphertext changes between identical plaintext inserts (IV randomness validation)
+   - Ensure traces table includes request_iv, response_iv, and encryption_key_version columns
+
+2. **Test Decryption Path:**
+   - Verify dashboard API returns decrypted content when appropriate authorization granted
+   - Verify decryption fails gracefully (no plaintext leaked) with wrong tenant_id
+   - Verify correct tenant_id always returns same plaintext for same encrypted body
+
+3. **Test Key Derivation and Tenant Isolation:**
+   - Verify same tenant_id always produces same DEK (deterministic derivation from master key + tenant_id)
+   - Verify different tenant_ids produce different DEKs (encryption isolation)
+   - Verify ciphertext from tenant A cannot be decrypted by tenant B
+
+4. **Test Edge Cases:**
+   - Empty trace body encryption/decryption
+   - Large trace bodies (>1MB) encryption/decryption
+   - Special characters and non-ASCII content
+   - Concurrent encryption of same content (different IVs, different ciphertexts)
+
+**Integration with Existing Test Infrastructure:**
+- Tests can use mock server (no KMS required for Phase 1)
+- Add encryption test database fixtures to `/tests/fixtures/test-database.ts`
+- Tests remain skippable (TEST_DB_ENABLED=1 environment variable)
+- Encryption tests validate against PostgreSQL schema
+
+**Performance Validation:**
+- Verify encryption overhead does NOT add >0.01ms per trace to persistence latency
+- Verify decryption overhead does NOT add >0.01ms per trace to read latency
+- Acceptable for observability dashboard (human-scale latency tolerance)
+
+**Key Management Test Assumptions:**
+- Master key provided via environment variable (tests mock via process.env)
+- No real KMS required in Phase 1 tests
+- Key rotation NOT tested in Phase 1 (deferred to Phase 2)
+
+**Risk Assessment:** LOW. Standard encryption library testing. Database tests already exist; add focused encryption validation tests.
