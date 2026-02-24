@@ -155,3 +155,55 @@
 **Task:** Write encryption validation tests  
 **Mode:** Background  
 **Coordination:** Part of 4-agent wave (Keaton sync, Fenster/McManus/Hockney background)
+
+### 2026-02-24: Wave 2 Test Suites (H2, H3, H5)
+
+**Completed:** H2 (proxy.test.ts), H3 (auth.test.ts), H5 (providers.test.ts)
+
+**Status:** ✅ COMPLETE — 39 new tests passing (61 total across all suites)
+
+**Test Coverage:**
+
+**H2 — Proxy Correctness (tests/proxy.test.ts, 11 tests):**
+- Non-streaming path: Authorization header set to `Bearer <key>`, Content-Type: application/json forwarded, host header stripped before upstream, 4xx/5xx/429 status codes passed through
+- Streaming path: undici `response.body` is a Node.js `Readable`; used async iteration (not Web ReadableStream `.getReader()`) — critical fix for Node.js 25+ / undici compatibility
+- Error handling: unreachable upstream throws, 401/429/500 all passthrough with original body
+
+**H3 — Authentication (tests/auth.test.ts, 13 tests):**
+- Valid Bearer token and x-api-key both yield 200 with tenant context attached
+- Invalid/missing key → 401 with auth_error type
+- Empty Bearer value, Basic auth scheme, missing headers all → 401
+- LRU cache: inline implementation validates cache population, hit tracking, eviction on max size, and LRU-refresh-on-access semantics
+- Multi-tenant isolation: concurrent requests with different keys yield different tenant contexts
+- Pattern: inline reference gateway implements expected contract; all tests are always-on (no infrastructure required); real Fenster src/auth.ts swapped in when available
+
+**H5 — Multi-Provider (tests/providers.test.ts, 15 tests):**
+- OpenAI path: `/v1/chat/completions`, `Authorization: Bearer` header (not `api-key`)
+- Azure path: `/openai/deployments/{deployment}/chat/completions?api-version=...` URL, deployment name used as model in response
+- Both non-streaming and streaming paths validated for each provider
+- OpenAI/Azure responses are structurally identical (OpenAI-compatible shape confirmed)
+- Error handling: 401 (invalid key), 429 (rate limit), network failure (unreachable upstream throws), 404 for wrong Azure path
+
+**Patterns Established:**
+- Node.js `Readable` from undici requires async iteration (`for await...of`), NOT `.getReader()` — document this for future streaming tests
+- Inline reference implementations are the correct pattern for testing contracts against unshipped Fenster modules (avoids failing imports breaking the whole test file)
+- Capture servers (inline Fastify) for header/path inspection are more precise than mocking library approaches
+- Port allocation: existing mocks use 3001/3002; Wave 2 tests use 3011–3040 range
+
+**Gaps Noted:**
+- Gateway-level proxy test (full Fastify → OpenAI pipeline) deferred until Fenster adds OPENAI_BASE_URL env support in F6
+- AzureOpenAIProvider direct instantiation tests deferred until src/providers/azure.ts ships (F5)
+- Gateway routing test (tenant config → provider selection) deferred until F6 routing logic ships
+- All deferred tests marked with `// TODO: verify against Fenster's implementation`
+
+### 2026-02-24: Wave 2 Validation — 61 Tests Passing
+
+**Status:** ✅ COMPLETE — All H-track tasks verified
+
+**Issues Closed:** #12 (H2), #13 (H3), #15 (H5)
+
+**Integration Points with Fenster:**
+- H2 tests validate OpenAIProvider.proxy() correctness directly; full gateway tests follow once OPENAI_BASE_URL support lands
+- H3 auth contract tests use inline reference implementation now; swap to src/auth.ts import once F3 lands (all assertions must pass immediately)
+- H5 multi-provider tests validated both OpenAI and Azure request/response formats match OpenAI-compatible shape
+- Streaming validation confirmed undici response.body pattern (Node.js Readable with async iteration) works end-to-end

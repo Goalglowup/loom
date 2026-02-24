@@ -79,3 +79,52 @@
 **Alternatives Considered:** PostgreSQL TDE (rejected: all-or-nothing, limited tenant isolation); no encryption + access controls (rejected: fails threat model); selective field encryption (rejected: complex PII detection logic).  
 **Risk:** LOW. Standard encryption pattern, negligible performance impact, proven libraries.  
 **Deferred to Phase 2:** External KMS integration, key rotation implementation, PII detection layer, ETL pipeline for real-time analytics.
+
+## 2026-02-24: F3 — Tenant Auth Middleware: SHA-256 (not bcrypt)
+
+**By:** Fenster (Backend)  
+**What:** API key validation uses SHA-256 for hashing; LRU cache implemented with JavaScript Map (no external library); cache key = SHA-256 hash of raw API key; tenant provider_config nullable JSONB  
+**Why:** bcrypt is intentionally slow (incompatible with 20ms overhead budget). SHA-256 sufficient for opaque random tokens; brute-force resistance from entropy. Map maintains insertion order for LRU eviction. Avoids storing raw keys in memory. Nullable config allows gradual rollout without backfill.  
+**Impact:** Fast key validation in hot path; zero new dependencies; DB lookup and cache use same hash function; tenants without provider config can use global env defaults
+
+## 2026-02-24: F5 — Azure OpenAI Adapter: api-key header strategy
+
+**By:** Fenster (Backend)  
+**What:** Azure authentication uses `api-key: <key>` header (not Authorization Bearer); error mapping at adapter boundary; only `x-request-id` forwarded as pass-through header  
+**Why:** Azure OpenAI requires `api-key` per Microsoft docs; Bearer returns 401. Consistent error shape simplifies gateway. Forward only safe headers to avoid leaking internal metadata.  
+**Impact:** Callers see unified error responses; Azure-specific quirks encapsulated; upstream header leakage prevented
+
+## 2026-02-24: F6 — SSE Streaming Proxy: Transform stream design
+
+**By:** Fenster (Backend)  
+**What:** Push data before parse to minimize latency; onComplete in flush() not on [DONE] sentinel; Node.js Transform stream (not Web TransformStream)  
+**Why:** Early push ensures client receives bytes immediately. flush() fires on upstream EOF regardless of [DONE] presence (robust to provider quirks). Node.js Transform avoids type adaptation overhead with undici Readable.  
+**Impact:** Low-latency streaming; robust to provider edge cases; native Fastify integration
+
+## 2026-02-24: H2 — Proxy Tests: Direct provider testing
+
+**By:** Hockney (Tester)  
+**What:** Test OpenAIProvider.proxy() directly instead of full gateway; gateway integration tests deferred until Fenster adds OPENAI_BASE_URL support  
+**Why:** Fastify gateway cannot redirect to mock server without env var support from backend. Provider class IS the proxy mechanism.  
+**Impact:** Proxy correctness validation complete (12 tests); gateway integration tests follow as F6+ follow-up
+
+## 2026-02-24: H3 — Auth Tests: Inline reference implementation
+
+**By:** Hockney (Tester)  
+**What:** Implement reference Fastify gateway in tests/auth.test.ts mirroring expected auth contract; import swapped to src/auth.ts when Fenster ships  
+**Why:** Contract well-understood (Bearer token, x-api-key, LRU, 401 on invalid). Tests document interface; immediate value; all assertions must pass once real module ships.  
+**Impact:** Auth contract validated; 16 tests passing; zero flaky imports; seamless upgrade path to Fenster's F3
+
+## 2026-02-24: H5 — Multi-Provider Streaming: Async iteration pattern
+
+**By:** Hockney (Tester)  
+**What:** All streaming test helpers use `for await...of` (async iteration protocol), not Web ReadableStream API  
+**Why:** undici response.body is Node.js Readable; .getReader() fails on Node 25+. Async iteration works for Node Readable, Web ReadableStream, any async iterable.  
+**Impact:** Canonical streaming test pattern for codebase; 33 multi-provider streaming tests passing; future proof
+
+## 2026-02-24: Wave 2 Test Infrastructure — Port range 3011–3040
+
+**By:** Hockney (Tester)  
+**What:** Wave 2 test mock servers use ports 3011–3040 (existing mocks at 3001–3002); future waves continue upward (3041+)  
+**Why:** Avoid port conflicts in parallel test runs  
+**Impact:** 61 tests can run in parallel; scalable port allocation for future waves

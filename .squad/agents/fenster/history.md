@@ -146,3 +146,48 @@
 - Comprehensive inline documentation explaining cryptographic choices
 - Security reasoning documented in code comments
 - Test coverage for security properties (tenant isolation, tamper detection)
+
+### 2026-02-24: Wave 2 Implementation (F3, F5, F6)
+
+**F3 — Tenant Auth Middleware (`src/auth.ts`)**
+- API key extracted from `Authorization: Bearer <key>` or `x-api-key` header
+- Keys are SHA-256 hashed before DB lookup (never stored in plaintext)
+- Map-based LRU cache (1000 slots) wraps DB queries; cache miss triggers single JOIN query on `api_keys ⋈ tenants`
+- `TenantContext` (tenantId, name, providerConfig) attached to `request.tenant` for downstream use
+- `/health` and `/dashboard/*` routes bypass auth (no-ops)
+- `FastifyRequest` augmented via `declare module 'fastify'` — type-safe downstream access
+- New migration `1000000000004` adds nullable `provider_config JSONB` column to tenants
+
+**F5 — Azure OpenAI Adapter (`src/providers/azure.ts`)**
+- Extends `BaseProvider`; uses deployment-based URL: `{endpoint}/openai/deployments/{deployment}/chat/completions?api-version=...`
+- Auth via `api-key` header (not `Authorization: Bearer`)
+- Streaming response: body stream passed through unchanged (same pattern as OpenAI provider)
+- Non-streaming: Azure error envelope `{ error: { code, message, innerError } }` mapped to OpenAI shape `{ error: { message, type, code, param } }` with HTTP status → type mapping
+- `AzureProviderConfig` extends `ProviderConfig` with `endpoint`, `deployment`, `apiVersion`
+
+**F6 — SSE Streaming Proxy (`src/streaming.ts`)**
+- `createSSEProxy(options)` returns a Node.js `Transform` stream
+- **Push-before-parse**: each incoming `Buffer` chunk is forwarded to the output immediately, then parsed — client latency is never blocked by parsing
+- Maintains `parseBuffer` to handle SSE events split across chunks
+- Assembles `StreamCapture { content, chunks, usage }` from `delta.content` fields
+- `onComplete(capture)` called in `flush()` when upstream closes — ready for encrypted trace storage
+- Does not buffer the full response; true streaming pass-through
+
+**Key Implementation Decisions:**
+- LRU via plain `Map` (insertion order = LRU order); no new dependency needed
+- SHA-256 key hash matches what migrations store in `api_keys.key_hash`
+- AzureProvider is a standalone class — gateway selects provider at request time using `tenant.providerConfig`
+- `[DONE]` sentinel in SSE is skipped cleanly (no JSON.parse attempt)
+
+**Status:**
+- F3 ✅ Complete — issues #1 closed
+- F5 ✅ Complete — issues #2 closed
+- F6 ✅ Complete — issues #3 closed
+
+### 2026-02-24: Wave 2 Learnings — Undici Streaming Pattern
+
+**Cross-Agent Note (from Hockney):**
+When using undici for HTTP client requests with streaming responses, the response body is a Node.js `Readable` stream, NOT a Web `ReadableStream`. Testing streaming paths requires `for await...of` async iteration, NOT `.getReader()` (which will fail on Node.js 25+ with undici). This pattern is now canonical for all streaming tests in the codebase.
+
+**Implementation Consequence for F6:**
+The `createSSEProxy()` function receives undici response body as Node.js Readable. Using `node:stream` Transform over the Readable is the correct approach (no Web API adaptation needed). Fastify's `reply.send()` accepts Node.js streams natively, so this pattern is end-to-end consistent.
