@@ -9,7 +9,7 @@ interface TraceDetailsProps {
 }
 
 function estimateCost(t: Trace): string {
-  // Rough approximation: prompt @ $0.01/1k tokens, completion @ $0.03/1k tokens
+  if (t.prompt_tokens == null || t.completion_tokens == null) return '—';
   const cost = (t.prompt_tokens * 0.01 + t.completion_tokens * 0.03) / 1000;
   return `$${cost.toFixed(4)}`;
 }
@@ -58,7 +58,7 @@ function TraceDetails({ trace, onClose }: TraceDetailsProps) {
               <dt>Status Code</dt>
               <dd>
                 <span className={`status-badge ${statusClass(trace.status_code)}`}>
-                  {trace.status_code}
+                  {trace.status_code ?? '—'}
                 </span>
               </dd>
 
@@ -66,10 +66,10 @@ function TraceDetails({ trace, onClose }: TraceDetailsProps) {
               <dd>{trace.latency_ms.toLocaleString()} ms</dd>
 
               <dt>Prompt Tokens</dt>
-              <dd>{trace.prompt_tokens.toLocaleString()}</dd>
+              <dd>{trace.prompt_tokens != null ? trace.prompt_tokens.toLocaleString() : '—'}</dd>
 
               <dt>Completion Tokens</dt>
-              <dd>{trace.completion_tokens.toLocaleString()}</dd>
+              <dd>{trace.completion_tokens != null ? trace.completion_tokens.toLocaleString() : '—'}</dd>
 
               <dt>Estimated Cost</dt>
               <dd>{estimateCost(trace)}</dd>

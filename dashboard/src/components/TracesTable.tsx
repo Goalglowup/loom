@@ -7,10 +7,10 @@ export interface Trace {
   tenant_id: string;
   model: string;
   provider: string;
-  status_code: number;
+  status_code: number | null;
   latency_ms: number;
-  prompt_tokens: number;
-  completion_tokens: number;
+  prompt_tokens: number | null;
+  completion_tokens: number | null;
   created_at: string;
 }
 
@@ -18,7 +18,8 @@ interface TracesTableProps {
   onRowClick: (trace: Trace) => void;
 }
 
-export function statusClass(code: number): string {
+export function statusClass(code: number | null): string {
+  if (code == null) return '';
   if (code >= 200 && code < 300) return 'status-2xx';
   if (code >= 400 && code < 500) return 'status-4xx';
   if (code >= 500) return 'status-5xx';
@@ -101,9 +102,10 @@ function TracesTable({ onRowClick }: TracesTableProps) {
 
   const filtered = traces.filter(t => {
     if (modelFilter !== 'all' && t.model !== modelFilter) return false;
-    if (statusFilter === '2xx' && !(t.status_code >= 200 && t.status_code < 300)) return false;
-    if (statusFilter === '4xx' && !(t.status_code >= 400 && t.status_code < 500)) return false;
-    if (statusFilter === '5xx' && !(t.status_code >= 500)) return false;
+    const code = t.status_code ?? 0;
+    if (statusFilter === '2xx' && !(code >= 200 && code < 300)) return false;
+    if (statusFilter === '4xx' && !(code >= 400 && code < 500)) return false;
+    if (statusFilter === '5xx' && !(code >= 500)) return false;
     return true;
   });
 
@@ -186,7 +188,7 @@ function TracesTable({ onRowClick }: TracesTableProps) {
                   </td>
                   <td className="align-right">{trace.latency_ms.toLocaleString()}</td>
                   <td className="align-right">
-                    {(trace.prompt_tokens + trace.completion_tokens).toLocaleString()}
+                    {((trace.prompt_tokens ?? 0) + (trace.completion_tokens ?? 0)).toLocaleString()}
                   </td>
                 </tr>
               ))
