@@ -19,7 +19,7 @@ const fastify = Fastify({
 
 // Database pool — used by auth middleware and (future) trace persistence
 const pool = new pg.Pool({
-  connectionString: process.env.DATABASE_URL,
+  connectionString: process.env.DATABASE_URL ?? 'postgresql://loom:loom_dev_password@localhost:5432/loom',
 });
 
 registerAuthMiddleware(fastify, pool);
