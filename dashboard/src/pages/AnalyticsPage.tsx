@@ -1,12 +1,27 @@
+import { useState } from 'react';
+import { getApiKey } from '../utils/api';
+import ApiKeyPrompt from '../components/ApiKeyPrompt';
+import AnalyticsSummary, { type WindowHours } from '../components/AnalyticsSummary';
+import TimeseriesCharts from '../components/TimeseriesCharts';
 import './AnalyticsPage.css';
 
 function AnalyticsPage() {
+  const [hasKey, setHasKey] = useState(() => !!getApiKey());
+  const [win, setWin] = useState<WindowHours>(24);
+
+  if (!hasKey) {
+    return <ApiKeyPrompt onSaved={() => setHasKey(true)} />;
+  }
+
   return (
     <div className="page">
-      <h2 className="page-title">Analytics</h2>
-      <div className="placeholder-content">
-        <p>Analytics summary and timeseries charts will be displayed here.</p>
-        <p className="placeholder-note">Coming in Wave 3 after API integration.</p>
+      <div className="page-header">
+        <h2 className="page-title">Analytics</h2>
+      </div>
+
+      <div className="analytics-sections">
+        <AnalyticsSummary win={win} onWinChange={setWin} />
+        <TimeseriesCharts win={win} />
       </div>
     </div>
   );

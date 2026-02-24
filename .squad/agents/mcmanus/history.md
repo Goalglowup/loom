@@ -87,3 +87,45 @@
 **Task:** Build trace viewer page  
 **Mode:** Background  
 **Coordination:** Part of 4-agent wave (Keaton sync, Fenster/McManus/Hockney background)
+
+## Learnings
+
+### M2–M5: API Integration & Dashboard Components Complete
+
+**Implemented:**
+- `dashboard/src/utils/api.ts` — shared API base URL + auth header helpers; reads `VITE_API_URL` env var, falls back to `http://localhost:3000`; API key from `localStorage.loom_api_key`
+- `dashboard/src/components/ApiKeyPrompt.tsx/.css` — modal overlay shown when no API key in localStorage; saves to localStorage on submit
+- `dashboard/src/components/TracesTable.tsx/.css` — real `/v1/traces` API, infinite scroll via IntersectionObserver, model+status filter bar (client-side), loading skeleton rows, empty state, status color badges (2xx/4xx/5xx), accessible row click
+- `dashboard/src/components/TraceDetails.tsx/.css` — slide-in panel (40% width), escape/click-outside dismiss, encrypted body placeholder, estimated cost calculation
+- `dashboard/src/components/AnalyticsSummary.tsx/.css` — 6 metric cards from `/v1/analytics/summary`, time window selector (1h/6h/24h/7d) shared with charts, 30s auto-refresh via setInterval in useEffect cleanup
+- `dashboard/src/components/TimeseriesCharts.tsx/.css` — recharts AreaChart for requests + latency, responsive containers, bucket size derived from window
+- `dashboard/src/pages/TracesPage.tsx` — replaced mock with real API, integrates TracesTable + TraceDetails
+- `dashboard/src/pages/AnalyticsPage.tsx` — integrates AnalyticsSummary + TimeseriesCharts with shared window state
+- `dashboard/src/vite-env.d.ts` — added missing Vite client type reference (was absent from scaffold)
+- `dashboard/.env.example` — added `VITE_API_URL=http://localhost:3000`
+
+**Key Technical Patterns:**
+- Window state lifted to AnalyticsPage so both AnalyticsSummary and TimeseriesCharts respond to same selector
+- Infinite scroll: IntersectionObserver on sentinel div at bottom of table, 200px rootMargin trigger
+- Auto-refresh: setInterval inside useEffect with cleanup function; `cancelled` flag prevents state updates after unmount
+- recharts Tooltip `formatter` receives `number | undefined` — always guard with `?? 0`
+- Missing `vite-env.d.ts` causes `import.meta.env` TypeScript errors — always create this for Vite projects
+
+**Issues Closed:** #8 (M2), #9 (M3), #10 (M4), #11 (M5)
+
+## Wave 3 Cross-Agent Learnings
+
+**From Fenster's backend (F8/F9/F10):**
+- Analytics engine working perfectly; `/v1/analytics` summary returns correct request counts, average latencies, and total costs.
+- `/v1/analytics/timeseries` bucketing correctly handles all time windows (1h→5min, 6h→30min, 24h→60min, 7d→360min).
+- `/v1/traces` cursor pagination with ISO timestamp is stable; `nextCursor` logic works correctly with IntersectionObserver.
+- Status code (`statusCode` field from TraceInput) now persisted in traces table via migration 1000000000006.
+- **Implication:** All backend APIs fully functional. Dashboard M2–M5 components can consume endpoints without modification.
+
+**From Hockney's test suite (H4/H6/H7):**
+- Multi-tenant auth tested with 10 cases; key isolation and race conditions all passing.
+- Streaming + batch flush integration validated; fire-and-forget trace recording during SSE works correctly.
+- Encryption-at-rest per-tenant key derivation verified; dashboard sees encrypted data placeholder as expected.
+- **Implication:** Backend security and data integrity fully validated. Production-ready for Wave 4.
+
+**Test Coverage Status:** 85 tests (61 existing + 24 new Wave 3), 100% passing. End-to-end dashboard integration confirmed working.

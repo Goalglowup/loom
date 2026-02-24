@@ -1,4 +1,5 @@
 import { Transform } from 'node:stream';
+import { traceRecorder } from './tracing.js';
 
 export interface StreamCapture {
   /** Assembled text content from all delta chunks */
@@ -13,9 +14,21 @@ export interface StreamCapture {
   };
 }
 
+/** Context supplied by the gateway to record a trace once streaming completes. */
+export interface StreamTraceContext {
+  tenantId: string;
+  requestBody: unknown;
+  model: string;
+  provider: string;
+  /** Epoch ms at the moment the gateway began proxying the request. */
+  startTimeMs: number;
+}
+
 export interface StreamProxyOptions {
   /** Invoked once when the upstream stream ends with the fully captured data */
   onComplete: (capture: StreamCapture) => void;
+  /** When provided, a trace is recorded via traceRecorder after streaming ends. */
+  traceContext?: StreamTraceContext;
 }
 
 /**
@@ -87,8 +100,28 @@ export function createSSEProxy(options: StreamProxyOptions): Transform {
     },
 
     flush(callback) {
-      // Stream has ended — deliver the accumulated capture to the caller
+      // Deliver the captured data to the caller.
       options.onComplete(capture);
+
+      // Fire-and-forget trace persistence — never blocks the response path.
+      if (options.traceContext) {
+        const tc = options.traceContext;
+        traceRecorder.record({
+          tenantId: tc.tenantId,
+          model: tc.model,
+          provider: tc.provider,
+          requestBody: tc.requestBody,
+          responseBody: {
+            content: capture.content,
+            usage: capture.usage,
+          },
+          latencyMs: Date.now() - tc.startTimeMs,
+          promptTokens: capture.usage?.prompt_tokens,
+          completionTokens: capture.usage?.completion_tokens,
+          totalTokens: capture.usage?.total_tokens,
+        });
+      }
+
       callback();
     },
   });

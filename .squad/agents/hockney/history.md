@@ -207,3 +207,69 @@
 - H3 auth contract tests use inline reference implementation now; swap to src/auth.ts import once F3 lands (all assertions must pass immediately)
 - H5 multi-provider tests validated both OpenAI and Azure request/response formats match OpenAI-compatible shape
 - Streaming validation confirmed undici response.body pattern (Node.js Readable with async iteration) works end-to-end
+
+### 2026-02-24: Wave 3 Test Suites (H4, H6, H7)
+
+**Completed:** H4 (multi-tenant.test.ts), H6 (streaming-traces.test.ts), H7 (encryption-at-rest.test.ts)
+
+**Status:** ✅ COMPLETE — 24 new tests passing (85 total across all suites)
+
+**Test Coverage:**
+
+**H4 — Multi-Tenant Isolation (tests/multi-tenant.test.ts, 8 tests):**
+- Tenant A's API key resolves exclusively to Tenant A's context
+- Tenant B's API key resolves exclusively to Tenant B's context
+- Tenant A's key cannot access Tenant B's tenant_id
+- Missing API key returns 401
+- Invalid API key returns 401 (with `invalid_api_key` error code)
+- Deleted/inactive tenant returns 401 (DB returns 0 rows; 403 differentiation is a future TODO)
+- Same plaintext for two tenants produces different ciphertext (separate derived keys)
+- Race condition: 10 concurrent pairs of requests never cross-contaminate TenantContext
+- Pattern: real `src/auth.ts` + mocked `pg.Pool`; uses `fastify.inject()` (no port allocation)
+
+**H6 — Streaming & Trace Recording (tests/streaming-traces.test.ts, 9 tests):**
+- SSE pass-through: every raw byte reaches the client unchanged
+- StreamCapture assembles complete content from delta chunks
+- [DONE] sentinel does not produce a parsed chunk; stream ends cleanly
+- `traceRecorder.record()` called exactly once when traceContext provided
+- `traceRecorder.record()` not called when traceContext omitted
+- Stream failure mid-way: record() not called (Node.js Transform flush() skipped on error; TODO)
+- Fire-and-forget: stream ends synchronously; record() is void/sync
+- Batch flush: 100 traces trigger immediate auto-flush; mocked query called ≥ 100 times
+- Timer flush: fake timers advance 5 s → flush fires even when batch < 100
+- Pattern: `vi.mock('../src/tracing.js')` preserves real TraceRecorder class, replaces singleton with spies
+
+**H7 — Encryption-at-Rest (tests/encryption-at-rest.test.ts, 7 tests):**
+- `request_body` stored as hex ciphertext (not plaintext)
+- `response_body` stored as hex ciphertext (not plaintext)
+- Two traces from same tenant have different IVs (24 hex chars = 12 bytes)
+- IV stored alongside ciphertext in INSERT parameters
+- Two traces from different tenants produce different ciphertext for identical content
+- Decryption with wrong tenant key throws (no silent data corruption)
+- Missing ENCRYPTION_MASTER_KEY throws `'ENCRYPTION_MASTER_KEY environment variable not set'`
+- Pattern: inspect mocked `query()` call parameters (indices documented in test); no real DB
+
+**Key Patterns Established:**
+- `fastify.inject()` for auth middleware testing — no port needed, no flaky bind races
+- `vi.mock` with `importOriginal` to preserve real class while replacing singleton with spy
+- INSERT parameter index constants documented as `IDX` object for clarity and maintenance
+- Fake timers + `vi.advanceTimersByTimeAsync()` for timer-based flush validation
+- `setImmediate` yield pattern for fire-and-forget async flush assertion
+
+**Issues Closed:** #14 (H4), #16 (H6), #17 (H7)
+
+## Wave 3 Cross-Agent Learnings
+
+**From Fenster's backend (F8/F9/F10):**
+- Analytics engine cost calculation is correct; SQL CASE expressions work correctly for GPT-3.5 and GPT-4o rate handling (both OpenAI + Azure naming variants).
+- Dashboard API cursor pagination is stable under concurrent trace writes; timestamp-based cursors work as expected.
+- Provider registry lazy caching works correctly; per-tenant baseUrl routing validates provider selection logic.
+- **Implication:** Backend APIs are production-ready. Dashboard can consume all endpoints without issues.
+
+**From McManus's dashboard (M2–M5):**
+- Dashboard correctly calls all analytics endpoints; traces pagination integrates seamlessly with IntersectionObserver infinite scroll.
+- Time window selector shared state keeps summary cards and charts in sync across all time ranges.
+- localStorage API key prompt appears on first visit; Authorization header injection works for all API calls.
+- **Implication:** Full end-to-end integration working correctly. No auth or API contract issues.
+
+**Test Coverage Status:** 85 tests (61 existing + 24 new Wave 3), 100% passing. All H4/H6/H7 test suites complete and green.

@@ -1,0 +1,251 @@
+.traces-table-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+/* ── Filter Bar ── */
+.filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem;
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-bottom: none;
+  border-radius: 6px 6px 0 0;
+  flex-wrap: wrap;
+}
+
+.filter-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #6b7280;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.filter-select {
+  padding: 0.375rem 0.625rem;
+  border: 1px solid #d1d5db;
+  border-radius: 5px;
+  font-size: 0.8125rem;
+  background: #fff;
+  color: #111827;
+  cursor: pointer;
+  outline: none;
+}
+
+.filter-select:focus {
+  border-color: #6366f1;
+  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.15);
+}
+
+.filter-sep {
+  width: 1px;
+  height: 20px;
+  background: #e5e7eb;
+  margin: 0 0.25rem;
+}
+
+.status-filter-group {
+  display: flex;
+  gap: 0.25rem;
+}
+
+.status-filter-btn {
+  padding: 0.3125rem 0.625rem;
+  border: 1px solid #d1d5db;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  background: #fff;
+  color: #374151;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.status-filter-btn:hover {
+  background: #f3f4f6;
+}
+
+.status-filter-btn.active {
+  background: #6366f1;
+  border-color: #6366f1;
+  color: #fff;
+}
+
+.status-filter-btn.sfb-2xx.active {
+  background: #059669;
+  border-color: #059669;
+}
+
+.status-filter-btn.sfb-4xx.active {
+  background: #d97706;
+  border-color: #d97706;
+}
+
+.status-filter-btn.sfb-5xx.active {
+  background: #dc2626;
+  border-color: #dc2626;
+}
+
+/* ── Table Container ── */
+.traces-table-container {
+  overflow-x: auto;
+  border: 1px solid #e5e7eb;
+  border-radius: 0 0 6px 6px;
+}
+
+.traces-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+}
+
+.traces-table thead {
+  background-color: #f9fafb;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.traces-table th {
+  padding: 0.75rem 1rem;
+  text-align: left;
+  font-weight: 600;
+  color: #374151;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+}
+
+.traces-table th.align-right {
+  text-align: right;
+}
+
+.traces-table tbody tr {
+  border-bottom: 1px solid #f3f4f6;
+}
+
+.traces-table tbody tr:last-child {
+  border-bottom: none;
+}
+
+.traces-table td {
+  padding: 0.875rem 1rem;
+  color: #1f2937;
+}
+
+.traces-table td.align-right {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Row hover / click ── */
+.trace-row {
+  cursor: pointer;
+  transition: background-color 0.1s;
+}
+
+.trace-row:hover,
+.trace-row:focus {
+  background-color: #f0f0ff;
+  outline: none;
+}
+
+.trace-row:focus-visible {
+  box-shadow: inset 0 0 0 2px #6366f1;
+}
+
+/* ── Cell types ── */
+.traces-table td.timestamp {
+  color: #6b7280;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.traces-table td.model {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.8125rem;
+  color: #059669;
+}
+
+.traces-table td.provider {
+  color: #6b7280;
+}
+
+/* ── Status Badges ── */
+.status-badge {
+  display: inline-block;
+  padding: 0.2em 0.55em;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.status-badge.status-2xx {
+  background: #d1fae5;
+  color: #065f46;
+}
+
+.status-badge.status-4xx {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.status-badge.status-5xx {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+/* ── Skeleton Loading ── */
+.skeleton-row td {
+  padding: 0.875rem 1rem;
+}
+
+.skeleton-cell {
+  display: block;
+  height: 14px;
+  border-radius: 4px;
+  background: linear-gradient(90deg, #f3f4f6 25%, #e9eaec 50%, #f3f4f6 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s infinite;
+  width: 80%;
+}
+
+.skeleton-row td:nth-child(1) .skeleton-cell { width: 60%; }
+.skeleton-row td:nth-child(2) .skeleton-cell { width: 70%; }
+.skeleton-row td:nth-child(3) .skeleton-cell { width: 50%; }
+.skeleton-row td:nth-child(4) .skeleton-cell { width: 35%; }
+.skeleton-row td:nth-child(5) .skeleton-cell { width: 40%; margin-left: auto; }
+.skeleton-row td:nth-child(6) .skeleton-cell { width: 40%; margin-left: auto; }
+
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+/* ── Empty State ── */
+.empty-state {
+  text-align: center;
+  padding: 3rem 1rem !important;
+  color: #9ca3af;
+  font-size: 0.9375rem;
+}
+
+/* ── Scroll Sentinel ── */
+.scroll-sentinel {
+  height: 1px;
+}
+
+@media (max-width: 768px) {
+  .traces-table {
+    font-size: 0.8125rem;
+  }
+
+  .traces-table th,
+  .traces-table td {
+    padding: 0.625rem 0.75rem;
+  }
+}

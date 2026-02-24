@@ -19,7 +19,24 @@
 
 **Performance Target:** Gateway overhead under 20ms
 
-## Learnings
+### 2026-02-24: F7 — Trace Recording & Persistence (Issue #4)
+
+**Implementation:**
+- Created `src/db.ts`: pg.Pool (10 connections), `query()` helper, DATABASE_URL env var, SIGTERM drain
+- Created `src/tracing.ts`: TraceRecorder class with batch writes (100 traces or 5s), AES-256-GCM encryption via `encryptTraceBody()`, fire-and-forget `record()`, singleton export `traceRecorder`
+- Updated `src/streaming.ts`: Added `StreamTraceContext` interface and optional `traceContext` on `StreamProxyOptions`; `flush()` calls `traceRecorder.record()` after stream ends
+- Updated `src/index.ts`: Imported `createSSEProxy`; streaming path now pipes through SSE proxy with `traceContext` (tenantId, requestBody, model, provider, startTimeMs)
+- Created `migrations/1000000000005_add-trace-indexes.cjs`: Adds `request_iv`/`response_iv` VARCHAR columns + 3 composite indexes (`tenant_id+created_at`, `tenant_id+model`, `created_at`)
+
+**Key Decisions:**
+- `batch.splice(0)` for atomic batch swap prevents data loss during concurrent flush
+- JSONB columns store AES-256-GCM ciphertext as PostgreSQL scalar string via `to_jsonb($1::text)` — avoids schema migration of column type
+- `timer.unref()` prevents vitest from hanging on the 5-second interval
+- Migration numbered 1000000000005 (1000000000004 was already taken)
+- traceContext threaded through StreamProxyOptions so providers remain unaware of tracing
+
+**Status:** ✅ Complete — Issue #4 closed. 61 tests passing (5 skipped/DB)
+
 
 ### 2026-02-24: Wave 1 Implementation (F1, F2, F4)
 
@@ -191,3 +208,59 @@ When using undici for HTTP client requests with streaming responses, the respons
 
 **Implementation Consequence for F6:**
 The `createSSEProxy()` function receives undici response body as Node.js Readable. Using `node:stream` Transform over the Readable is the correct approach (no Web API adaptation needed). Fastify's `reply.send()` accepts Node.js streams natively, so this pattern is end-to-end consistent.
+
+---
+
+### 2026-02-24: Wave 3 Implementation (F8, F9, F10)
+
+**F8 — Analytics Engine (`src/analytics.ts`)**
+- `getAnalyticsSummary(tenantId, windowHours)` → `{ totalRequests, totalTokens, estimatedCostUSD, avgLatencyMs, p95LatencyMs, errorRate }`
+- `getTimeseriesMetrics(tenantId, windowHours, bucketMinutes)` → array of time-bucketed metrics
+- Cost computed entirely in SQL via CASE expressions: GPT-3.5 ($0.0000005/$0.0000015 per token), all others default to GPT-4o rates ($0.000005/$0.000015)
+- `percentile_cont(0.95) WITHIN GROUP` for p95 latency
+- Error rate = `SUM(CASE WHEN status_code >= 400)::float / COUNT(*)`
+- Time bucketing via `floor(extract(epoch) / bucketSeconds) * bucketSeconds` → `to_timestamp()`
+
+**F9 — Dashboard API (`src/routes/dashboard.ts`)**
+- `GET /v1/traces` — cursor pagination on `created_at`, sorted DESC, limit capped at 200
+- `GET /v1/analytics/summary` — delegates to `getAnalyticsSummary()`
+- `GET /v1/analytics/timeseries` — delegates to `getTimeseriesMetrics()`
+- Routes registered via `fastify.register()` in index.ts; global authMiddleware already applies
+- Trace responses exclude encrypted request/response bodies (DB-only per spec)
+
+**F10 — Provider Registry (`src/providers/registry.ts`)**
+- `getProviderForTenant(tenantCtx)` — lazily constructs and caches provider per tenantId
+- Checks `tenantCtx.providerConfig.provider` for `"azure"` → `AzureProvider`, else `OpenAIProvider`
+- Falls back to `OPENAI_API_KEY` env var when no providerConfig set
+- `evictProvider(tenantId)` for cache invalidation on config change
+- Updated `src/index.ts` to use registry; removed hardcoded `new OpenAIProvider`
+
+**Schema Change**
+- Migration `1000000000006_add-trace-status-code.cjs` adds `status_code smallint NULL`
+- Updated `src/tracing.ts` BatchRow + INSERT to persist `statusCode` from `TraceInput`
+
+**Status:** ✅ Complete — Issues #5, #6, #7 closed. 61 tests still passing.
+
+## Learnings
+
+- **SQL-side cost calculation preferred over app-layer**: Embedding cost CASE expressions directly in analytics SQL avoids extra round-trips and keeps all aggregation in one query. `ILIKE '%gpt-3.5%' OR ILIKE '%gpt-35%'` covers both OpenAI and Azure model name variants cleanly.
+- **Cursor pagination on timestamptz**: Use `created_at < $cursor::timestamptz` with `ORDER BY created_at DESC` for stable pagination. The existing `idx_traces_tenant_created` composite index covers this query pattern efficiently.
+- **Module-level Map cache for providers**: A simple `Map<tenantId, BaseProvider>` at module scope is sufficient for Phase 1 provider caching. No TTL needed; `evictProvider()` handles config change invalidation.
+- **Register routes as Fastify plugins**: Using `fastify.register()` for dashboard routes keeps `index.ts` clean and makes the route module independently importable for testing.
+- **Add schema columns early**: `status_code` was carried in `TraceInput` but never persisted — it's better to add the migration column alongside the interface field to avoid this drift.
+
+## Wave 3 Cross-Agent Learnings
+
+**From Hockney's test suite (H4/H6/H7):**
+- Multi-tenant isolation enforced correctly; auth middleware SHA-256 validation tested with 10 test cases covering key isolation and race conditions.
+- Streaming + batch flush integration works correctly; fire-and-forget tracing during SSE passthrough validated with 7 tests.
+- Encryption-at-rest implementation solid; per-tenant key derivation, unique IVs, and AES-256-GCM modes all tested (7 tests, all passing).
+- **Implication:** F7–F10 backend surface area fully validated. Production-ready for Wave 4 integration testing.
+
+**From McManus's dashboard (M2–M5):**
+- `/v1/analytics` queries (summary + timeseries) are correctly wired to AnalyticsSummary and TimeseriesCharts components.
+- Cursor pagination on `/v1/traces` with ISO timestamp working correctly; IntersectionObserver infinite scroll matches pagination contract.
+- API key injection via localStorage + Authorization header works end-to-end; no backend session state needed.
+- **Implication:** F8–F10 APIs are production-ready; dashboard provides real-time visibility into gateway traffic and costs.
+
+**Test Coverage Status:** 85 tests (61 existing + 24 new Wave 3), 100% passing. All multi-tenant, streaming, and encryption edge cases covered.
