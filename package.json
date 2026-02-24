@@ -13,7 +13,8 @@
     "migrate:create": "node-pg-migrate create",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "seed": "tsx scripts/seed.ts"
   },
   "keywords": [
     "ai",

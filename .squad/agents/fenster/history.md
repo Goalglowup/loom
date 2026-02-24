@@ -80,6 +80,8 @@
 - **Module-level Map cache for providers**: A simple `Map<tenantId, BaseProvider>` at module scope is sufficient for Phase 1 provider caching. No TTL needed; `evictProvider()` handles config change invalidation.
 - **Register routes as Fastify plugins**: Using `fastify.register()` for dashboard routes keeps `index.ts` clean and makes the route module independently importable for testing.
 - **Add schema columns early**: `status_code` was carried in `TraceInput` but never persisted — it's better to add the migration column alongside the interface field to avoid this drift.
+- **Seed scripts: check-then-insert, not ON CONFLICT**: `tenants.name` and `api_keys.tenant_id` have no unique constraints, so `ON CONFLICT` clauses don't apply. Use a `SELECT` + conditional `INSERT` pattern instead; for api_keys, `DELETE`+`INSERT` is simplest for "replace the dev key" semantics.
+- **ESM seed scripts with dotenv**: Use `import 'dotenv/config'` at the top (not `dotenv.config()`) in ESM TypeScript files run with `tsx` — this is the cleanest pattern and mirrors what the rest of the codebase does.
 
 ## Wave 3 Cross-Agent Learnings
 
@@ -96,3 +98,15 @@
 - **Implication:** F8–F10 APIs are production-ready; dashboard provides real-time visibility into gateway traffic and costs.
 
 **Test Coverage Status:** 85 tests (61 existing + 24 new Wave 3), 100% passing. All multi-tenant, streaming, and encryption edge cases covered.
+
+## 2026-02-24T15:12:45Z: Seed Script + Chat Example Setup
+
+**Event:** Built dev seed script and gateway quickstart docs  
+**Artifacts:** `scripts/seed.ts`, `examples/chat/GATEWAY_SETUP.md`, `package.json` (seed script)  
+**Coordination:** Background spawn; McManus delivered chat UI in same wave
+
+**Key Patterns:**
+- `import 'dotenv/config'` (ESM-compatible dotenv loading, consistent with codebase)
+- Check-then-insert for idempotent tenant upsert (no unique constraint on `tenants.name`)
+- DELETE + INSERT for "replace dev key" semantics
+- `tsx scripts/seed.ts` via `npm run seed`

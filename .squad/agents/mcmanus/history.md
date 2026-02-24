@@ -129,3 +129,38 @@
 - **Implication:** Backend security and data integrity fully validated. Production-ready for Wave 4.
 
 **Test Coverage Status:** 85 tests (61 existing + 24 new Wave 3), 100% passing. End-to-end dashboard integration confirmed working.
+
+### 2026-02-24: Chat Getting-Started Example
+
+**Implemented:**
+- `examples/chat/index.html` — standalone single-page chat app, zero dependencies, everything inline (CSS + JS)
+- `examples/chat/README.md` — brief usage guide with feature list
+
+**Key Patterns Used:**
+- `fetch` + `ReadableStream` + `TextDecoder` for SSE streaming — no EventSource (needs GET, not POST)
+- Async generator `parseSSEStream()` yields content tokens; caller `for await`s and updates bubble in real time
+- Full `conversationHistory` array sent on every request for multi-turn context
+- `localStorage` persists `loom_api_key`, `loom_gateway_url`, `loom_model` across reloads
+- Typing indicator (CSS bounce animation) shown until first stream byte arrives
+- Auto-expand config panel on first load if no API key found
+- Textarea auto-resize via `scrollHeight`; Enter sends, Shift+Enter inserts newline
+- Error handling covers: missing API key, unreachable gateway (TypeError + fetch), HTTP non-2xx, malformed SSE JSON
+- Optimistic user message rolled back from history on error to keep history consistent
+
+**Design Decisions:**
+- Dark-mode-first with CSS custom properties; no external frameworks
+- Messages right-aligned (user, blue bubble) / left-aligned (assistant, dark bubble) — Claude/ChatGPT convention
+- SSE parsing: manual `buffer.split('\n')` loop rather than EventSource for POST compatibility
+- `[DONE]` sentinel handled via early `return` inside async generator
+
+## 2026-02-24T15:12:45Z: Chat Getting-Started Example
+
+**Event:** Built standalone chat example  
+**Artifacts:** `examples/chat/index.html`, `examples/chat/README.md`  
+**Coordination:** Background spawn; Fenster delivered seed script + GATEWAY_SETUP.md in same wave
+
+**Key Patterns:**
+- Zero-dependency SSE streaming: `fetch` + `ReadableStream` + async generator `parseSSEStream()`
+- `localStorage` config persistence for gateway URL, API key, model
+- Optimistic user bubble with rollback on error
+- Dark-mode-first CSS custom properties; works offline (file:// URL)
