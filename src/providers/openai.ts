@@ -8,7 +8,8 @@ export class OpenAIProvider extends BaseProvider {
 
   constructor(config: ProviderConfig) {
     super(config);
-    this.baseUrl = config.baseUrl || 'https://api.openai.com';
+    // Strip trailing /v1 from baseUrl — proxyReq.url already includes /v1/...
+    this.baseUrl = (config.baseUrl || 'https://api.openai.com').replace(/\/v1\/?$/, '');
   }
 
   async proxy(proxyReq: ProxyRequest): Promise<ProxyResponse> {
