@@ -1,4 +1,5 @@
 import Fastify from 'fastify';
+import fastifyCors from '@fastify/cors';
 import fastifyStatic from '@fastify/static';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
@@ -23,6 +24,9 @@ const pool = new pg.Pool({
 });
 
 registerAuthMiddleware(fastify, pool);
+
+// Allow requests from file:// origins and any localhost port (dev chat app, dashboard)
+fastify.register(fastifyCors, { origin: true });
 
 // Serve dashboard at /dashboard
 fastify.register(fastifyStatic, {
