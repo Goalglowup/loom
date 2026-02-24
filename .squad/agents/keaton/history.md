@@ -120,6 +120,12 @@ Key design implications from volume target:
 - No encryption: Fails to address unauthorized DB console access threat
 - Selective encryption: Too complex to determine what's sensitive in prompts
 
+### Schema Changes (2026-02-24)
+- Added `encryption_key_version` column to traces table migration (1000000000003_create-traces.cjs)
+- Column spec: `integer NOT NULL DEFAULT 1`
+- Purpose: Phase 2 key rotation support, avoids backfill migration later
+- Migration follows envelope encryption pattern from security architecture decision
+
 ### Key File Paths
 - PRD: /Users/michaelbrown/projects/loom/Loom_PRD_v0.1.pdf
 - Team decisions: /Users/michaelbrown/projects/loom/.squad/decisions.md
@@ -127,3 +133,10 @@ Key design implications from volume target:
 - Architecture decision (approved): /Users/michaelbrown/projects/loom/.squad/decisions/inbox/keaton-architecture-approved.md
 - Security architecture (encryption): /Users/michaelbrown/projects/loom/.squad/decisions/inbox/keaton-tenant-encryption.md
 - Database migrations: /Users/michaelbrown/projects/loom/migrations/
+
+## 2026-02-24T03:31:15Z: Wave 1 Encryption Launch Spawn
+
+**Event:** Spawned for encryption infrastructure Phase 1  
+**Task:** Add encryption_key_version column to traces migration  
+**Mode:** Sync  
+**Coordination:** Part of 4-agent wave (Keaton sync, Fenster/McManus/Hockney background)
