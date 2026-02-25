@@ -135,3 +135,112 @@
 **Note:** No DB schema migration needed; columns already existed in traces table. All INSERT parameter indices kept in sync (16 positional params now).
 
 **Cross-team impact:** McManus can now display latency breakdown in trace views; full observability cycle complete.
+
+## 2026-02-25T01:05:00Z: Startup Warning — Missing ENCRYPTION_MASTER_KEY
+
+**Event:** Added boot-time warning for missing `ENCRYPTION_MASTER_KEY` environment variable  
+**Artifact:** `src/index.ts` (startup check after dotenv import)
+
+**What was added:**
+- Check for `process.env.ENCRYPTION_MASTER_KEY` immediately after `import 'dotenv/config'`
+- `console.warn()` to stderr with loud emoji prefix: `⚠️  WARNING: ENCRYPTION_MASTER_KEY is not set...`
+- Gateway still starts (non-blocking) — trace recording fails silently downstream in `tracing.ts`, but this catches the misconfiguration early
+
+**Why:**
+- Trace recording silently swallows encryption errors (try/catch in `tracing.ts`)
+- Without this warning, operators discover missing traces hours/days later (bad UX)
+- Boot-time warnings surface configuration issues immediately during startup, not in production after traffic arrives
+
+**Learning:**
+- **Fail-fast on config, fail-soft on runtime**: Configuration validation should be loud and early (boot time). Runtime errors in non-critical paths (like trace recording) can be swallowed to avoid cascading failures, but the misconfiguration should never be silent at startup.
+
+## 2026-02-25T02:00:00Z: Multi-Tenant Management Migrations (F-MT1, F-MT2)
+
+**Event:** Implemented first two schema migrations for multi-tenant lifecycle management  
+**Artifacts:** `migrations/1000000000007_alter-tenants-add-status.cjs`, `migrations/1000000000008_alter-api-keys-add-management.cjs`
+
+**Migration F-MT1 (1000000000007_alter-tenants-add-status.cjs):**
+- Added `status varchar(20) NOT NULL DEFAULT 'active'` to `tenants` table (values: `active`, `inactive`)
+- Added `updated_at timestamptz NOT NULL DEFAULT now()` for last modification tracking
+- Created `idx_tenants_status` index for filtering queries
+- Existing rows backfilled automatically via DEFAULT values
+
+**Migration F-MT2 (1000000000008_alter-api-keys-add-management.cjs):**
+- Added `name varchar(255) NOT NULL DEFAULT 'Default Key'` for user-friendly key identification
+- Added `key_prefix varchar(20) NOT NULL DEFAULT ''` for display in UI (e.g., "loom_1234...")
+- Added `status varchar(20) NOT NULL DEFAULT 'active'` (values: `active`, `revoked`)
+- Added `revoked_at timestamptz` (nullable) to track revocation timestamp
+- Created `idx_api_keys_status` index for filtering active vs revoked keys
+- Existing rows backfilled automatically via DEFAULT values
+
+**Application Code:** None yet — schema-only changes per task requirements. Future work will add tenant status filtering in auth middleware and API key management endpoints.
+
+**Learnings:**
+- **node-pg-migrate DEFAULT behavior**: Using `default: 'value'` in `addColumns()` automatically applies the default to existing rows during migration, making backfill seamless for NOT NULL columns
+- **Index naming convention**: node-pg-migrate auto-generates index names like `{table}_{column}_index` when using `pgm.createIndex(table, column)`
+- **Migration numbering**: Incremented to 1000000000007 and 1000000000008 sequentially after the existing 1000000000006
+- **Status column pattern**: Using `varchar(20)` with application-enforced enums (not PostgreSQL ENUMs) provides flexibility for adding new status values without schema migrations
+
+## 2026-02-25T03:00:00Z: Multi-Tenant Auth Foundation (F-MT3, F-MT4a)
+
+**Event:** Implemented admin users table and enhanced auth middleware with revocation/deactivation filters  
+**Tasks:** F-MT4a (admin users migration), F-MT3 (auth middleware updates)  
+**Artifacts:** `migrations/1000000000009_create-admin-users.cjs`, `src/auth.ts` (updated)
+
+**F-MT4a — Admin Users Migration:**
+- Created `admin_users` table with id, username (unique), password_hash, created_at, last_login
+- Index on username for login lookups
+- Password hashing uses Node.js built-in `crypto.scrypt` (no new dependencies)
+  - Salt: 16-byte random hex
+  - Derived key: 64-byte scrypt output
+  - Stored format: `${salt}:${derivedKey}`
+- Migration seeds default admin user from env vars:
+  - `ADMIN_USERNAME` (default: `admin`)
+  - `ADMIN_PASSWORD` (default: `changeme`)
+- `ON CONFLICT (username) DO NOTHING` for idempotent re-runs
+- Migration applied successfully via `npm run migrate:up`
+
+**F-MT3 — Auth Middleware Updates:**
+- Updated `lookupTenant()` query to filter out revoked keys and inactive tenants:
+  - Added `AND ak.status = 'active'` to WHERE clause
+  - Added `AND t.status = 'active'` to WHERE clause
+- Exported two cache invalidation helpers:
+  - `invalidateCachedKey(keyHash: string)`: Invalidate single key by hash (for key revocation)
+  - `invalidateAllKeysForTenant(tenantId: string, pool: pg.Pool)`: Query all key hashes for tenant and invalidate each (for tenant deactivation)
+- LRU cache method used: `invalidate()` (already existed in the LRUCache class)
+
+**Build Status:** ✅ Clean compile (npm run build, zero TypeScript errors)
+
+**Learnings:**
+- **crypto.scrypt for admin passwords**: Using Node's built-in `crypto.scrypt` avoids adding bcrypt dependency. Format `${salt}:${derivedKey}` is simple and secure. Unlike bcrypt's cost parameter, scrypt parameters (N, r, p) are fixed in Node's implementation, which is fine for admin login (not on hot path).
+- **Migration-time password seeding**: Reading env vars in migration `exports.up` function works cleanly with node-pg-migrate. The `ON CONFLICT DO NOTHING` ensures idempotent migrations even with seeded data.
+- **Auth query enhancement pattern**: Adding status filters to the existing JOIN query is zero-overhead — indexes already exist on both status columns from prior migrations (F-MT1, F-MT2).
+- **Cache invalidation by hash**: The invalidation helpers bridge the gap between key_id (used in management APIs) and key_hash (used as cache key). The `invalidateAllKeysForTenant` function queries all hashes first, then invalidates each — necessary because the cache is keyed by hash, not ID.
+- **Pool injection for invalidation**: The `invalidateAllKeysForTenant` helper takes `pool` as a parameter rather than importing it — keeps auth.ts decoupled from DB initialization and makes testing easier (same pattern as `registerAuthMiddleware`).
+
+## 2026-02-25T10:20:10Z: Multi-Tenant Wave A Complete — F-MT1, F-MT2, Startup Check
+
+**Event:** Completed migration foundations and startup validation for multi-tenant management  
+**Status:** ✅ All tasks completed per spawn manifest
+
+**What was delivered:**
+
+1. **F-MT1 Migration (1000000000007):** ALTER TABLE tenants ADD status, updated_at with indexes
+2. **F-MT2 Migration (1000000000008):** ALTER TABLE api_keys ADD name, key_prefix, status, revoked_at with indexes
+3. **Startup Env Check:** Boot-time validation warning for missing `ENCRYPTION_MASTER_KEY`
+
+**Key Design Decisions Recorded:**
+- **Status columns:** varchar(20) not PostgreSQL ENUMs — allows future expansion without schema locks
+- **Revoked_at:** Nullable timestamptz (not boolean flag) — tracks audit timestamp
+- **Key prefix:** NOT NULL empty string default — cleaner TypeScript types, simpler UI rendering
+- **Backfill:** Via DEFAULT clauses in ALTER TABLE — zero-downtime, automatic
+- **Indexes:** idx_tenants_status and idx_api_keys_status for fast filtering
+
+**Startup Warning Pattern:**
+- Fail-fast on config (loud warning at boot), fail-soft on runtime (swallow non-critical errors)
+- Early warning prevents hours of debugging missing traces
+- Extends to other env vars (DATABASE_URL, provider keys) in future
+
+**Next Wave (B):** F-MT3 (auth middleware tightening), F-MT4a/4b (admin users + login), F-MT5/6/7 (CRUD endpoints + encryption)
+
+**Cross-Team Context:** Keaton finalized multi-tenant design document incorporating Michael's Q&A decisions (per-user JWT admin auth, soft+hard delete, provider key encryption). Migrations provide schema foundation; future backend work adds endpoints, frontend work adds admin UI.

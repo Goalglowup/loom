@@ -24,6 +24,8 @@ export interface StreamTraceContext {
   statusCode?: number;
   /** Epoch ms at the moment the gateway began proxying the request. */
   startTimeMs: number;
+  /** Epoch ms immediately before the upstream fetch was initiated. */
+  upstreamStartMs?: number;
 }
 
 export interface StreamProxyOptions {
@@ -57,9 +59,17 @@ export interface StreamProxyOptions {
 export function createSSEProxy(options: StreamProxyOptions): Transform {
   const capture: StreamCapture = { content: '', chunks: [] };
   let parseBuffer = '';
+  let firstChunkSeen = false;
+  let firstChunkMs: number | undefined;
 
   return new Transform({
     transform(chunk: Buffer, _encoding, callback) {
+      // Record the time of the very first byte forwarded to the client.
+      if (!firstChunkSeen) {
+        firstChunkSeen = true;
+        firstChunkMs = Date.now();
+      }
+
       // Forward immediately — this keeps the pass-through latency near zero
       this.push(chunk);
 
@@ -108,7 +118,13 @@ export function createSSEProxy(options: StreamProxyOptions): Transform {
       // Fire-and-forget trace persistence — never blocks the response path.
       if (options.traceContext) {
         const tc = options.traceContext;
-        console.debug('[streaming] flush() — usage:', capture.usage, 'content length:', capture.content.length);
+        const endMs = Date.now();
+        const totalLatencyMs = endMs - tc.startTimeMs;
+        const ttfbMs = firstChunkMs !== undefined ? firstChunkMs - tc.startTimeMs : undefined;
+        const gatewayOverheadMs = tc.upstreamStartMs !== undefined
+          ? tc.upstreamStartMs - tc.startTimeMs
+          : undefined;
+
         traceRecorder.record({
           tenantId: tc.tenantId,
           model: tc.model,
@@ -118,11 +134,13 @@ export function createSSEProxy(options: StreamProxyOptions): Transform {
             content: capture.content,
             usage: capture.usage,
           },
-          latencyMs: Date.now() - tc.startTimeMs,
+          latencyMs: totalLatencyMs,
           statusCode: tc.statusCode,
           promptTokens: capture.usage?.prompt_tokens,
           completionTokens: capture.usage?.completion_tokens,
           totalTokens: capture.usage?.total_tokens,
+          ttfbMs,
+          gatewayOverheadMs,
         });
       }
 

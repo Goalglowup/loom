@@ -20,6 +20,10 @@ export interface TraceInput {
   completionTokens?: number;
   totalTokens?: number;
   statusCode?: number;
+  /** Elapsed ms from gateway start to first SSE byte forwarded (non-streaming: equals latencyMs). */
+  ttfbMs?: number;
+  /** Pre/post-LLM overhead in ms (total_latency - llm_latency). */
+  gatewayOverheadMs?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -41,6 +45,8 @@ interface BatchRow {
   completion_tokens: number | null;
   total_tokens: number | null;
   status_code: number | null;
+  ttfb_ms: number | null;
+  gateway_overhead_ms: number | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -102,9 +108,9 @@ export class TraceRecorder {
         completion_tokens: trace.completionTokens ?? null,
         total_tokens: trace.totalTokens ?? null,
         status_code: trace.statusCode ?? null,
+        ttfb_ms: trace.ttfbMs ?? null,
+        gateway_overhead_ms: trace.gatewayOverheadMs ?? null,
       });
-
-      console.debug('[tracing] record() enqueued — batch size now', this.batch.length);
 
       if (this.batch.length >= BATCH_SIZE) {
         void this.flush();
@@ -127,29 +133,27 @@ export class TraceRecorder {
 
     try {
       for (const row of rows) {
-        console.debug('[tracing] flush() inserting row for tenant', row.tenant_id, 'model', row.model);
         await query(
           `INSERT INTO traces
              (tenant_id, request_id, model, provider, endpoint,
               request_body, request_iv,
               response_body, response_iv,
               latency_ms, prompt_tokens, completion_tokens, total_tokens,
-              status_code, encryption_key_version)
+              status_code, ttfb_ms, gateway_overhead_ms, encryption_key_version)
            VALUES
              ($1,$2,$3,$4,$5,
               to_jsonb($6::text),$7,
               to_jsonb($8::text),$9,
               $10,$11,$12,$13,
-              $14,1)`,
+              $14,$15,$16,1)`,
           [
             row.tenant_id, row.request_id, row.model, row.provider, row.endpoint,
             row.request_body_ct, row.request_iv,
             row.response_body_ct, row.response_iv,
             row.latency_ms, row.prompt_tokens, row.completion_tokens, row.total_tokens,
-            row.status_code,
+            row.status_code, row.ttfb_ms, row.gateway_overhead_ms,
           ],
         );
-        console.debug('[tracing] flush() INSERT succeeded for request_id', row.request_id);
       }
     } catch (err) {
       console.error('[tracing] flush() DB write failed:', err);

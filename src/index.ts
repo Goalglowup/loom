@@ -9,8 +9,14 @@ import pg from 'pg';
 import { ProxyRequest } from './types/openai.js';
 import { registerAuthMiddleware } from './auth.js';
 import { createSSEProxy } from './streaming.js';
+import { traceRecorder } from './tracing.js';
 import { getProviderForTenant } from './providers/registry.js';
 import { registerDashboardRoutes } from './routes/dashboard.js';
+
+// Startup warning: check critical env vars
+if (!process.env.ENCRYPTION_MASTER_KEY) {
+  console.warn('⚠️  WARNING: ENCRYPTION_MASTER_KEY is not set. Trace recording will fail silently. Set this env var in .env before starting the gateway.');
+}
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -78,6 +84,7 @@ fastify.post('/v1/chat/completions', async (request, reply) => {
   const startTimeMs = Date.now();
 
   try {
+    const upstreamStartMs = Date.now();
     const response = await provider.proxy(proxyReq);
 
     // Set response headers
@@ -99,6 +106,7 @@ fastify.post('/v1/chat/completions', async (request, reply) => {
               provider: provider.name,
               statusCode: response.status,
               startTimeMs,
+              upstreamStartMs,
             }
           : undefined,
       });
@@ -107,6 +115,25 @@ fastify.post('/v1/chat/completions', async (request, reply) => {
     }
 
     // Handle regular JSON response
+    if (tenant) {
+      const latencyMs = Date.now() - startTimeMs;
+      const reqBody = request.body as any;
+      const usage = (response.body as any)?.usage;
+      traceRecorder.record({
+        tenantId: tenant.tenantId,
+        model: reqBody?.model ?? 'unknown',
+        provider: provider.name,
+        requestBody: reqBody,
+        responseBody: response.body,
+        latencyMs,
+        statusCode: response.status,
+        promptTokens: usage?.prompt_tokens,
+        completionTokens: usage?.completion_tokens,
+        totalTokens: usage?.total_tokens,
+        ttfbMs: latencyMs,
+        gatewayOverheadMs: upstreamStartMs - startTimeMs,
+      });
+    }
     return reply.code(response.status).send(response.body);
   } catch (err: any) {
     fastify.log.error(err);

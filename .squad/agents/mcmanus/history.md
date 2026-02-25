@@ -202,3 +202,37 @@
 **Build Status:** ✅ Passed (dashboard build, React 19 + Vite)
 
 **Cross-team outcome:** Latency observability complete end-to-end; users can now distinguish gateway overhead from LLM response time.
+
+### 2026-02-25: M-MT1 — Admin API Utility + Admin Login Component
+
+**Implemented:**
+- `dashboard/src/utils/adminApi.ts` — Admin API utility with JWT-based auth
+- `dashboard/src/components/AdminLogin.tsx` — Username/password login form
+- `dashboard/src/components/AdminLogin.css` — Styling matching existing app design patterns
+
+**Key Files:**
+- `adminApi.ts` — Mirrors `api.ts` pattern but reads `loom_admin_token` from localStorage; base path `/v1/admin/`; all requests use `Authorization: Bearer <token>`; redirects to admin login on 401 or missing token
+- `AdminLogin.tsx` — Form with username/password fields; posts to `/v1/admin/login`; stores JWT in localStorage on success; displays inline error on failure; calls `onLogin` callback prop
+- `AdminLogin.css` — Follows `ApiKeyPrompt.css` pattern with overlay, card, inputs, button, and error state styling
+
+**Technical Patterns:**
+- Token stored as `localStorage.loom_admin_token`
+- `adminFetch()` helper includes Bearer token in Authorization header
+- Auto-redirect to login on 401 or missing token (except for login endpoint itself)
+- Form submit disables inputs during loading state
+- Error display inline below password field with red background
+
+**Type Exports:**
+- `AdminTenant` — id, name, status, created_at, updated_at
+- `AdminApiKey` — id, name, keyPrefix, status, created_at, revoked_at
+- `AdminProviderConfig` — provider, baseUrl, hasApiKey
+
+**Design Decisions:**
+- JWT stored in localStorage (not sessionStorage) — persists across page reloads
+- Separate auth utility from tenant API utility — clean separation of concerns
+- Login form matches ApiKeyPrompt styling for consistency
+- Loading state prevents double-submit
+
+**Build Status:** ✅ Passed (dashboard build clean compile, 694 modules transformed)
+
+**Next Steps:** M-MT2 will add admin page shell and route registration; M-MT3+ will build tenant list and detail views consuming these utilities.

@@ -341,3 +341,120 @@
 **Why:** Users need latency breakdown to diagnose performance bottlenecks. Inline hints improve accessibility over hover-only tooltips.
 
 **Impact:** Latency observability complete end-to-end; users can distinguish gateway overhead from LLM response time; Phase 1 observability goals achieved.
+
+## 2026-02-25: Startup Environment Variable Validation
+
+**By:** Fenster (Backend)  
+**Date:** 2026-02-25  
+**Status:** Implemented
+
+**What:** Added boot-time validation for `ENCRYPTION_MASTER_KEY` environment variable in `src/index.ts`. If missing, gateway logs a warning to stderr but continues startup.
+
+**Why:** Trace recording silently fails when `ENCRYPTION_MASTER_KEY` is missing (errors are caught and swallowed in `tracing.ts`). Operators discover the misconfiguration only after noticing missing traces (hours or days later). Boot-time warnings surface configuration issues immediately during startup.
+
+**Implementation:** Added check after dotenv import that warns if `ENCRYPTION_MASTER_KEY` is not set.
+
+**Pattern:** Fail-fast on config, fail-soft on runtime — configuration validation should be loud and early (boot time); runtime errors in non-critical paths (like trace recording) can be swallowed to avoid cascading failures; misconfiguration should never be silent at startup.
+
+**Impact:** Operators see immediate feedback when required env vars are missing; gateway remains operational for proxying even without trace recording (graceful degradation); no breaking changes to existing deployments.
+
+**Future Consideration:** This pattern could be extended to validate other critical env vars at boot time (e.g., `DATABASE_URL`, provider API keys).
+
+## 2026-02-25: Schema Decisions: Multi-Tenant Management Migrations
+
+**By:** Fenster (Backend)  
+**Date:** 2026-02-25  
+**Migrations:** F-MT1 (1000000000007), F-MT2 (1000000000008)
+
+**Decision 1: varchar(20) for Status Columns (Not PostgreSQL ENUMs)**
+
+Both `tenants.status` and `api_keys.status` use `varchar(20)` with application-enforced valid values rather than PostgreSQL `ENUM` types.
+
+**Why:** Adding new enum values to PostgreSQL ENUMs requires `ALTER TYPE` which locks the table. varchar allows adding new status values (e.g., `suspended`, `pending`) without schema migrations. Application layer can enforce validation via constants/types. Simpler rollback story (down migration just drops columns).
+
+**Valid Values:** `tenants.status`: `active`, `inactive`; `api_keys.status`: `active`, `revoked`
+
+**Impact:** Future status expansion doesn't require coordinated migrations; application code owns the enum contract.
+
+**Decision 2: Nullable `revoked_at` vs Boolean `is_revoked`**
+
+`api_keys.revoked_at` is a nullable `timestamptz` rather than a boolean flag.
+
+**Why:** Tracks **when** the key was revoked (audit requirement). Can distinguish "never revoked" (NULL) from "revoked at time X". Single column serves both status indicator and timestamp purposes. Pairs with `status` column for filtering (`WHERE status = 'active'` is faster than `WHERE revoked_at IS NULL`).
+
+**Impact:** Future audit queries can answer "how long was this key active?" without additional columns.
+
+**Decision 3: Empty String Default for `key_prefix`**
+
+`api_keys.key_prefix` defaults to empty string (`''`) rather than NULL.
+
+**Why:** Simplifies UI rendering (no null checks needed in frontend). Key prefix is optional but when populated should always be a string. Empty string vs NULL distinction unnecessary for this field. NOT NULL + default empty avoids null handling in application layer.
+
+**Impact:** Cleaner TypeScript types (`string` not `string | null`); fewer edge cases in dashboard.
+
+**Decision 4: Automatic Backfill via DEFAULT Values**
+
+Both migrations use `DEFAULT` clauses to backfill existing rows automatically during `ALTER TABLE`.
+
+**Why:** Existing tenants get `status = 'active'`, `updated_at = now()` without separate UPDATE statements. Existing api_keys get `name = 'Default Key'`, `key_prefix = ''`, `status = 'active'` atomically. Single DDL statement (faster, less lock time). Idempotent migration (re-running doesn't duplicate backfill logic).
+
+**Impact:** Zero-downtime migrations on existing data; no multi-step migration coordination needed.
+
+**Decision 5: Index on Status Columns**
+
+Both `tenants.status` and `api_keys.status` have dedicated indexes.
+
+**Why:** Common query pattern: filter by status (`WHERE status = 'active'`). Low cardinality (2-3 values) but high selectivity (most rows are `active`). Supports dashboard queries that list active tenants or active keys. Index overhead minimal (single column, small data type).
+
+**Impact:** Fast status-based filtering; supports future admin UI for tenant/key management.
+
+## 2026-02-25: Multi-Tenant Management Design — Approved
+
+**By:** Keaton (Lead), revised per Michael Brown's decisions (Q1–Q4)  
+**Date:** 2026-02-25  
+**Status:** Revised design incorporating all open questions resolved — ready for implementation
+
+**Scope:** Phase 1 operational multi-tenancy (tenant CRUD, API key management, provider config management, dashboard admin interface)
+
+**Key Decisions:**
+
+1. **Q1 — Admin Auth (Per-User, Not Shared Secret):** New `admin_users` table (id, username, password_hash, created_at, last_login). `POST /v1/admin/login` endpoint validates bcrypt hash, returns 8h JWT (HS256, signed with `ADMIN_JWT_SECRET` env var). Admin auth middleware on all `/v1/admin/*` routes. Seed script (`scripts/create-admin.js`) for initial admin user creation. Dashboard stores JWT in `localStorage['loom_admin_token']`.
+
+2. **Q2 — Deletion Strategy (Soft Default + Hard Delete Option):** Soft delete (default) via `PATCH /v1/admin/tenants/:id` with `status: "inactive"`. Hard delete via `DELETE /v1/admin/tenants/:id?confirm=true` — cascades through api_keys, traces, provider_config. API key soft revoke via `DELETE /v1/admin/tenants/:id/api-keys/:keyId` (sets status=revoked, revoked_at=now()). API key hard delete via `DELETE /v1/admin/tenants/:id/api-keys/:keyId?permanent=true`. Confirmation query params required on all destructive operations.
+
+3. **Q3 — Provider Config Encryption (AES-256-GCM at Rest):** Reuses `src/encryption.ts` pattern (ENCRYPTION_MASTER_KEY + HMAC-SHA256 per-tenant key derivation). Provider `apiKey` encrypted before storing in `provider_config` JSONB column. Decrypted on read in `registry.ts` before passing to provider constructor. GET responses return `hasApiKey: boolean` — never raw or encrypted key.
+
+4. **Q4 — Existing Data Backfill (Confirmed):** Migration defaults handle backfill for existing tenant and API keys. No additional migration logic needed — already designed correctly.
+
+**API Endpoints:**
+- `POST /v1/admin/login` — Public, no auth required. Returns JWT.
+- `POST /v1/admin/tenants` — Create tenant
+- `GET /v1/admin/tenants` — List all (paginated, filterable by status)
+- `GET /v1/admin/tenants/:id` — Get tenant with provider config summary (keys redacted)
+- `PATCH /v1/admin/tenants/:id` — Update name or status
+- `DELETE /v1/admin/tenants/:id?confirm=true` — Hard delete with cascade
+- `PUT /v1/admin/tenants/:id/provider-config` — Set/update provider config (encrypts apiKey at write)
+- `DELETE /v1/admin/tenants/:id/provider-config` — Remove provider config
+- `POST /v1/admin/tenants/:id/api-keys` — Create API key (raw key shown once)
+- `GET /v1/admin/tenants/:id/api-keys` — List keys (no raw key/hash returned)
+- `DELETE /v1/admin/tenants/:id/api-keys/:keyId` — Soft revoke (default)
+- `DELETE /v1/admin/tenants/:id/api-keys/:keyId?permanent=true` — Hard delete
+
+**Auth Middleware Update:** Skip `/v1/admin` routes in the tenant API key auth preHandler. Admin routes use dedicated JWT auth preHandler.
+
+**DB Schema Migrations:**
+- **F-MT1 (1000000000007):** `ALTER TABLE tenants ADD status varchar(20) DEFAULT 'active', ADD updated_at timestamptz DEFAULT now(); CREATE INDEX idx_tenants_status ON tenants (status);`
+- **F-MT2 (1000000000008):** `ALTER TABLE api_keys ADD name varchar(255) DEFAULT 'Default Key', ADD key_prefix varchar(20) DEFAULT '', ADD status varchar(20) DEFAULT 'active', ADD revoked_at timestamptz; CREATE INDEX idx_api_keys_status ON api_keys (status);`
+- **F-MT4a (1000000000009):** `CREATE TABLE admin_users (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), username varchar(100) UNIQUE NOT NULL, password_hash varchar(255) NOT NULL, created_at timestamptz DEFAULT now(), last_login timestamptz);`
+
+**Frontend Strategy:** Dedicated `/admin` page (not multi-tenant tenant switcher). Admin uses JWT auth via form login. Existing Traces/Analytics pages continue per-tenant (API key scope). Admin UI components: AdminLoginForm, TenantsList, TenantDetail (with provider config and API key management), CreateTenantModal, ProviderConfigForm, ApiKeysTable, CreateApiKeyModal.
+
+**New Environment Variables:**
+- `ADMIN_JWT_SECRET` — HS256 signing key for admin JWT tokens (required for startup if admin routes enabled)
+- `ENCRYPTION_MASTER_KEY` — Already exists, reused for provider config encryption
+
+**Why:** Addresses all Phase 1 operational multi-tenancy requirements. Per-user admin auth more secure than shared secret. Soft delete allows graceful deactivation; hard delete supports GDPR compliance. Provider key encryption consistent with existing encryption-at-rest architecture. Zero-downtime migrations via DEFAULT backfill.
+
+**Impact:** Defines complete backend (F-MT1 through F-MT8) and frontend (M-MT1 through M-MT6) work breakdown for multi-tenant Wave (4 waves, critical path F-MT4a → F-MT4b → F-MT5 → F-MT8). Locks API surface and schema for Wave execution. Establishes admin/operator interface separate from tenant observability interface. No blockers identified; ready for implementation.
+
+**Deferred to Phase 2:** RBAC per admin user, tenant self-service registration, audit logging for admin actions, rate limiting per tenant, multi-region routing.

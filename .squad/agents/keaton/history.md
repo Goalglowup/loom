@@ -194,3 +194,79 @@ Each issue includes:
 2. **Wave 2 Critical Path:** F3 → F6 → F7 (tenant auth → streaming → trace recording) must execute sequentially; H2/H3/H5 can run in parallel with F3-F6
 3. **Wave 3 Unblocking:** F7 and F8 are the critical unlocks for all frontend work (M2-M5) and remaining test coverage (H4, H6, H7)
 4. **Architecture Decisions Embedded:** Each issue references specific decisions from .squad/decisions.md to ensure team alignment; no decisions isolated in issue comments
+
+### Multi-Tenant Management Design (2026-02-25)
+
+**Task:** Design multi-tenant management feature — tenant CRUD, API key management, provider config management, dashboard admin view.
+
+**Key Design Decisions:**
+1. **Admin auth via `ADMIN_API_KEY` env var** — avoids RBAC complexity in Phase 1. Single shared admin key checked in a dedicated preHandler hook on `/v1/admin/*` routes.
+2. **Schema additions, not replacements** — two ALTER TABLE migrations add `status`/`updated_at` to tenants and `name`/`key_prefix`/`status`/`revoked_at` to api_keys. All new columns have defaults for backward compatibility with existing data.
+3. **Soft deactivation over hard delete** — tenants get `active`/`inactive` status; API keys get `active`/`revoked`. No cascade deletes in management operations.
+4. **Auth query tightened** — existing `lookupTenant` query must filter by `ak.status = 'active' AND t.status = 'active'`. LRU cache invalidation helpers exported for use by admin routes.
+5. **Dedicated Admin page, not tenant switcher** — dashboard stays per-tenant for operators; new `/admin` route for Loom operator with separate admin API key in localStorage. Avoids mixing operator and tenant concerns.
+6. **Provider config management with cache eviction** — PUT/DELETE on provider config calls `evictProvider(tenantId)` to force re-init on next request. Already supported by registry.ts.
+
+**Work Breakdown:** 8 backend tasks (Fenster), 6 frontend tasks (McManus), 5 test tasks (Hockney). 4 execution waves. Critical path: schema → auth update → CRUD endpoints → route registration.
+
+**Open Questions for Michael:** Admin auth model sufficiency, hard delete vs. soft deactivation, provider config secret encryption, existing data backfill approach.
+
+**Design doc:** `.squad/decisions/inbox/keaton-multitenant-design.md`
+
+### Multi-Tenant Design Revision (2026-02-25)
+
+**Task:** Revise multi-tenant management design based on Michael Brown's answers to 4 open questions.
+
+**Decisions Incorporated:**
+1. **Q1 — Admin auth:** Changed from shared `ADMIN_API_KEY` env var to per-user admin auth. New `admin_users` table with bcrypt password hashing + JWT-based login endpoint (`POST /v1/admin/login`). `ADMIN_JWT_SECRET` env var for token signing. Keeps it simple (no RBAC) but eliminates shared secrets.
+2. **Q2 — Deletion:** Soft delete remains default (`PATCH` with `status: "inactive"`). Added hard `DELETE /v1/admin/tenants/:id?confirm=true` with cascade (api_keys → traces → provider_config → tenant row). API keys get `?permanent=true` option on DELETE. Confirmation guards prevent accidents.
+3. **Q3 — Provider config encryption:** Provider API keys encrypted at rest using existing AES-256-GCM pattern from `src/encryption.ts`. Same `ENCRYPTION_MASTER_KEY` + per-tenant HMAC-SHA256 key derivation. Encrypt on write, decrypt on read in `registry.ts`. API responses show `hasApiKey: boolean` only.
+4. **Q4 — Existing data backfill:** Confirmed Keaton's recommendation — migration defaults handle it. No change needed.
+
+**Work Breakdown Impact:**
+- F-MT4 split into F-MT4a (admin_users migration) and F-MT4b (admin login endpoint + JWT middleware + seed script)
+- F-MT5 updated to include hard DELETE with cascade
+- F-MT6 updated to include `?permanent=true` hard delete for API keys
+- F-MT7 updated to include AES-256-GCM encryption/decryption of provider API keys
+- H-MT1 expanded to cover JWT auth testing (login, validation, expiry)
+- Critical path shifted to F-MT4a → F-MT4b → F-MT5 → F-MT8
+- Wave structure preserved (4 waves), task count increased slightly
+
+**Key Lesson:** Per-user admin auth with JWT is the right call for Phase 1 — it's barely more complex than a shared env var but eliminates the "who did this?" blindspot and prepares the path for Phase 2 RBAC. Bcrypt is fine for admin login because it's not on the gateway hot path.
+
+## 2026-02-25T10:20:10Z: Multi-Tenant Wave A Design Finalization
+
+**Event:** Final multi-tenant design document approved and merged to decisions.md  
+**Status:** ✅ Complete, ready for implementation wave execution
+
+**What was finalized:**
+
+1. **Complete Design Document** — Full API surface, schema migrations, auth patterns, work breakdown, risk analysis documented in `.squad/decisions.md`
+2. **Michael's Q&A Incorporated** — All 4 open questions answered and design revised accordingly
+3. **Implementation Ready** — Backend (Fenster), frontend (McManus), and testing (Hockney) work breakdown finalized across 4 waves
+
+**Design Highlights:**
+
+- **Multi-tenant model:** API key-based tenancy with per-tenant provider config, status lifecycle
+- **Admin interface:** Per-user JWT auth (not shared secret), dedicated `/admin` route/page, separate from operator tenant interface
+- **Lifecycle management:** Soft deactivation (status: inactive) + hard delete with confirmation guards (`?confirm=true`, `?permanent=true`)
+- **Security:** Provider API keys encrypted at rest (reuses existing AES-256-GCM infrastructure)
+- **API coverage:** 11 admin endpoints across tenant CRUD, API key management, provider config management
+- **Database:** 3 migrations (F-MT1, F-MT2, F-MT4a) adding status/lifecycle columns and admin_users table
+
+**Work Breakdown:**
+- **Backend:** 8 tasks (Fenster) F-MT1 through F-MT8
+- **Frontend:** 6 tasks (McManus) M-MT1 through M-MT6
+- **Testing:** 5 tasks (Hockney) H-MT1 through H-MT5
+- **Critical path:** F-MT4a → F-MT4b → F-MT5 → F-MT8
+- **Execution:** 4 waves (A through D)
+
+**Risks Identified (managed):**
+- LRU cache invalidation on key revocation (ID→hash lookup required, design documented)
+- Admin routes share Fastify instance (acceptable Phase 1, note for Phase 2 service split)
+- Hard delete cascade on large tenants (sync delete acceptable for expected volumes)
+- JWT secret management (must be set at startup, fail loudly if missing)
+
+**Deferred to Phase 2:** RBAC per admin user, tenant self-service registration, audit logging, rate limiting per tenant, multi-region routing
+
+**Cross-Team Context:** Fenster implemented Wave A (migrations F-MT1, F-MT2 + startup check). Migrations provide schema foundation. Future waves unlock endpoint development (Wave B), admin UI (Waves C/D), and test coverage.

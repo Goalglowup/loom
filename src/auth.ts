@@ -72,6 +72,8 @@ async function lookupTenant(keyHash: string, pool: pg.Pool): Promise<TenantConte
      FROM   api_keys ak
      JOIN   tenants  t  ON ak.tenant_id = t.id
      WHERE  ak.key_hash = $1
+       AND  ak.status = 'active'
+       AND  t.status = 'active'
      LIMIT  1`,
     [keyHash],
   );
@@ -147,4 +149,26 @@ export function registerAuthMiddleware(fastify: FastifyInstance, pool: pg.Pool):
 
     request.tenant = tenant;
   });
+}
+
+/**
+ * Invalidate a single cached key lookup by its hash.
+ * Use when an API key is revoked or its associated tenant is deactivated.
+ */
+export function invalidateCachedKey(keyHash: string): void {
+  tenantCache.invalidate(keyHash);
+}
+
+/**
+ * Invalidate all cached keys for a tenant.
+ * Use when a tenant is deactivated to ensure all their keys are removed from cache.
+ */
+export async function invalidateAllKeysForTenant(tenantId: string, pool: pg.Pool): Promise<void> {
+  const result = await pool.query<{ key_hash: string }>(
+    'SELECT key_hash FROM api_keys WHERE tenant_id = $1',
+    [tenantId]
+  );
+  for (const row of result.rows) {
+    tenantCache.invalidate(row.key_hash);
+  }
 }

@@ -30,7 +30,7 @@ export async function registerDashboardRoutes(fastify: FastifyInstance): Promise
     if (cursor) {
       result = await query(
         `SELECT id, tenant_id, model, provider, status_code, latency_ms,
-                prompt_tokens, completion_tokens, created_at
+                prompt_tokens, completion_tokens, ttfb_ms, gateway_overhead_ms, created_at
          FROM   traces
          WHERE  tenant_id = $1
            AND  created_at < $2::timestamptz
@@ -41,7 +41,7 @@ export async function registerDashboardRoutes(fastify: FastifyInstance): Promise
     } else {
       result = await query(
         `SELECT id, tenant_id, model, provider, status_code, latency_ms,
-                prompt_tokens, completion_tokens, created_at
+                prompt_tokens, completion_tokens, ttfb_ms, gateway_overhead_ms, created_at
          FROM   traces
          WHERE  tenant_id = $1
          ORDER  BY created_at DESC
