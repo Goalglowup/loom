@@ -164,3 +164,41 @@
 - `localStorage` config persistence for gateway URL, API key, model
 - Optimistic user bubble with rollback on error
 - Dark-mode-first CSS custom properties; works offline (file:// URL)
+
+### 2025-07-17: TTFB and Overhead columns added to trace views
+
+**Implemented:**
+- Added `gateway_overhead_ms` and `ttfb_ms` as optional nullable fields to the `Trace` interface in `TracesTable.tsx`
+- Added "Overhead" and "TTFB" columns to `TracesTable` after "Latency (ms)", before "Tokens"; formatted as `Xms` or `—` when null
+- Updated `SkeletonRow` cell count (6→8) and empty-state `colSpan` (6→8) to match new column count
+- Added "Overhead" and "TTFB" `<dt>`/`<dd>` fields to `TraceDetails` panel after the Latency field
+- Each detail label includes an italic inline hint (`field-hint` CSS class): "proxy processing time (excl. LLM)" and "time to first streamed token"
+- Added `.field-hint` CSS rule to `TraceDetails.css`
+- No sorting on new columns (Phase 1 scope)
+
+**Key Files:**
+- `dashboard/src/components/TracesTable.tsx` — Trace type + table columns
+- `dashboard/src/components/TraceDetails.tsx` — detail panel fields
+- `dashboard/src/components/TraceDetails.css` — field-hint style
+
+**Decisions logged:** `.squad/decisions/inbox/mcmanus-ttfb-overhead-display.md`
+
+## 2026-02-25T00:21:37Z: Display Complete — TTFB + Overhead in Trace Views
+
+**Event:** Surfaced `ttfb_ms` and `gateway_overhead_ms` columns in TracesTable and TraceDetails  
+**Artifacts:** `dashboard/src/components/TracesTable.tsx`, `dashboard/src/components/TraceDetails.tsx`, `dashboard/src/components/TraceDetails.css`
+
+**Changes:**
+- `Trace` interface updated to include `ttfb_ms` and `gateway_overhead_ms` (number | null | undefined)
+- TracesTable: Added "Overhead" and "TTFB" columns after "Latency (ms)", before "Tokens"; format `Xms` or `—` if null
+- TraceDetails: Added detail fields with inline hints ("proxy processing time excl. LLM" and "time to first streamed token")
+- Null-safe rendering ensures backward compatibility with older traces
+
+**Design Rationale:**
+- No sorting on new columns (Phase 1 scope only)
+- Inline label hints preferred over hover-only tooltips for accessibility and quick scanning
+- Column placement groups timing metrics together visually
+
+**Build Status:** ✅ Passed (dashboard build, React 19 + Vite)
+
+**Cross-team outcome:** Latency observability complete end-to-end; users can now distinguish gateway overhead from LLM response time.

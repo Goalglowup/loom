@@ -300,3 +300,44 @@
 **Why:** Provides visibility into cost implications during Phase 1; approximation acceptable when actual costs not available.
 
 **Impact:** Users see cost estimates in trace details; Phase 2 API enhancement will replace with real cost from backend analytics engine.
+
+## 2026-02-25: F — Instrumentation: TTFB + Gateway Overhead Metrics
+
+**By:** Fenster (Backend)  
+**Date:** 2026-02-25  
+**Status:** Implemented
+
+**What:** Wired `ttfb_ms` and `gateway_overhead_ms` columns (pre-existing in DB schema) into the full request lifecycle — from capture through trace recording to dashboard API response.
+
+**Metrics Defined:**
+- `ttfb_ms` — Elapsed ms from gateway start to first SSE byte (for non-streaming: equals latency_ms)
+- `gateway_overhead_ms` — Pre-LLM gateway work time (auth, routing, parsing, provider selection)
+
+**Changes Made:**
+- `src/tracing.ts` — Added `ttfbMs` and `gatewayOverheadMs` to `TraceInput` and `BatchRow` interfaces; updated INSERT to 16 positional params
+- `src/streaming.ts` — Captures `firstChunkMs` on first SSE byte; computes `ttfbMs` (firstChunk - start) and `gatewayOverheadMs` (upstreamStart - start) in flush()
+- `src/index.ts` — Records `upstreamStartMs` immediately before provider.proxy(); passes to streaming context; added non-streaming trace recording with latency metrics
+- `src/routes/dashboard.ts` — Added both fields to cursor and non-cursor trace listing SELECT queries
+
+**Why:** Phase 1 latency observability requires visibility into both time-to-first-token and gateway processing overhead. No schema migration needed — columns already existed.
+
+**Impact:** Backend trace system now emits complete latency breakdown; dashboard API returns both metrics per trace; frontend can display granular latency insights.
+
+## 2026-02-25: M — Dashboard Display: TTFB + Overhead Visibility
+
+**By:** McManus (Frontend)  
+**Date:** 2026-02-25  
+**Status:** Implemented
+
+**What:** Surfaced `ttfb_ms` and `gateway_overhead_ms` in TracesTable and TraceDetails views.
+
+**Changes Made:**
+- `dashboard/src/components/TracesTable.tsx` — Updated `Trace` interface; added "Overhead" and "TTFB" columns after Latency, before Tokens (null-safe rendering)
+- `dashboard/src/components/TraceDetails.tsx` — Added `<dt>`/`<dd>` pairs for both metrics with inline italic hints
+- `dashboard/src/components/TraceDetails.css` — Added `.field-hint` style for inline label explanations
+
+**Column Format:** `Xms` or `—` if null (backward compatible with older traces)
+
+**Why:** Users need latency breakdown to diagnose performance bottlenecks. Inline hints improve accessibility over hover-only tooltips.
+
+**Impact:** Latency observability complete end-to-end; users can distinguish gateway overhead from LLM response time; Phase 1 observability goals achieved.
