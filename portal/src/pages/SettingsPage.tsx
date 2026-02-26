@@ -36,10 +36,10 @@ export default function SettingsPage() {
       {loading && <p className="text-gray-500 animate-pulse">Loading…</p>}
       {error && <p className="text-red-400 text-sm">{error}</p>}
 
-      {config && (
+      {!loading && !error && (
         <div className="bg-gray-900 border border-gray-700 rounded-xl p-6 space-y-4">
           {/* Current state summary */}
-          {config.provider && (
+          {config?.provider && (
             <div className="flex items-center gap-2 text-sm text-gray-400 border-b border-gray-700 pb-4">
               <span className="text-green-400">✓</span>
               <span>
@@ -50,7 +50,10 @@ export default function SettingsPage() {
             </div>
           )}
 
-          <ProviderConfigForm initialConfig={config} onSave={handleSave} />
+          <ProviderConfigForm
+            initialConfig={config ?? { provider: null, baseUrl: null, deployment: null, apiVersion: null, hasApiKey: false }}
+            onSave={handleSave}
+          />
         </div>
       )}
     </div>
