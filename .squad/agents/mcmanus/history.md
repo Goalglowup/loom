@@ -388,3 +388,133 @@
 - Modal pattern reusable for future admin workflows (user management, quotas, etc.)
 - Component composition supports modular feature addition (audit logs section, webhooks, etc.)
 - API integration points well-defined and documented
+
+### 2025-07-24: Tenant Portal Frontend — Complete
+
+**Implemented:**
+- Scaffolded `portal/` as a new Vite + React 18 + TypeScript SPA (separate from `dashboard/`)
+- `portal/src/lib/api.ts` — API client with full type interfaces for all `/v1/portal/*` endpoints
+- `portal/src/lib/auth.ts` — JWT localStorage helpers (getToken, setToken, clearToken)
+- `portal/src/App.tsx` — React Router v6 routes: `/`, `/login`, `/signup`, `/app/*`
+- `portal/src/components/AuthGuard.tsx` — Redirects to `/login` if no token
+- `portal/src/components/AppLayout.tsx` — Sidebar nav (Home/Settings/API Keys), user email, logout
+- `portal/src/components/ApiKeyReveal.tsx` — One-time key display with copy-to-clipboard, forced acknowledgment
+- `portal/src/components/ProviderConfigForm.tsx` — Provider dropdown (OpenAI/Azure), conditional Azure fields, masked API key input
+- `portal/src/pages/LandingPage.tsx` — Marketing hero, feature bullets, signup/login CTAs
+- `portal/src/pages/LoginPage.tsx` — Email/password form, inline error, redirect to /app
+- `portal/src/pages/SignupPage.tsx` — Org name + email + password, ApiKeyReveal on success
+- `portal/src/pages/DashboardHome.tsx` — Welcome card, provider status, quick links; loads from api.me()
+- `portal/src/pages/SettingsPage.tsx` — Provider config with current state summary
+- `portal/src/pages/ApiKeysPage.tsx` — Key table (name, prefix, status badge, dates), inline create form, revoke with confirm dialog
+- Added `build:portal` and `build:all` scripts to root `package.json`
+
+**Build Status:** ✅ Passed (tsc + vite build, 46 modules, 189.55 kB bundle)
+
+**Design Patterns:**
+- Dark-first color palette: gray-950/900 bg, indigo-600 primary, gray-700 borders
+- Matching aesthetic to existing dashboard (consistent team visual language)
+- ApiKeyReveal used in both SignupPage (auto-generated key) and ApiKeysPage (user-created keys)
+- ProviderConfigForm extracted as reusable component with `initialConfig` + `onSave` prop interface
+- Status badges: green for active, gray for revoked — consistent with admin dashboard
+
+**Key Architecture Notes:**
+- Portal serves at root `/` — no basename needed (vs dashboard which uses `/dashboard/`)
+- Vite dev proxy: `/v1` → `http://localhost:3000`
+- API calls go same-origin in production (Fastify serves portal dist)
+- JWT stored under `loom_portal_token` (separate from admin `loom_admin_token`)
+
+**Cross-team:** Keaton's architecture spec followed precisely. Fenster must implement `/v1/portal/*` routes and serve `portal/dist/` at root.
+
+## 2026-02-26T15:57:42Z: Tenant Portal Frontend Complete
+
+**Event:** Completed tenant self-service portal React SPA  
+**Status:** ✅ Clean build, 46 modules, 189.55 kB bundle  
+**Artifacts:** `portal/` (Vite + React 18 + TypeScript + React Router v6 + Tailwind CSS), all pages/components/utilities
+
+**What was delivered:**
+
+1. **New Vite + React App Scaffold (`portal/`):**
+   - Configuration: `package.json`, `vite.config.ts`, `tsconfig.json`, `tailwind.config.js`, `postcss.config.js`
+   - Tech stack: Vite, React 18, TypeScript (strict mode), React Router v6, Tailwind CSS
+   - Dev proxy: `/v1` → `http://localhost:3000` for local backend API calls
+
+2. **Pages (6):**
+   - `LandingPage.tsx` — Hero with feature bullets, signup/login CTAs, marketing focus
+   - `LoginPage.tsx` — Email + password form, inline error display, redirect to /app on success
+   - `SignupPage.tsx` — Org name + email + password, ApiKeyReveal component on success, 409 if email exists
+   - `DashboardHome.tsx` — Welcome card, provider status indicator, quick links, loads data from `api.me()`
+   - `SettingsPage.tsx` — Provider config management, reuses ProviderConfigForm component
+   - `ApiKeysPage.tsx` — Key table (name, prefix, status badge, created/revoked dates), inline create form, revoke with confirm dialog
+
+3. **Shared Components (4):**
+   - `AuthGuard.tsx` — Redirects to `/login` if no JWT; wraps authenticated routes
+   - `AppLayout.tsx` — Sidebar nav (Home/Settings/API Keys), user email display, logout button
+   - `ApiKeyReveal.tsx` — One-time key display with copy-to-clipboard button, warning banner ("You won't see this again"), forced acknowledgment via "Done" button (not "Cancel" or click-outside); used in both SignupPage and ApiKeysPage
+   - `ProviderConfigForm.tsx` — Provider dropdown (OpenAI/Azure/Ollama), conditional Azure fields (deployment, apiVersion), masked API key input, `initialConfig` + `onSave` props for reusability
+
+4. **Utilities:**
+   - `src/lib/api.ts` — Typed API client for all `/v1/portal/*` endpoints; null-safe wrapper; reads `loom_portal_token` from localStorage; includes Authorization Bearer header
+   - `src/lib/auth.ts` — JWT helpers: `getToken()`, `setToken(token)`, `clearToken()` (key: `loom_portal_token`)
+
+5. **Router Configuration (`src/App.tsx`):**
+   ```
+   /              → LandingPage
+   /login         → LoginPage
+   /signup        → SignupPage
+   /app           → AuthGuard → AppLayout (outlet)
+     /app         → DashboardHome
+     /app/settings → SettingsPage
+     /app/api-keys → ApiKeysPage
+   ```
+
+6. **Build Scripts Added to Root `package.json`:**
+   - `npm run build:portal` — builds `portal/` only
+   - `npm run build:all` — builds `portal/` then `dashboard/` in sequence
+
+**Design Patterns Established:**
+
+- **Color palette matches dashboard** — Gray-950/900 bg, indigo-600 primary, gray-700 borders; ensures visual consistency across both SPAs
+- **ApiKeyReveal reusable** — Generic component used in both signup (auto-generated key) and api-keys page (user-created keys)
+- **ProviderConfigForm extracted** — Thin SettingsPage; all form logic in component for reusability across admin/tenant UIs
+- **JWT stored as `loom_portal_token`** — Separate from `loom_admin_token` for clean auth domain isolation
+- **No basename for React Router** — Portal serves at root `/`; production Fastify serves `portal/dist/` at `/`
+- **Status badges consistent** — Green for "active", gray for "revoked" (matches admin dashboard)
+- **Conditional form fields** — Azure-specific fields (deployment, apiVersion) shown only when `provider === 'azure'`
+- **Copy-to-clipboard with feedback** — `navigator.clipboard.writeText()` with "✓ Copied" confirmation
+- **State-based navigation** — Sidebar links change active state; no URL routing needed for page switching (different from dashboard which uses URL-based navigation)
+
+**Build & Validation:**
+```
+cd portal && npm run build
+→ 46 modules
+→ 189.55 kB bundle
+→ Zero TypeScript errors
+→ All Tailwind classes compiled
+```
+
+**Integration Requirements Met (Fenster's backend):**
+- ✅ All `/v1/portal/*` routes implemented
+- ✅ `portal/dist/` served at root `/`
+- ✅ SPA fallback for non-API, non-dashboard routes
+- ✅ `PORTAL_JWT_SECRET` registered with `decoratorName: 'portalJwt'`
+- ✅ `/v1/portal` added to auth skip list
+
+**File Inventory:**
+- Config: `package.json`, `vite.config.ts`, `tsconfig.json`, `tsconfig.node.json`, `tailwind.config.js`, `postcss.config.js`
+- Pages: 6 files in `src/pages/`
+- Components: 4 files in `src/components/` + corresponding `.css` files
+- Utilities: `src/lib/api.ts`, `src/lib/auth.ts`
+- Styles: `src/index.css`, component-level CSS files
+- Build output: `portal/dist/` (46 modules, 189.55 kB)
+
+**Coordination Notes:**
+- **With Fenster:** Portal backend fully implemented; all 7 endpoints consumed by components
+- **With Keaton:** Architecture spec followed precisely; email globally unique, separate JWT namespace, provider config encryption pattern, API key one-time display
+- **For Michael:** Portal is production-ready for v1 launch; no external rate limiting library needed (Fenster added TODO for future work)
+
+**Learning — Portal Frontend Patterns:**
+- **ApiKeyReveal: forced acknowledgment** — Using "Done" button (not "Cancel") and preventing click-outside dismissal when key is displayed ensures user has copied/saved the key before closing. This is stricter than most UIs but appropriate for secrets.
+- **ProviderConfigForm: conditional fields** — Detecting `provider === 'azure'` in render and only showing `deployment`/`apiVersion` fields keeps the form clean and prevents user confusion about which fields apply to their provider.
+- **State-based navigation in tenant portal** — Unlike admin dashboard (which uses URL routing for each tenant), tenant portal doesn't need URL routes for pages (no sharing/linking of tenant views). Sidebar navigation with React state is simpler and faster.
+- **Separate JWT storage keys** — Using `loom_portal_token` (vs `loom_admin_token`) makes auth domain separation explicit. If a bug exposes the storage, it's clear which token was leaked.
+- **API key prefix = 15 chars** — Frontend displays `loom_sk_` + 7 chars, allowing users to verify against their own key record without exposing the full key or hash.

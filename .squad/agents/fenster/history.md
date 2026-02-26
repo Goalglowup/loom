@@ -359,3 +359,121 @@
 - Encryption key versioning support in schema
 - Cache invalidation pattern proven; can extend to other entities
 
+
+---
+
+## Session: Tenant Portal Backend — 2025-07-24
+
+### Task
+Built all backend infrastructure for the tenant self-service portal per Keaton's approved architecture spec.
+
+### Work Completed
+
+**1. Migration** — `migrations/1000000000010_create-tenant-users.cjs`
+- New `tenant_users` table: `id, tenant_id (FK→tenants CASCADE), email (unique), password_hash, role, created_at, last_login`
+- Indexes on `tenant_id` and `email`
+
+**2. Portal Auth Middleware** — `src/middleware/portalAuth.ts`
+- `registerPortalAuthMiddleware(fastify, requiredRole?)` returns a Fastify preHandler
+- Reads Bearer token from Authorization header, calls `request.portalJwtVerify()`
+- Attaches `request.portalUser: { userId, tenantId, role }`
+- Optional role enforcement (owner/member); returns 403 if role mismatch
+
+**3. Portal Routes** — `src/routes/portal.ts`
+- `POST /v1/portal/auth/signup` — atomic transaction: tenant + user + api_key; returns JWT + raw API key (shown once)
+- `POST /v1/portal/auth/login` — scrypt password verify, 403 for suspended tenants
+- `GET /v1/portal/me` — returns user + tenant (never raw LLM API key)
+- `PATCH /v1/portal/settings` — owner only; encrypts LLM provider key via `encryptTraceBody`, evicts provider cache
+- `GET /v1/portal/api-keys` — lists all keys for tenant (no raw keys)
+- `POST /v1/portal/api-keys` — owner only; generates new `loom_sk_` key
+- `DELETE /v1/portal/api-keys/:id` — owner only; soft revoke + LRU cache invalidation
+
+**4. `src/index.ts` updates**
+- Registered portal JWT plugin (`namespace: 'portal', decoratorName: 'portalJwt'`)
+- Registered `fastifyStatic` for `portal/dist/` at `/` with `decorateReply: false`
+- Registered portal routes
+- Added PORTAL_JWT_SECRET startup warning
+- Updated `setNotFoundHandler` with portal SPA fallback
+
+**5. `src/auth.ts` update**
+- Added `/v1/portal` and non-`/v1/` routes to skip list for tenant API key auth
+
+**6. `.env` update**
+- Added generated `PORTAL_JWT_SECRET`
+
+### Build & Test
+- `npm run build` — zero TypeScript errors
+- `npm test` — 113/113 tests pass
+
+### Patterns Established
+- Portal JWT is fully isolated from admin JWT via Fastify namespace
+- Portal routes use `registerPortalAuthMiddleware(fastify, 'owner')` preHandler for owner-only endpoints
+- Scrypt password format consistent: `salt:derivedKey` (matches admin_users)
+- API key prefix is first 15 chars: `loom_sk_` + 7 base64url chars
+
+## 2026-02-26T15:57:42Z: Tenant Portal Backend Complete
+
+**Event:** Completed tenant self-service portal backend  
+**Status:** ✅ All 113 tests passing  
+**Artifacts:** `migrations/1000000000010_create-tenant-users.cjs`, `src/middleware/portalAuth.ts`, `src/routes/portal.ts`, updated `src/index.ts` + `src/auth.ts`, generated `PORTAL_JWT_SECRET`
+
+**What was delivered:**
+
+1. **Tenant Users Migration (1000000000010):**
+   - New table: id (UUID), tenant_id (FK → tenants CASCADE), email (unique), password_hash, role (varchar 50), created_at, last_login
+   - Indexes on tenant_id and email
+   - Supports future RBAC (first user seeded as 'owner')
+
+2. **Portal Auth Middleware (`src/middleware/portalAuth.ts`):**
+   - `registerPortalAuthMiddleware(fastify, requiredRole?)` returns Fastify preHandler
+   - Reads Bearer token from Authorization header, calls `request.portalJwtVerify()`
+   - Attaches `request.portalUser: { userId, tenantId, role }`
+   - Optional role enforcement (owner/member); returns 403 on mismatch
+   - Fully isolated from admin JWT via `namespace: 'portal'`
+
+3. **Portal Routes (`src/routes/portal.ts`) — 7 Endpoints:**
+   - `POST /v1/portal/auth/signup` — Atomic transaction: tenant + user + api_key; returns JWT + raw API key (shown once)
+   - `POST /v1/portal/auth/login` — Scrypt password verify; 403 for inactive tenants; updates last_login
+   - `GET /v1/portal/me` — Returns user + tenant (never raw LLM API key, only `hasApiKey: boolean`)
+   - `PATCH /v1/portal/settings` — Owner only; encrypts LLM provider key via `encryptTraceBody`; evicts provider cache
+   - `GET /v1/portal/api-keys` — Lists all keys for tenant (no raw keys or hashes)
+   - `POST /v1/portal/api-keys` — Owner only; generates new `loom_sk_` key with 15-char prefix display
+   - `DELETE /v1/portal/api-keys/:id` — Owner only; soft revoke + LRU cache invalidation
+
+4. **Integration (`src/index.ts`):**
+   - Registered portal JWT plugin (`decoratorName: 'portalJwt'`, `namespace: 'portal'`)
+   - Registered `fastifyStatic` for `portal/dist/` at `/` with `decorateReply: false`
+   - Registered portal routes via `fastify.register()`
+   - Added `PORTAL_JWT_SECRET` startup warning
+   - Updated `setNotFoundHandler` with portal SPA fallback (checks `/v1/` and `/dashboard` prefixes)
+
+5. **Auth Skip List (`src/auth.ts`):**
+   - Added `/v1/portal` and non-`/v1/` routes to skip list (portal uses JWT, not tenant API key auth)
+
+6. **Environment (`.env`):**
+   - Generated `PORTAL_JWT_SECRET` (32 bytes hex): `0a48e1dd6d91f82c0bbdd4dca9eceac8e93f7b2c9d18db0b2456c7718323a8b1`
+
+**Key Design Patterns:**
+
+- **Email globally unique** — One email = one tenant_user (can extend to multi-tenant-per-user later)
+- **Email lowercase enforcement** — Applied at app layer in signup/login to prevent case-sensitivity bugs
+- **Scrypt format consistency** — `salt:derivedKey` matches admin_users table (20-byte salt, 64-byte key)
+- **Atomic signup transaction** — BEGIN/COMMIT wraps tenant creation, user creation, and API key generation
+- **API key prefix = 15 chars** — `loom_sk_` + 7 base64url (follows Keaton's spec exactly; differs from admin's 12-char prefix)
+- **Provider API key encryption** — Reuses `encryptTraceBody` function and `ENCRYPTION_MASTER_KEY` (no new dependency)
+- **Cache invalidation pattern** — Portal settings update evicts provider from cache (same pattern as admin updates)
+- **JWT isolation** — Portal JWT fully separate from admin JWT via Fastify namespace; `request.portalJwtVerify()` is distinct from `request.jwtVerify()`
+
+**Build Status:** ✅ npm run build (zero TypeScript errors), npm test (113/113 passing)
+
+**Coordination Notes:**
+- **With McManus:** All 7 endpoints ready for consumption by portal React SPA
+- **With Hockney:** Integration tests validate signup/login flows, provider encryption, cache invalidation, transaction atomicity
+- **For Michael:** Rate limiting TODO added to signup/login (not blocking v1 but recommended before public launch); `PORTAL_JWT_SECRET` added to `.env`
+
+**Learning — Tenant Portal Patterns:**
+- **Signup atomicity:** Using PostgreSQL transaction ensures tenant + user + api_key are created together or fail together. No orphaned records on partial failure.
+- **Email as identity** — Single global identity simplifies Phase 1. Multi-tenant-per-user requires junction table refactor in Phase 2 (backwards-compatible).
+- **Fastify namespace for JWT** — `decoratorName: 'portalJwt'` and `namespace: 'portal'` fully isolates portal JWT from admin JWT. Request decorators are independent: `request.jwtVerify()` vs `request.portalJwtVerify()`.
+- **SPA fallback ordering** — Portal fallback must come AFTER `/v1/`, `/dashboard`, and `/health` checks, otherwise API 404s return HTML. Handler order matters in Fastify `setNotFoundHandler`.
+- **API key prefix strategy** — Displaying first 15 chars (`loom_sk_abc...`) allows UI to show key identity without exposing the full key or hash. User can compare against their generated key for verification.

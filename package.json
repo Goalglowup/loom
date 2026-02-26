@@ -14,7 +14,9 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "seed": "tsx scripts/seed.ts"
+    "seed": "tsx scripts/seed.ts",
+    "build:portal": "cd portal && npm run build",
+    "build:all": "npm run build:portal && cd dashboard && npm run build"
   },
   "keywords": [
     "ai",
@@ -35,6 +37,7 @@
   },
   "dependencies": {
     "@fastify/cors": "^11.2.0",
+    "@fastify/jwt": "^10.0.0",
     "@fastify/static": "^9.0.0",
     "dotenv": "^17.3.1",
     "fastify": "^5.7.4",

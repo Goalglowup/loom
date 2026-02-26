@@ -270,3 +270,25 @@ Each issue includes:
 **Deferred to Phase 2:** RBAC per admin user, tenant self-service registration, audit logging, rate limiting per tenant, multi-region routing
 
 **Cross-Team Context:** Fenster implemented Wave A (migrations F-MT1, F-MT2 + startup check). Migrations provide schema foundation. Future waves unlock endpoint development (Wave B), admin UI (Waves C/D), and test coverage.
+
+### Tenant Self-Service Portal Architecture (2025-07-24)
+
+**Request:** Michael Brown asked for a tenant self-service portal — landing page at root, signup/login, and a UI for managing gateway settings (LLM provider config, API keys).
+
+**Decision:** Full architecture spec written to `.squad/decisions/inbox/keaton-tenant-portal-architecture.md`.
+
+**Key decisions:**
+- Separate Vite+React app in `portal/` (not extending dashboard — different audience, different auth)
+- New `tenant_users` table (email, password_hash, tenant_id, role). Email globally unique. Scrypt hashing.
+- Portal API at `/v1/portal/*` with its own JWT (`PORTAL_JWT_SECRET`, separate from admin JWT)
+- Dual `@fastify/jwt` registration using `namespace`/`decoratorName` to isolate admin vs portal tokens
+- Signup creates tenant + owner user + auto-generated API key in a single transaction
+- Portal static files served at `/` with SPA fallback for non-API, non-dashboard routes
+- Provider config management reuses existing encryption (`ENCRYPTION_MASTER_KEY`) and cache eviction patterns
+- Auth skip list in `src/auth.ts` updated to bypass API key auth for `/v1/portal/*` routes
+
+**Gotchas flagged:**
+- `@fastify/static` decorator collision (need `decorateReply: false` on second registration)
+- SPA fallback ordering (must not catch `/v1/*` 404s as HTML)
+- Email uniqueness = one user per tenant (simple now, junction table refactor if multi-tenant-per-user needed later)
+- Rate limiting on signup/login deferred but noted as TODO

@@ -725,3 +725,24 @@ Both `tenants.status` and `api_keys.status` have dedicated indexes.
 - Admin health check endpoint
 
 **Ready for:** Production deployment validation, user acceptance testing, integration with existing observability dashboard.
+
+## 2025-07-24: Tenant Portal Architecture Approved
+
+**By:** Keaton (Lead), approved by Michael Brown  
+**What:** Complete architecture for tenant self-service portal — separate React SPA (`portal/`), 7 backend routes (`/v1/portal/*`), `tenant_users` table with scrypt passwords, separate JWT namespace (`PORTAL_JWT_SECRET`), provider API key encryption, email-globally-unique design  
+**Why:** Phase 1 requires tenant onboarding without admin access; signup/login flows, provider configuration, and API key self-management; email uniqueness simplifies initial implementation  
+**Impact:** Defines work breakdown for Fenster (portal backend, migration, auth middleware), McManus (portal React SPA, 6 pages, 4 components); unblocks tenant adoption without admin provisioning; establishes separate auth domain (portal JWT vs admin JWT) for security isolation
+
+## 2025-07-24: Portal Backend Implementation Notes
+
+**By:** Fenster (Backend Dev)  
+**What:** Implementation decisions for portal backend: JWT registered at top-level Fastify instance, `registerPortalAuthMiddleware` returns route-level preHandler (not hook), `keyPrefix` = 15 chars (per spec), email stored lowercase at app layer, scrypt format `salt:derivedKey` consistent with admin_users  
+**Why:** Ensure JWT availability during route registration, match admin auth pattern, follow Keaton's spec exactly, prevent email case-sensitivity issues  
+**Impact:** Portal auth middleware fully isolated from admin auth via Fastify namespace; signup/login endpoints establish email-based identity; rate limiting TODO for future work
+
+## 2025-07-24: Tenant Portal Frontend Decisions
+
+**By:** McManus (Frontend Dev)  
+**What:** Design decisions for portal React SPA: color palette matches dashboard (gray-950/900, indigo-600), ApiKeyReveal component reused in both signup and key creation, ProviderConfigForm extracted as reusable component, JWT stored as `loom_portal_token` (separate from `loom_admin_token`), no basename for React Router (portal serves at `/`)  
+**Why:** Visual consistency across both SPAs, reduce component duplication, clean auth domain separation, simplify production serving (no path prefix needed)  
+**Impact:** Unified Loom UI aesthetic; ApiKeyReveal establishes "show once" pattern for sensitive keys; ProviderConfigForm enables reuse in future admin dashboard; state-based navigation (selectedTenantId) supports scalable admin UI without URL routing complexity
