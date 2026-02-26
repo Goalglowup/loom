@@ -11,7 +11,10 @@ export default function SettingsPage() {
 
   useEffect(() => {
     const token = getToken();
-    if (!token) return;
+    if (!token) {
+      setLoading(false);
+      return;
+    }
     api.me(token)
       .then(({ tenant }) => setConfig(tenant.providerConfig))
       .catch(err => setError(err.message))
