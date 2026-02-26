@@ -54,7 +54,7 @@ export interface TenantDetail extends Tenant {
   providerConfig: ProviderConfigSafe;
 }
 export interface ProviderConfig {
-  provider: 'openai' | 'azure';
+  provider: 'openai' | 'azure' | 'ollama';
   apiKey?: string;
   baseUrl?: string;
   deployment?: string;

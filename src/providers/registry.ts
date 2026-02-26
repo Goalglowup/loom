@@ -12,7 +12,7 @@ const providerCache = new Map<string, BaseProvider>();
  * provider_config JSONB field.
  *
  * provider_config shape:
- *   { provider: "openai" | "azure", apiKey, baseUrl?, deployment?, apiVersion? }
+ *   { provider: "openai" | "azure" | "ollama", apiKey, baseUrl?, deployment?, apiVersion? }
  *
  * Falls back to an OpenAI provider using OPENAI_API_KEY env var when no
  * provider_config is present.  Instances are cached per tenant (lazy init).
@@ -50,6 +50,11 @@ export function getProviderForTenant(tenantCtx: TenantContext): BaseProvider {
       endpoint:    cfg.baseUrl ?? '',
       deployment:  cfg.deployment ?? '',
       apiVersion:  cfg.apiVersion ?? '2024-02-01',
+    });
+  } else if (cfg?.provider === 'ollama') {
+    provider = new OpenAIProvider({
+      apiKey:   'ollama', // Ollama ignores the key but the client requires a non-empty value
+      baseUrl:  (cfg.baseUrl ?? 'http://localhost:11434') + '/v1',
     });
   } else {
     provider = new OpenAIProvider({

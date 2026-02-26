@@ -3,7 +3,7 @@ import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import pg from 'pg';
 
 export interface TenantProviderConfig {
-  provider: 'openai' | 'azure';
+  provider: 'openai' | 'azure' | 'ollama';
   apiKey: string;
   baseUrl?: string;       // OpenAI base URL or Azure endpoint
   deployment?: string;    // Azure deployment name

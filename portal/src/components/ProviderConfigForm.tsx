@@ -7,8 +7,8 @@ interface Props {
 }
 
 export default function ProviderConfigForm({ initialConfig, onSave }: Props) {
-  const [provider, setProvider] = useState<'openai' | 'azure'>(
-    (initialConfig.provider as 'openai' | 'azure') || 'openai'
+  const [provider, setProvider] = useState<'openai' | 'azure' | 'ollama'>(
+    (initialConfig.provider as 'openai' | 'azure' | 'ollama') || 'openai'
   );
   const [apiKey, setApiKey] = useState('');
   const [baseUrl, setBaseUrl] = useState(initialConfig.baseUrl || '');
@@ -25,7 +25,7 @@ export default function ProviderConfigForm({ initialConfig, onSave }: Props) {
     setSuccess(false);
     try {
       const config: ProviderConfig = { provider };
-      if (apiKey) config.apiKey = apiKey;
+      if (apiKey && provider !== 'ollama') config.apiKey = apiKey;
       if (baseUrl) config.baseUrl = baseUrl;
       if (provider === 'azure') {
         if (deployment) config.deployment = deployment;
@@ -49,15 +49,17 @@ export default function ProviderConfigForm({ initialConfig, onSave }: Props) {
         <label className="block text-sm text-gray-400 mb-1">Provider</label>
         <select
           value={provider}
-          onChange={e => setProvider(e.target.value as 'openai' | 'azure')}
+          onChange={e => setProvider(e.target.value as 'openai' | 'azure' | 'ollama')}
           className="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-gray-100 focus:outline-none focus:border-indigo-500"
         >
           <option value="openai">OpenAI</option>
           <option value="azure">Azure OpenAI</option>
+          <option value="ollama">Ollama (local)</option>
         </select>
       </div>
 
-      {/* API Key */}
+      {/* API Key — not needed for Ollama */}
+      {provider !== 'ollama' && (
       <div>
         <label className="block text-sm text-gray-400 mb-1">
           {provider === 'azure' ? 'Azure API Key' : 'OpenAI API Key'}
@@ -70,17 +72,22 @@ export default function ProviderConfigForm({ initialConfig, onSave }: Props) {
           className="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-gray-100 placeholder-gray-600 focus:outline-none focus:border-indigo-500"
         />
       </div>
+      )}
 
       {/* Base URL */}
       <div>
         <label className="block text-sm text-gray-400 mb-1">
-          Base URL <span className="text-gray-600">(optional)</span>
+          Base URL {provider !== 'ollama' && <span className="text-gray-600">(optional)</span>}
         </label>
         <input
           type="url"
           value={baseUrl}
           onChange={e => setBaseUrl(e.target.value)}
-          placeholder={provider === 'azure' ? 'https://your-resource.openai.azure.com' : 'https://api.openai.com/v1'}
+          placeholder={
+            provider === 'azure' ? 'https://your-resource.openai.azure.com' :
+            provider === 'ollama' ? 'http://localhost:11434' :
+            'https://api.openai.com/v1'
+          }
           className="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-gray-100 placeholder-gray-600 focus:outline-none focus:border-indigo-500"
         />
       </div>

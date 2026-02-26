@@ -226,7 +226,7 @@ export function registerPortalRoutes(fastify: FastifyInstance, pool: pg.Pool): v
     const { tenantId } = request.portalUser!;
     const { provider, apiKey, baseUrl, deployment, apiVersion } = request.body;
 
-    if (!provider || (provider !== 'openai' && provider !== 'azure')) {
+    if (!provider || (provider !== 'openai' && provider !== 'azure' && provider !== 'ollama')) {
       return reply.code(400).send({ error: 'Provider must be "openai" or "azure"' });
     }
 
