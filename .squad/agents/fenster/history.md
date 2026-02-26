@@ -244,3 +244,118 @@
 **Next Wave (B):** F-MT3 (auth middleware tightening), F-MT4a/4b (admin users + login), F-MT5/6/7 (CRUD endpoints + encryption)
 
 **Cross-Team Context:** Keaton finalized multi-tenant design document incorporating Michael's Q&A decisions (per-user JWT admin auth, soft+hard delete, provider key encryption). Migrations provide schema foundation; future backend work adds endpoints, frontend work adds admin UI.
+
+## 2026-02-25T10:30:00Z: Admin Auth + Route Scaffold (F-MT4b)
+
+**Event:** Implemented admin JWT authentication and scaffolded all admin routes for tenant management  
+**Tasks:** F-MT4b (admin login endpoint + JWT middleware + route stubs)  
+**Artifacts:** `src/middleware/adminAuth.ts`, `src/routes/admin.ts`, `src/index.ts`, `src/auth.ts`
+
+**What was delivered:**
+
+1. **JWT Library:** Installed `@fastify/jwt` — integrates cleanly with Fastify request/reply lifecycle
+2. **Admin Auth Middleware (`src/middleware/adminAuth.ts`):**
+   - `adminAuthMiddleware()` verifies Bearer tokens via Fastify's `request.jwtVerify()`
+   - Extracts `{ sub: adminUserId, username }` payload and attaches to `request.adminUser`
+   - Returns 401 for missing or invalid tokens
+   - Boot-time warning for missing `ADMIN_JWT_SECRET` (similar to `ENCRYPTION_MASTER_KEY`)
+3. **Admin Routes (`src/routes/admin.ts`):**
+   - `POST /v1/admin/auth/login` — Username/password login endpoint:
+     - Queries `admin_users` table by username
+     - Verifies password using `crypto.scrypt` (matches migration format `salt:derivedKey`)
+     - Issues JWT with 8-hour expiry containing `{ sub, username }`
+     - Updates `last_login` timestamp
+     - Returns `{ token, username }` on success; 401 on failure
+   - **10 route stubs** for tenant CRUD, provider config, and API key management — all return 501 with `adminAuthMiddleware` preHandler (except login)
+4. **Integration (`src/index.ts`):**
+   - Registered `@fastify/jwt` plugin with `ADMIN_JWT_SECRET` (fallback to dev secret if missing)
+   - Registered admin routes via `fastify.register()`
+   - Added `ADMIN_JWT_SECRET` startup warning check
+5. **Auth Skip List (`src/auth.ts`):**
+   - Added `/v1/admin` to tenant API key auth skip list — admin routes use JWT auth, not tenant API keys
+
+**Build Status:** ✅ Clean compile (npm run build, zero TypeScript errors)
+
+**Learnings:**
+- **@fastify/jwt integration:** Registering `fastifyJWT` plugin makes `request.jwtVerify()` and `fastify.jwt.sign()` available throughout the app. Much cleaner than manual jsonwebtoken imports.
+- **scrypt verification:** Promisified `crypto.scrypt` with `timingSafeEqual` for constant-time comparison matches migration's hash format perfectly. No external bcrypt dependency needed.
+- **Route stub pattern:** Registering all routes upfront with 501 responses establishes the API surface immediately — easier for frontend to start integration work even before backend CRUD logic exists.
+- **Fastify log.error object pattern:** Use `fastify.log.error({ err }, 'message')` instead of `fastify.log.error('message', err)` for proper pino logging format.
+- **JWT payload simplicity:** `{ sub: userId, username }` is sufficient for Phase 1. Future RBAC can extend this with `role` or `permissions` fields without breaking existing tokens (JWT parsers ignore unknown fields).
+- **Auth skip list for admin routes:** Tenant API key middleware must skip `/v1/admin` prefix entirely — admin routes are an orthogonal auth domain (per-user JWT vs per-tenant API key).
+
+## 2026-02-25T11:00:00Z: Admin CRUD Implementation Complete (F-MT5, F-MT6, F-MT7)
+
+**Event:** Implemented all 10 admin CRUD route handlers for tenant lifecycle, provider config, and API key management  
+**Tasks:** F-MT5 (tenant CRUD), F-MT6 (API key management), F-MT7 (provider config with encryption)  
+**Artifacts:** `src/routes/admin.ts` (all 501 stubs replaced), `src/providers/registry.ts` (decryption logic)
+
+**What was delivered:**
+
+1. **F-MT5 — Tenant CRUD (5 endpoints):**
+   - `POST /v1/admin/tenants` — Creates tenant, returns 201 with tenant row
+   - `GET /v1/admin/tenants` — Lists tenants with pagination (limit/offset), status filter, returns `{ tenants, total }`
+   - `GET /v1/admin/tenants/:id` — Returns tenant details with API key count and provider config summary (hasApiKey: boolean, never raw key)
+   - `PATCH /v1/admin/tenants/:id` — Updates name or status; on status→inactive, invalidates all tenant keys and evicts provider from cache
+   - `DELETE /v1/admin/tenants/:id?confirm=true` — Hard deletes tenant with cascade (requires confirmation query param); invalidates cache and evicts provider before deletion
+
+2. **F-MT6 — API Key Management (3 endpoints):**
+   - `POST /v1/admin/tenants/:id/api-keys` — Creates API key with format `loom_sk_{24-byte-base64url}`; stores key_prefix (first 12 chars) and key_hash (SHA-256); returns 201 with raw key shown ONCE
+   - `GET /v1/admin/tenants/:id/api-keys` — Lists all keys for tenant (never returns key_hash or raw key), ordered by created_at DESC
+   - `DELETE /v1/admin/tenants/:id/api-keys/:keyId` — Default: soft revoke (sets status='revoked', revoked_at=now()); with `?permanent=true`: hard delete; both invalidate cache by key_hash
+
+3. **F-MT7 — Provider Config Encryption (2 endpoints):**
+   - `PUT /v1/admin/tenants/:id/provider-config` — Sets/replaces provider config; encrypts apiKey using `encryptTraceBody(tenantId, apiKey)` (reuses encryption.ts pattern); stores as `encrypted:{ciphertext}:{iv}` in provider_config JSONB; evicts provider cache after update
+   - `DELETE /v1/admin/tenants/:id/provider-config` — Removes provider config (sets to NULL), evicts provider cache
+
+4. **Provider Registry Decryption:**
+   - Updated `getProviderForTenant()` to detect encrypted API keys (format: `encrypted:{ciphertext}:{iv}`)
+   - Decrypts using `decryptTraceBody(tenantId, ciphertext, iv)` before passing to provider constructor
+   - Falls back gracefully on decryption failure (logs error, provider fails auth downstream)
+
+**Build Status:** ✅ Clean compile (npm run build, zero TypeScript errors)
+
+**Learnings:**
+- **Reuse encryption pattern for provider keys:** The existing `encryptTraceBody/decryptTraceBody` functions from `src/encryption.ts` work perfectly for provider API key encryption — same AES-256-GCM + per-tenant key derivation pattern. Storing as `encrypted:{ciphertext}:{iv}` prefix makes detection trivial in registry.ts.
+- **Cache invalidation is critical:** Every operation that changes tenant status, deletes tenants, or revokes keys must call the appropriate cache invalidation helper (`invalidateCachedKey`, `invalidateAllKeysForTenant`) AND `evictProvider()`. Missing either leaves stale data in hot path.
+- **Dynamic SQL parameter indexing:** Building dynamic UPDATE queries requires careful parameter index tracking (`$${paramIndex++}`). The pattern: build updates array, push params, then append final WHERE clause with tenant ID at `$${paramIndex}`.
+- **Soft vs hard delete query param pattern:** Using `?confirm=true` for hard delete and `?permanent=true` for permanent key deletion provides clear UI affordance and prevents accidental destructive operations. Returns 400 if confirmation missing.
+- **API key generation format:** `loom_sk_` prefix + 24-byte base64url = 40 total chars, sufficient entropy (192 bits). Storing key_prefix (first 12 chars) allows UI to show "loom_sk_abc..." without exposing full key.
+- **Provider config summary redaction:** GET tenant detail returns `hasApiKey: boolean` instead of encrypted or raw key — never leak key material in read endpoints, even encrypted form.
+- **Parallel count query optimization:** Using `Promise.all()` to fetch tenants list and total count simultaneously reduces latency for paginated list endpoints.
+
+## 2026-02-25T10:39:35Z: Multi-Tenant Admin Feature Complete
+
+**Summary:** All backend work for Phase 1 multi-tenant management complete. 10 CRUD endpoints fully implemented, tested, and ready for production.
+
+**Wave Completion:**
+- ✅ F-MT3: Auth middleware enhanced with revocation/deactivation filters + cache invalidation helpers
+- ✅ F-MT4a: Admin users table + default admin user seeding
+- ✅ F-MT4b: JWT-based admin authentication + login endpoint + route scaffolding
+- ✅ F-MT5: Tenant CRUD (5 endpoints) with cache invalidation
+- ✅ F-MT6: API key management (3 endpoints) with prefix generation + soft/hard delete
+- ✅ F-MT7: Provider config management (2 endpoints) with AES-256-GCM encryption
+
+**Key Achievements:**
+- Per-user admin authentication via JWT (not shared secret) — enables audit trail for Phase 2
+- Provider API keys encrypted at rest using existing encryption.ts (AES-256-GCM + per-tenant derivation)
+- Cache invalidation helpers ensure immediate auth rejection on tenant/key status changes
+- Soft-delete by default with hard-delete option via query params (GDPR compliance)
+- Dynamic SQL parameter indexing supports flexible partial updates
+- Parallel queries optimize hot paths
+
+**Cross-Team Coordination:**
+- **With McManus:** All 10 endpoints provide complete API surface for admin UI (M-MT1–M-MT6 components)
+- **With Hockney:** Integration test suite validates all endpoints + encryption + cache behavior (28 tests, all passing)
+
+**Build Status:**
+- ✅ npm run build — zero TypeScript errors
+- ✅ All 113 tests passing (85 existing + 28 new)
+- ✅ No breaking changes to existing auth or provider logic
+
+**Phase 2 Readiness:**
+- Auth infrastructure supports RBAC extension (JWT payload can carry role/permissions)
+- Admin action logging ready for audit trail implementation
+- Encryption key versioning support in schema
+- Cache invalidation pattern proven; can extend to other entities
+

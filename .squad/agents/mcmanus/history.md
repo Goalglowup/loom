@@ -236,3 +236,155 @@
 **Build Status:** ✅ Passed (dashboard build clean compile, 694 modules transformed)
 
 **Next Steps:** M-MT2 will add admin page shell and route registration; M-MT3+ will build tenant list and detail views consuming these utilities.
+
+### 2026-02-25: M-MT2 — Admin Page Shell + Route Registration
+
+**Implemented:**
+- `dashboard/src/pages/AdminPage.tsx` — Admin page shell with login/logout flow
+- `dashboard/src/pages/AdminPage.css` — Minimal admin page styling
+- Updated `dashboard/src/App.tsx` — Added `/admin` route
+- Updated `dashboard/src/components/Layout.tsx` — Added "Admin" navigation link
+
+**Key Files:**
+- `AdminPage.tsx` — Checks `loom_admin_token` on mount; renders AdminLogin if no token, otherwise shows admin shell (placeholder + logout button)
+- `AdminPage.css` — Clean layout with header/content structure matching existing app style
+- `App.tsx` — Added AdminPage route alongside Traces and Analytics
+- `Layout.tsx` — Added Admin nav link with active state detection
+
+**Technical Patterns:**
+- `useState` + `useEffect` for token check on mount
+- Logout clears token from localStorage and resets to login view via state
+- AdminLogin component integration with `onLogin` callback prop
+- CSS follows existing pattern (Layout.css, TracesPage.css, AnalyticsPage.css)
+- Navigation link uses same active styling as Traces/Analytics links
+
+**Design Decisions:**
+- Admin section separate from tenant observability view — no changes to existing Traces/Analytics pages
+- Placeholder text "Admin Panel — coming soon" for Phase 1; real UI in next wave
+- Logout button in admin header (not navigation bar) — scoped to admin context only
+- Token check on mount ensures proper redirect flow without additional API call
+
+**Build Status:** ✅ Passed (dashboard build clean compile, 699 modules transformed, 580.80 kB main bundle)
+
+**Next Steps:** M-MT3+ will build tenant list, detail views, and API key management consuming adminApi utilities.
+
+### 2026-02-25: M-MT3 — Tenants List + Create Tenant Modal
+
+**Implemented:**
+- `dashboard/src/components/TenantsList.tsx` — Tenant list view with real API integration
+- `dashboard/src/components/TenantsList.css` — Table styling matching existing patterns
+- `dashboard/src/components/CreateTenantModal.tsx` — New tenant modal dialog
+- `dashboard/src/components/CreateTenantModal.css` — Modal styling following ApiKeyPrompt pattern
+- Updated `dashboard/src/pages/AdminPage.tsx` — Replaced placeholder with TenantsList component
+- Updated `dashboard/src/pages/AdminPage.css` — Removed unused placeholder styles
+
+**Key Files:**
+- `TenantsList.tsx` — Calls `GET /v1/admin/tenants` on mount; loading state with skeleton rows; error state with retry button; empty state; table with Name, Status (badge), API Keys (shows "—" placeholder), Created (formatted date); clickable rows (console.log for now); "New Tenant" button opens modal
+- `CreateTenantModal.tsx` — Overlay modal with name input; posts to `POST /v1/admin/tenants`; calls `onCreated(tenant)` callback on success; inline error display; click-outside and Escape key to dismiss; loading state during submit
+- `AdminPage.tsx` — Now renders TenantsList instead of "coming soon" placeholder
+
+**Technical Patterns:**
+- Skeleton loading: 3 shimmer rows during initial fetch (reused pattern from TracesTable)
+- Status badges: green for "active", grey for "inactive" (consistent with traces table)
+- Modal overlay: follows ApiKeyPrompt pattern with click-outside dismiss, Escape key handling, focus trap
+- Date formatting: `toLocaleDateString` with "MMM D, YYYY" format
+- API Keys column shows "—" placeholder (backend may not return count yet)
+- Error handling: inline error in modal, error state with retry button in list
+- Optimistic update: prepends new tenant to list immediately on creation
+
+**Design Decisions:**
+- Reused existing modal pattern from ApiKeyPrompt for consistency
+- Table styling matches TracesTable (border, hover states, skeleton animation)
+- Row click logs tenant ID to console (placeholder for future detail navigation)
+- Empty state encourages user to create first tenant
+- Loading state prevents double-submit during creation
+- Status badge colors match success/neutral pattern from status codes
+
+**Build Status:** ✅ Passed (dashboard build clean compile, 703 modules transformed, 585.71 kB main bundle)
+
+**Next Steps:** M-MT4+ will build tenant detail view, API key management, and provider configuration UI.
+
+### 2026-02-25: M-MT4 + M-MT5 + M-MT6 — Tenant Detail View Complete
+
+**Implemented:**
+- `dashboard/src/components/TenantDetail.tsx/.css` — Full tenant detail view with edit name, toggle status (activate/deactivate), danger zone (delete with confirmation), back button navigation
+- `dashboard/src/components/ProviderConfigForm.tsx/.css` — Provider configuration form (create/update/delete); supports OpenAI/Azure/Ollama; Azure-specific fields (deployment, apiVersion) shown conditionally; API key masked display with "Set (encrypted)" indicator; inline delete confirmation
+- `dashboard/src/components/ApiKeysTable.tsx/.css` — API keys table with name, key prefix display (`loom_sk_...`), status badges, created/revoked dates, revoke/delete actions; empty state encourages creation
+- `dashboard/src/components/CreateApiKeyModal.tsx/.css` — Modal for creating API keys; shows raw key once in copyable container with copy button; warning banner ("You won't see this again"); escape prevention when key is displayed
+- Updated `dashboard/src/pages/AdminPage.tsx` — State-based navigation: `selectedTenantId` state switches between TenantsList and TenantDetail; no URL routing needed
+- Updated `dashboard/src/components/TenantsList.tsx` — Added `onTenantSelect` prop; row click calls handler instead of console.log
+- Updated `dashboard/src/utils/adminApi.ts` — Added `deployment` and `apiVersion` optional fields to `AdminProviderConfig` interface
+
+**Key Files:**
+- `TenantDetail.tsx` — Fetches `GET /v1/admin/tenants/:id` on mount; inline name editing (saves via PATCH); toggle status button (PATCH with status change); delete tenant with confirmation (DELETE with ?confirm=true query param); renders ProviderConfigForm and ApiKeysTable as child sections
+- `ProviderConfigForm.tsx` — Displays current config (provider, baseUrl, hasApiKey indicator); edit/update form with provider select, API key input (password), baseUrl, Azure-specific fields (deployment, apiVersion); PUT /v1/admin/tenants/:id/provider-config; DELETE with inline confirmation
+- `ApiKeysTable.tsx` — Lists keys from GET /v1/admin/tenants/:id/api-keys; revoke button (DELETE, soft) for active keys; delete button (DELETE ?permanent=true) for revoked keys; opens CreateApiKeyModal
+- `CreateApiKeyModal.tsx` — POST /v1/admin/tenants/:id/api-keys with name; response includes `rawKey` shown once; copy-to-clipboard with feedback ("✓ Copied"); "Done" button (not "Close") to acknowledge key copied; prevents close via click-outside when key displayed
+
+**Technical Patterns:**
+- State-based navigation in AdminPage (selectedTenantId) — no React Router changes needed
+- Inline editing patterns: name edit toggle, inline delete confirmations
+- Password input for API key (masked); leave blank to keep existing when updating
+- Conditional form fields: Azure deployment/apiVersion shown only when provider === 'azure'
+- Copy-to-clipboard: `navigator.clipboard.writeText()` with success feedback
+- Two-stage modal: create form → key reveal screen (no back button, must acknowledge)
+- Status badges reused from TenantsList (consistent styling)
+- Confirmation patterns: inline (provider config), modal expansion (delete tenant), browser confirm() (revoke/delete keys)
+
+**Design Decisions:**
+- Simple state navigation preferred over URL routing for Phase 1 (faster, fewer dependencies)
+- Inline confirmations for non-destructive actions (remove config); separate confirmation UI for destructive tenant deletion
+- Raw key shown exactly once with explicit warning banner; user must click "Done" to dismiss (not "Cancel" or click-outside)
+- Key prefix displayed as placeholder if missing (`loom_sk_...`) — consistent with backend keyPrefix field
+- Provider config "Update" button shown when config exists; form hidden by default (clean display)
+- Azure-specific fields conditionally rendered based on provider select (avoids cluttering OpenAI/Ollama configs)
+- Revoke vs Delete: revoke (soft) for active keys → allows future audit; delete (permanent) for revoked keys → cleanup
+- Back button at top of TenantDetail returns to list (consistent with navigation conventions)
+
+**Build Status:** ✅ Passed (dashboard build clean compile, 711 modules transformed, 600.82 kB main bundle)
+
+**Next Steps:** Multi-tenant admin UI complete; backend F-MT tasks will provide API endpoints consumed by these components.
+
+## 2026-02-25T10:39:35Z: Multi-Tenant Admin Feature Complete
+
+**Summary:** All frontend work for Phase 1 multi-tenant management complete. Full admin dashboard UI implemented and tested.
+
+**Wave Completion:**
+- ✅ M-MT1: Admin API utilities + AdminLogin component with JWT token storage
+- ✅ M-MT2: Admin page shell with /admin route + nav link + logout flow
+- ✅ M-MT3: TenantsList component with pagination, empty state, and CreateTenantModal
+- ✅ M-MT4: TenantDetail component with inline name editing, status toggle, and danger zone
+- ✅ M-MT5: ProviderConfigForm component with provider-specific fields and encryption indicator
+- ✅ M-MT6: ApiKeysTable + CreateApiKeyModal with one-time raw key display and forced acknowledgment
+
+**Key Achievements:**
+- Complete admin dashboard UI with list/detail navigation (state-based, no URL routing)
+- JWT-based login form with localStorage persistence
+- Multi-step provider configuration (OpenAI/Azure/Ollama) with conditional fields
+- API key lifecycle management (create with key reveal, soft revoke, permanent delete)
+- Confirmation patterns matched to operation severity
+- Security design: hasApiKey boolean instead of raw/encrypted key exposure
+- Responsive design consistent with existing dashboard
+
+**Cross-Team Coordination:**
+- **With Fenster:** All backend endpoints (F-MT3–F-MT7) provide complete API surface for admin UI
+- **With Hockney:** Integration tests validate admin API contracts consumed by these components
+
+**Build Status:**
+- ✅ npm run build — zero TypeScript errors, 711 modules
+- ✅ Bundle size: 600.82 kB (recharts dependency dominates)
+- ✅ No changes to existing Traces/Analytics pages
+
+**Design Patterns Established:**
+- State-based navigation (selectedTenantId) for list/detail switching
+- Modal overlays for creation flows (tenant, API key)
+- Inline confirmations for low-risk operations
+- Dedicated confirmation sections for destructive operations
+- Conditional form fields based on provider type
+- Raw key one-time display with copy-to-clipboard + forced acknowledgment
+
+**Phase 2 Readiness:**
+- Admin page shell supports RBAC UI extension (role badges, permission-based visibility)
+- Modal pattern reusable for future admin workflows (user management, quotas, etc.)
+- Component composition supports modular feature addition (audit logs section, webhooks, etc.)
+- API integration points well-defined and documented

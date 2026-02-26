@@ -100,3 +100,104 @@
 - **Implication:** Full end-to-end integration working correctly. No auth or API contract issues.
 
 **Test Coverage Status:** 85 tests (61 existing + 24 new Wave 3), 100% passing. All H4/H6/H7 test suites complete and green.
+
+---
+
+### 2026-02-25: Wave 4 — Multi-Tenant Admin API Testing (H-MT1 through H-MT5)
+
+**H-MT1 — Admin Auth Middleware (6 tests)**
+- JWT-based authentication for admin routes
+- Login endpoint validation: valid/invalid credentials, unknown user
+- Protected route middleware: missing token, invalid token, expired token
+- Pattern: scrypt password hashing matches migration format (salt:derivedKey)
+
+**H-MT2 — Tenant CRUD (10 tests)**
+- Create tenant: name validation, 201 response
+- List tenants: pagination, status filtering (active/inactive)
+- Get tenant: provider config summary, API key count, 404 handling
+- Update tenant: name change, status deactivation
+- Hard delete: confirm=true requirement
+
+**H-MT3 — API Key Management (5 tests)**
+- Create API key: raw key returned once, key_prefix stored
+- List API keys: key_hash never exposed, prefix shown
+- Revoke key (soft delete): status='revoked', revoked_at timestamp
+- Hard delete key: permanent=true removes row
+- 404 handling for non-existent tenant
+
+**H-MT4 — Provider Config (4 tests)**
+- Set provider config: apiKey encryption, hasApiKey flag
+- Provider config sanitization: raw apiKey never in response
+- Remove provider config: DELETE returns 204
+- Get tenant after removal: providerConfig=null
+
+**H-MT5 — Auth Regression (3 tests)**
+- Active key + active tenant: proxy auth passes (200/500, not 401/403)
+- Active key + inactive tenant: 401 rejection
+- Revoked key + active tenant: 401 rejection
+- Pattern: invalidateCachedKey() between tests to avoid LRU cache contamination
+
+**Key Learnings:**
+- **Module-level singleton caching requires explicit invalidation**: auth.ts LRU cache persists across Fastify instances in tests. Must call invalidateCachedKey() in beforeEach to prevent cross-test contamination
+- **Dynamic query param ordering in mocks**: When UPDATE queries build param arrays conditionally (name, status), mock must parse SQL to determine which fields are present and map params correctly
+- **Multi-space SQL formatting in mocks**: Auth queries have inconsistent whitespace (FROM   api_keys vs FROM api_keys). Mock checks must be flexible with OR conditions
+- **Admin routes need /v1/chat/completions stub**: H-MT5 regression tests hit proxy endpoint. Must register minimal stub route in test app to validate auth middleware
+
+**Test Infrastructure:**
+- 28 new tests (H-MT1: 6, H-MT2: 10, H-MT3: 5, H-MT4: 4, H-MT5: 3)
+- All tests use fastify.inject() for in-process testing
+- Mocked pg.Pool with 15+ query patterns covering admin routes + auth middleware
+- Total: 113 tests (85 existing + 28 new), 100% passing
+
+**Status:** ✅ Complete — All H-MT1 through H-MT5 tests passing. Admin backend API fully validated.
+
+## 2026-02-25T10:39:35Z: Multi-Tenant Admin Feature Complete
+
+**Summary:** All integration tests for Phase 1 multi-tenant management complete. 28 new tests added, 113 total suite (100% passing).
+
+**Wave Completion:**
+- ✅ H-MT1: Admin auth middleware tests (6 tests) — JWT verification, bearer tokens, 401 handling
+- ✅ H-MT2: Tenant CRUD tests (10 tests) — create, list, detail, update, delete with cache validation
+- ✅ H-MT3: API key management tests (5 tests) — create, list, soft revoke, hard delete
+- ✅ H-MT4: Provider config tests (4 tests) — CRUD with encryption simulation
+- ✅ H-MT5: Auth regression tests (3 tests) — revoked keys, inactive tenants, cache invalidation
+
+**Key Achievements:**
+- Comprehensive integration test coverage for all 10 admin endpoints
+- Mocked pg.Pool with 15+ query handlers covers complete admin API surface
+- Cache invalidation behavior explicitly validated (critical learning)
+- No PostgreSQL dependency; all tests run in <2s total
+- 100% test pass rate with no breaking changes to existing tests
+
+**Test Insights:**
+- **Cache Invalidation Discovery:** Module-level LRU cache singleton persists across test runs. H-MT5 regression tests failed because first test cached values, subsequent tests with modified mock data still read stale cache. Solution: call `invalidateCachedKey()` in beforeEach for auth regression suite. Implication: future test authors must explicitly clear cache for auth regression scenarios (not obvious, documented for team).
+- **Dynamic SQL Parameter Mapping:** Admin CRUD updates build param arrays conditionally (name, status fields). Mock pg.Pool must parse SQL to determine which params are present and map correctly. Pattern: check presence of each field in SET clause, advance paramIndex accordingly.
+- **Multi-Space SQL Formatting:** Auth queries have inconsistent whitespace in FROM clauses. Mock checks use flexible matching with OR conditions to handle variations.
+
+**Admin Routes Testing Gap Identified:**
+- No dedicated health check endpoint (`GET /v1/admin/health`)
+- All routes except login require JWT auth
+- **Observation:** No easy smoke test for "is admin API alive?"
+- **Recommendation:** Consider adding health endpoint in Phase 2 for monitoring/load balancer checks
+
+**Test Architecture:**
+- Fastify test app with mocked pg.Pool (no real database)
+- fastify.inject() for in-process HTTP simulation
+- Covers: admin user login validation, tenant CRUD lifecycle, API key soft/hard delete, provider config encryption round-trip, auth rejection scenarios
+- Cache invalidation helpers integrated in test lifecycle
+
+**Build Status:**
+- ✅ npm test — all 113 tests passing
+- ✅ No breaking changes to existing test suites
+- ✅ All admin API contracts validated
+
+**Quality Metrics:**
+- **Coverage:** 28 new tests across auth, CRUD, encryption, regression scenarios
+- **Execution Time:** <2s for all 113 tests (in-process, no real DB)
+- **Pass Rate:** 100% (no flaky tests)
+- **Maintainability:** Mock pg.Pool approach proven; clear query handler patterns for future test additions
+
+**Phase 2 Readiness:**
+- Test patterns established for future admin features (RBAC, audit logging, usage limits)
+- Cache invalidation testing methodology proven; can extend to other entities
+- Integration test infrastructure handles complex mocking scenarios (encryption, status transitions)
