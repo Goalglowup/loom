@@ -1,5 +1,12 @@
 # Team Decisions
 
+## 2026-02-26T16:52:15Z: User directive — Commit After Every Major Update
+
+**By:** Michael Brown (via Copilot)  
+**What:** Commit and push after every major update going forward  
+**Why:** User request — establish commit-after-every-major-update practice for team continuity  
+**Impact:** Coordinator will commit/push after every agent batch; session logs capture decision context; team maintains living decision history
+
 ## 2026-02-24T02:33:16.822Z: Tech Stack
 
 **By:** Michael Brown  
