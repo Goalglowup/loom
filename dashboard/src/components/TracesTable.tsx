@@ -9,6 +9,8 @@ export interface Trace {
   provider: string;
   status_code: number | null;
   latency_ms: number;
+  gateway_overhead_ms?: number | null;
+  ttfb_ms?: number | null;
   prompt_tokens: number | null;
   completion_tokens: number | null;
   created_at: string;
@@ -41,7 +43,7 @@ const SKELETON_COUNT = 8;
 function SkeletonRow() {
   return (
     <tr className="skeleton-row" aria-hidden="true">
-      {[1, 2, 3, 4, 5, 6].map(i => (
+      {[1, 2, 3, 4, 5, 6, 7, 8].map(i => (
         <td key={i}>
           <span className="skeleton-cell" />
         </td>
@@ -155,6 +157,8 @@ function TracesTable({ onRowClick }: TracesTableProps) {
               <th>Provider</th>
               <th>Status</th>
               <th className="align-right">Latency (ms)</th>
+              <th className="align-right">Overhead</th>
+              <th className="align-right">TTFB</th>
               <th className="align-right">Tokens</th>
             </tr>
           </thead>
@@ -163,7 +167,7 @@ function TracesTable({ onRowClick }: TracesTableProps) {
               Array.from({ length: SKELETON_COUNT }, (_, i) => <SkeletonRow key={i} />)
             ) : filtered.length === 0 ? (
               <tr>
-                <td colSpan={6} className="empty-state">
+                <td colSpan={8} className="empty-state">
                   No traces yet. Make your first API call.
                 </td>
               </tr>
@@ -187,6 +191,12 @@ function TracesTable({ onRowClick }: TracesTableProps) {
                     </span>
                   </td>
                   <td className="align-right">{trace.latency_ms.toLocaleString()}</td>
+                  <td className="align-right">
+                    {trace.gateway_overhead_ms != null ? `${trace.gateway_overhead_ms.toLocaleString()}ms` : '—'}
+                  </td>
+                  <td className="align-right">
+                    {trace.ttfb_ms != null ? `${trace.ttfb_ms.toLocaleString()}ms` : '—'}
+                  </td>
                   <td className="align-right">
                     {((trace.prompt_tokens ?? 0) + (trace.completion_tokens ?? 0)).toLocaleString()}
                   </td>

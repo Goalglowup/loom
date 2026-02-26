@@ -2,6 +2,7 @@ import 'dotenv/config';
 import Fastify from 'fastify';
 import fastifyCors from '@fastify/cors';
 import fastifyStatic from '@fastify/static';
+import fastifyJWT from '@fastify/jwt';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { readFileSync } from 'fs';
@@ -12,10 +13,20 @@ import { createSSEProxy } from './streaming.js';
 import { traceRecorder } from './tracing.js';
 import { getProviderForTenant } from './providers/registry.js';
 import { registerDashboardRoutes } from './routes/dashboard.js';
+import { registerAdminRoutes } from './routes/admin.js';
+import { registerPortalRoutes } from './routes/portal.js';
 
 // Startup warning: check critical env vars
 if (!process.env.ENCRYPTION_MASTER_KEY) {
   console.warn('⚠️  WARNING: ENCRYPTION_MASTER_KEY is not set. Trace recording will fail silently. Set this env var in .env before starting the gateway.');
+}
+
+if (!process.env.ADMIN_JWT_SECRET) {
+  console.warn('⚠️  WARNING: ADMIN_JWT_SECRET is not set. Admin authentication will fail. Set this env var in .env before starting the gateway.');
+}
+
+if (!process.env.PORTAL_JWT_SECRET) {
+  console.warn('⚠️  WARNING: PORTAL_JWT_SECRET is not set. Portal authentication will fail. Set this env var in .env.');
 }
 
 const __filename = fileURLToPath(import.meta.url);
@@ -30,6 +41,11 @@ const pool = new pg.Pool({
   connectionString: process.env.DATABASE_URL ?? 'postgresql://loom:loom_dev_password@localhost:5432/loom',
 });
 
+// Register JWT plugin for admin authentication
+fastify.register(fastifyJWT, {
+  secret: process.env.ADMIN_JWT_SECRET || 'unsafe-dev-secret-change-in-production'
+});
+
 registerAuthMiddleware(fastify, pool);
 
 // Allow requests from file:// origins and any localhost port (dev chat app, dashboard)
@@ -42,11 +58,29 @@ fastify.register(fastifyStatic, {
   wildcard: false
 });
 
+// Serve portal at root (decorateReply: false — already decorated by dashboard plugin)
+fastify.register(fastifyStatic, {
+  root: join(__dirname, '../portal/dist'),
+  prefix: '/',
+  wildcard: false,
+  decorateReply: false,
+});
+
 // SPA fallback for React Router
 fastify.setNotFoundHandler((request, reply) => {
-  if (request.url.startsWith('/dashboard')) {
+  const url = request.url.split('?')[0];
+  // Serve index.html for SPA routes, but NOT for static asset requests
+  if (url.startsWith('/dashboard') && !url.startsWith('/dashboard/assets/')) {
     const indexHtml = readFileSync(join(__dirname, '../dashboard/dist/index.html'), 'utf-8');
-    reply.type('text/html').send(indexHtml);
+    reply.header('Cache-Control', 'no-cache, no-store, must-revalidate').type('text/html').send(indexHtml);
+  } else if (!url.startsWith('/v1/') && !url.startsWith('/dashboard') && !url.startsWith('/health') && !url.startsWith('/favicon.ico')) {
+    // Portal SPA fallback
+    try {
+      const indexHtml = readFileSync(join(__dirname, '../portal/dist/index.html'), 'utf-8');
+      reply.header('Cache-Control', 'no-cache, no-store, must-revalidate').type('text/html').send(indexHtml);
+    } catch {
+      reply.code(404).send({ error: 'Portal not built. Run: cd portal && npm run build' });
+    }
   } else {
     reply.code(404).send({ error: 'Not Found' });
   }
@@ -58,6 +92,18 @@ fastify.get('/health', async (request, reply) => {
 
 // Register dashboard API routes (/v1/traces, /v1/analytics/*)
 fastify.register(registerDashboardRoutes);
+
+// Register admin routes (/v1/admin/*)
+fastify.register((instance, opts, done) => {
+  registerAdminRoutes(instance, pool);
+  done();
+});
+
+// Register portal routes (/v1/portal/*)
+fastify.register((instance, opts, done) => {
+  registerPortalRoutes(instance, pool);
+  done();
+});
 
 fastify.post('/v1/chat/completions', async (request, reply) => {
   const tenant = request.tenant;

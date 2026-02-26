@@ -99,7 +99,8 @@ async function lookupTenant(keyHash: string, pool: pg.Pool): Promise<TenantConte
 export function registerAuthMiddleware(fastify: FastifyInstance, pool: pg.Pool): void {
   fastify.addHook('preHandler', async (request: FastifyRequest, reply: FastifyReply) => {
     // Public routes — no auth required
-    if (request.url === '/health' || request.url.startsWith('/dashboard')) {
+    // Skip tenant API key auth for /v1/admin routes (they use JWT auth)
+    if (request.url === '/health' || request.url === '/favicon.ico' || request.url.startsWith('/dashboard') || request.url.startsWith('/v1/admin') || request.url.startsWith('/v1/portal') || !request.url.startsWith('/v1/')) {
       return;
     }
 

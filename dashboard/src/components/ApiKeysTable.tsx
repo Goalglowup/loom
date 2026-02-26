@@ -28,7 +28,7 @@ function ApiKeysTable({ tenantId }: ApiKeysTableProps) {
         throw new Error(`Failed to load API keys: ${res.status}`);
       }
       const data = await res.json();
-      setKeys(data);
+      setKeys(Array.isArray(data) ? data : []);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load API keys');
     } finally {

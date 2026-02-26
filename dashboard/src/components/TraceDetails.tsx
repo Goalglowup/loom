@@ -65,6 +65,22 @@ function TraceDetails({ trace, onClose }: TraceDetailsProps) {
               <dt>Latency</dt>
               <dd>{trace.latency_ms.toLocaleString()} ms</dd>
 
+              <dt>
+                Overhead{' '}
+                <span className="field-hint" title="proxy processing time (excl. LLM)">proxy processing time (excl. LLM)</span>
+              </dt>
+              <dd>
+                {trace.gateway_overhead_ms != null ? `${trace.gateway_overhead_ms.toLocaleString()}ms` : '—'}
+              </dd>
+
+              <dt>
+                TTFB{' '}
+                <span className="field-hint" title="time to first streamed token">time to first streamed token</span>
+              </dt>
+              <dd>
+                {trace.ttfb_ms != null ? `${trace.ttfb_ms.toLocaleString()}ms` : '—'}
+              </dd>
+
               <dt>Prompt Tokens</dt>
               <dd>{trace.prompt_tokens != null ? trace.prompt_tokens.toLocaleString() : '—'}</dd>
 

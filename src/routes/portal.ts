@@ -2,10 +2,14 @@ import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { scrypt, randomBytes, createHash } from 'node:crypto';
 import { promisify } from 'node:util';
 import pg from 'pg';
+import { createSigner } from 'fast-jwt';
 import { registerPortalAuthMiddleware } from '../middleware/portalAuth.js';
 import { invalidateCachedKey } from '../auth.js';
 import { encryptTraceBody } from '../encryption.js';
 import { evictProvider } from '../providers/registry.js';
+
+const PORTAL_JWT_SECRET = process.env.PORTAL_JWT_SECRET || 'unsafe-portal-secret-change-in-production';
+const signPortalToken = createSigner({ key: PORTAL_JWT_SECRET, expiresIn: 86400000 }); // 24h in ms
 
 const scryptAsync = promisify(scrypt);
 
@@ -89,10 +93,7 @@ export function registerPortalRoutes(fastify: FastifyInstance, pool: pg.Pool): v
       await pool.query('COMMIT');
 
       // Sign portal JWT
-      const token = (fastify as any).portalJwt.sign(
-        { sub: user.id, tenantId: tenant.id, role: 'owner' },
-        { expiresIn: '24h' }
-      );
+      const token = signPortalToken({ sub: user.id, tenantId: tenant.id, role: 'owner' });
 
       return reply.code(201).send({
         token,
@@ -155,10 +156,7 @@ export function registerPortalRoutes(fastify: FastifyInstance, pool: pg.Pool): v
 
     await pool.query('UPDATE tenant_users SET last_login = now() WHERE id = $1', [row.id]);
 
-    const token = (fastify as any).portalJwt.sign(
-      { sub: row.id, tenantId: row.tenant_id, role: row.role },
-      { expiresIn: '24h' }
-    );
+    const token = signPortalToken({ sub: row.id, tenantId: row.tenant_id, role: row.role });
 
     return reply.send({
       token,
