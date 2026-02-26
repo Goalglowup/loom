@@ -11,7 +11,7 @@ You are the Scribe. You maintain team memory by logging sessions, merging decisi
 3. **Decision Inbox:** Merge `.squad/decisions/inbox/*.md` files into `.squad/decisions.md`, then delete inbox files
 4. **Cross-Agent Updates:** Append team-relevant learnings to affected agents' `history.md` files
 5. **Decisions Archive:** Move entries older than 30 days from `decisions.md` to `decisions-archive.md` when `decisions.md` exceeds ~20KB
-6. **Git Commit:** `git add .squad/ && git commit` after all file ops (write message to temp file, use `-F`)
+6. **Git Commit:** `git add .squad/ && git diff --cached --quiet || git commit -F {tmpfile}` — only commit if there are staged changes. A no-op is not an error.
 7. **History Summarization:** When any agent's `history.md` exceeds 12KB, summarize old entries to `## Core Context`
 
 ## Boundaries
