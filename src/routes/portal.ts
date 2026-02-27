@@ -7,6 +7,7 @@ import { registerPortalAuthMiddleware } from '../middleware/portalAuth.js';
 import { invalidateCachedKey } from '../auth.js';
 import type { TenantContext } from '../auth.js';
 import { encryptTraceBody } from '../encryption.js';
+import { traceRecorder } from '../tracing.js';
 import { evictProvider, getProviderForTenant } from '../providers/registry.js';
 import { applyAgentToRequest } from '../agent.js';
 import { getAnalyticsSummary, getTimeseriesMetrics, getModelBreakdown } from '../analytics.js';
@@ -250,8 +251,9 @@ export function registerPortalRoutes(fastify: FastifyInstance, pool: pg.Pool): v
       id: string; email: string; role: string;
       tenant_id: string; tenant_name: string;
       provider_config: Record<string, unknown> | null;
+      available_models: string[] | null;
     }>(
-      `SELECT u.id, u.email, tm.role, t.id AS tenant_id, t.name AS tenant_name, t.provider_config
+      `SELECT u.id, u.email, tm.role, t.id AS tenant_id, t.name AS tenant_name, t.provider_config, t.available_models
        FROM users u
        JOIN tenant_memberships tm ON tm.user_id = u.id
        JOIN tenants t ON t.id = tm.tenant_id
@@ -299,7 +301,7 @@ export function registerPortalRoutes(fastify: FastifyInstance, pool: pg.Pool): v
 
     return reply.send({
       user: { id: row.id, email: row.email, role: row.role },
-      tenant: { id: row.tenant_id, name: row.tenant_name, providerConfig },
+      tenant: { id: row.tenant_id, name: row.tenant_name, providerConfig, availableModels: row.available_models ?? null },
       tenants: tenantsResult.rows.map((t) => ({ id: t.tenant_id, name: t.tenant_name, role: t.role })),
       agents: agentsResult.rows.map((a) => ({ id: a.id, name: a.name })),
       subtenants: subtenantsResult.rows.map((s) => ({ id: s.id, name: s.name, status: s.status })),
@@ -314,10 +316,11 @@ export function registerPortalRoutes(fastify: FastifyInstance, pool: pg.Pool): v
       baseUrl?: string;
       deployment?: string;
       apiVersion?: string;
+      availableModels?: string[] | null;
     };
   }>('/v1/portal/settings', { preHandler: ownerRequired }, async (request, reply) => {
     const { tenantId } = request.portalUser!;
-    const { provider, apiKey, baseUrl, deployment, apiVersion } = request.body;
+    const { provider, apiKey, baseUrl, deployment, apiVersion, availableModels } = request.body;
 
     if (!provider || (provider !== 'openai' && provider !== 'azure' && provider !== 'ollama')) {
       return reply.code(400).send({ error: 'Provider must be "openai" or "azure"' });
@@ -338,10 +341,17 @@ export function registerPortalRoutes(fastify: FastifyInstance, pool: pg.Pool): v
       }
     }
 
-    await pool.query(
-      'UPDATE tenants SET provider_config = $1, updated_at = now() WHERE id = $2',
-      [JSON.stringify(providerConfig), tenantId]
-    );
+    if (availableModels !== undefined) {
+      await pool.query(
+        'UPDATE tenants SET provider_config = $1, available_models = $2, updated_at = now() WHERE id = $3',
+        [JSON.stringify(providerConfig), availableModels !== null ? JSON.stringify(availableModels) : null, tenantId]
+      );
+    } else {
+      await pool.query(
+        'UPDATE tenants SET provider_config = $1, updated_at = now() WHERE id = $2',
+        [JSON.stringify(providerConfig), tenantId]
+      );
+    }
 
     evictProvider(tenantId);
 
@@ -353,6 +363,7 @@ export function registerPortalRoutes(fastify: FastifyInstance, pool: pg.Pool): v
         apiVersion: apiVersion ?? null,
         hasApiKey: !!apiKey,
       },
+      availableModels: availableModels !== undefined ? (availableModels ?? null) : undefined,
     });
   });
 
@@ -940,6 +951,7 @@ export function registerPortalRoutes(fastify: FastifyInstance, pool: pg.Pool): v
     skills: unknown[] | null;
     mcp_endpoints: unknown[] | null;
     merge_policies: Record<string, unknown>;
+    available_models?: string[] | null;
     created_at: string; updated_at: string | null;
   }) {
     return {
@@ -950,6 +962,7 @@ export function registerPortalRoutes(fastify: FastifyInstance, pool: pg.Pool): v
       skills: row.skills,
       mcpEndpoints: row.mcp_endpoints,
       mergePolicies: row.merge_policies,
+      availableModels: row.available_models ?? null,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     };
@@ -1036,9 +1049,10 @@ export function registerPortalRoutes(fastify: FastifyInstance, pool: pg.Pool): v
       skills: unknown[] | null;
       mcp_endpoints: unknown[] | null;
       merge_policies: Record<string, unknown>;
+      available_models: string[] | null;
       created_at: string; updated_at: string | null;
     }>(
-      `SELECT id, name, provider_config, system_prompt, skills, mcp_endpoints, merge_policies, created_at, updated_at
+      `SELECT id, name, provider_config, system_prompt, skills, mcp_endpoints, merge_policies, available_models, created_at, updated_at
        FROM agents WHERE tenant_id = $1 ORDER BY created_at`,
       [tenantId]
     );
@@ -1108,10 +1122,11 @@ export function registerPortalRoutes(fastify: FastifyInstance, pool: pg.Pool): v
         skills: unknown[] | null;
         mcp_endpoints: unknown[] | null;
         merge_policies: Record<string, unknown>;
+        available_models: string[] | null;
         created_at: string; updated_at: string | null;
       }>(
         `SELECT a.id, a.name, a.provider_config, a.system_prompt, a.skills, a.mcp_endpoints, a.merge_policies,
-                a.created_at, a.updated_at
+                a.available_models, a.created_at, a.updated_at
          FROM agents a
          JOIN tenant_memberships tm ON tm.tenant_id = a.tenant_id
          WHERE a.id = $1 AND tm.user_id = $2`,
@@ -1135,6 +1150,7 @@ export function registerPortalRoutes(fastify: FastifyInstance, pool: pg.Pool): v
       skills?: unknown[];
       mcpEndpoints?: unknown[];
       mergePolicies?: Record<string, unknown>;
+      availableModels?: string[] | null;
     };
   }>(
     '/v1/portal/agents/:id',
@@ -1142,7 +1158,7 @@ export function registerPortalRoutes(fastify: FastifyInstance, pool: pg.Pool): v
     async (request, reply) => {
       const { tenantId, userId } = request.portalUser!;
       const { id } = request.params;
-      const { name, providerConfig, systemPrompt, skills, mcpEndpoints, mergePolicies } = request.body;
+      const { name, providerConfig, systemPrompt, skills, mcpEndpoints, mergePolicies, availableModels } = request.body;
 
       // Verify membership
       const memberCheck = await pool.query(
@@ -1168,6 +1184,7 @@ export function registerPortalRoutes(fastify: FastifyInstance, pool: pg.Pool): v
       if (skills !== undefined) { setClauses.push(`skills = $${idx++}`); values.push(JSON.stringify(skills)); }
       if (mcpEndpoints !== undefined) { setClauses.push(`mcp_endpoints = $${idx++}`); values.push(JSON.stringify(mcpEndpoints)); }
       if (mergePolicies !== undefined) { setClauses.push(`merge_policies = $${idx++}`); values.push(JSON.stringify(mergePolicies)); }
+      if (availableModels !== undefined) { setClauses.push(`available_models = $${idx++}`); values.push(availableModels !== null ? JSON.stringify(availableModels) : null); }
 
       values.push(id, tenantId);
 
@@ -1178,11 +1195,12 @@ export function registerPortalRoutes(fastify: FastifyInstance, pool: pg.Pool): v
         skills: unknown[] | null;
         mcp_endpoints: unknown[] | null;
         merge_policies: Record<string, unknown>;
+        available_models: string[] | null;
         created_at: string; updated_at: string | null;
       }>(
         `UPDATE agents SET ${setClauses.join(', ')}
          WHERE id = $${idx} AND tenant_id = $${idx + 1}
-         RETURNING id, name, provider_config, system_prompt, skills, mcp_endpoints, merge_policies, created_at, updated_at`,
+         RETURNING id, name, provider_config, system_prompt, skills, mcp_endpoints, merge_policies, available_models, created_at, updated_at`,
         values
       );
 
@@ -1450,6 +1468,8 @@ export function registerPortalRoutes(fastify: FastifyInstance, pool: pg.Pool): v
       );
 
       try {
+        const startTimeMs = Date.now();
+        const upstreamStartMs = Date.now();
         const response = await provider.proxy({
           url: '/v1/chat/completions',
           method: 'POST',
@@ -1465,6 +1485,24 @@ export function registerPortalRoutes(fastify: FastifyInstance, pool: pg.Pool): v
         if (!choice) {
           return reply.code(502).send({ error: 'Provider returned no choices' });
         }
+
+        const latencyMs = Date.now() - startTimeMs;
+        const usage = response.body?.usage;
+        traceRecorder.record({
+          tenantId: agent.tenant_id,
+          agentId: agent.id,
+          model: response.body?.model ?? model,
+          provider: provider.name,
+          requestBody: effectiveBody,
+          responseBody: response.body,
+          latencyMs,
+          statusCode: response.status,
+          promptTokens: usage?.prompt_tokens,
+          completionTokens: usage?.completion_tokens,
+          totalTokens: usage?.total_tokens,
+          ttfbMs: latencyMs,
+          gatewayOverheadMs: upstreamStartMs - startTimeMs,
+        });
 
         return reply.send({
           message: choice.message,

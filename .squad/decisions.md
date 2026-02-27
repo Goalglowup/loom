@@ -1,5 +1,41 @@
 # Team Decisions
 
+## 2026-02-27T21:45:09Z: Enable Trace Recording for Sandbox Chat Endpoint
+
+**By:** Fenster (Backend Dev)  
+**Supersedes:** "2026-02-27: Portal Sandbox Chat Endpoint — No Trace Recording"  
+**What:** `POST /v1/portal/agents/:id/chat` now calls `traceRecorder.record()` after a successful provider response, using the same payload shape as the main gateway.  
+**Why:** Sandbox traces are useful for debugging agent configurations — the absence was a gap, not intentional product behavior. `traceRecorder` buffers internally and is fire-and-forget; zero performance risk.  
+**Impact:** Sandbox messages now appear in the traces list with full token usage, latency, provider, and model metadata. No schema changes required.  
+**Changes:** `src/routes/portal.ts` — added `import { traceRecorder } from '../tracing.js'` and `traceRecorder.record(...)` in sandbox chat success path.
+
+## 2026-02-27T21:45:09Z: available_models Column — Storage and API Semantics
+
+**By:** Fenster (Backend Dev)  
+**What:** Added `available_models jsonb` to both `tenants` and `agents` tables; wired through portal API (`PATCH /v1/portal/settings`, `GET/PUT /v1/portal/agents/:id`).  
+**Why:** Allows per-tenant and per-agent model lists to be managed via the portal API. JSONB (not `text[]`) for consistency with rest of schema and future extensibility.  
+**Semantics:** `NULL` = use frontend defaults; `[]` = no explicit list (fall back to defaults); non-empty array = explicit model override. Conditional UPDATE in `PATCH /settings` — field absent from body leaves column untouched.  
+**Impact:** `formatAgent` returns `availableModels` (defaults to `null` if column absent); all read endpoints include `available_models` in SELECT/RETURNING.
+
+## 2026-02-27T21:45:09Z: Model Combobox — Sandbox, SettingsPage, AgentEditor
+
+**By:** McManus (Frontend Dev)  
+**What:** Replaced sandbox `<select>` + "custom" toggle with a `ModelCombobox` component; added `ModelListEditor` to `SettingsPage` and `AgentEditor`.  
+**Decisions:**
+- `COMMON_MODELS` extracted to `portal/src/lib/models.ts` — single source of truth imported by all three consumers.
+- `ModelCombobox` uses no external library; click-outside via `mousedown` on `document` (not `blur` delay pattern).
+- `ModelListEditor` auto-saves in `SettingsPage` — matches existing UX pattern; inline `saving/saved/error` status.
+- `updateSettings` signature extended additively: `ProviderConfig & { availableModels?: string[] | null }`.
+- Sandbox checks `agent.availableModels` first; falls back to `COMMON_MODELS`.
+- `AgentEditor` starts `availableModels` from `agent?.availableModels ?? null`; `null` passed to API means "use tenant defaults".
+
+## 2026-02-27T21:21:12Z: User Directive — Do Not Kill/Restart Server
+
+**By:** Michael Brown (via Copilot)  
+**What:** Do not kill or restart the dev server when making changes — the user will handle that.  
+**Why:** User request — captured for team memory.  
+**Impact:** All agents must make code changes without issuing `kill`, `pkill`, server restart, or `npm run dev` commands.
+
 ## 2026-02-27: Portal Sandbox Chat Endpoint — No Trace Recording
 
 **By:** Fenster (Backend)  

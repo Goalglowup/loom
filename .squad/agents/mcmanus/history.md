@@ -813,3 +813,27 @@ Used `adminMode?: boolean` prop pattern instead of passing full URLs/header fact
 - Panel rendered below agents table (not replacing editor) for clear spatial separation
 - Edit/Test buttons are mutually exclusive — opening one disables the other
 - If model picker is needed, deferred to follow-up work (Fenster/Keaton can define spec)
+
+## Learnings
+
+### 2026-03-XX: Dedicated Sandbox Page
+
+- Created `portal/src/pages/SandboxPage.tsx`: full-page sandbox with agent selector (left 1/3) and chat panel (right 2/3)
+- Agent selector renders cards; clicking switches agent and resets chat via `key={agent.id}` on `<AgentSandbox>`
+- Empty state links user to `/app/agents`; loading state shown while fetching
+- Made `onClose` prop optional in `AgentSandbox.tsx` — close button only renders when prop is provided, keeping embedded usage clean
+- Added 🧪 Sandbox nav link in `AppLayout.tsx` between Agents and the footer
+- Added `<Route path="sandbox" element={<SandboxPage />} />` in `App.tsx`
+- Build passes with zero TypeScript errors (`npm run build`)
+
+### 2026-05-XX: Model Combobox + Model List Config
+
+- Extracted `COMMON_MODELS` to `portal/src/lib/models.ts` — shared between AgentSandbox, SettingsPage, and AgentEditor
+- Created `ModelCombobox.tsx`: text input + filtered dropdown, no external libs, click-outside closes via `mousedown` listener on document
+- Replaced `<select>` + "custom" toggle in `AgentSandbox` with `<ModelCombobox>`; model options prefer `agent.availableModels` when set
+- Created `ModelListEditor.tsx`: checkbox toggle for custom list, chip tags with × remove, Add input; "Reset to defaults" sets to null
+- Added `availableModels?: string[] | null` to `Agent`, `AgentInput`, `TenantDetail` interfaces in `api.ts`
+- Updated `updateSettings` signature to accept `ProviderConfig & { availableModels?: string[] | null }`
+- `SettingsPage`: loads tenant `availableModels`, renders `ModelListEditor` below provider form, auto-saves on change with inline status text
+- `AgentEditor`: added `availableModels` state + `<ModelListEditor>` above inherited config section; included in save payload
+- Build passes with zero TypeScript errors

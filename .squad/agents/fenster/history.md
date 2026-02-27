@@ -791,3 +791,21 @@ if (tenantId) {
 - Portal auth gated (JWT, not API key) so safe from production gateway confusion
 - Errors: 400 (invalid request), 404 (agent not found), 502 (provider error)
 - Future trace recording of sandbox calls requires explicit `sandbox: true` flag in schema (Phase 2)
+
+### 2026-XX-XX: available_models Column
+
+**Implemented:** `available_models jsonb` on `tenants` and `agents` tables, wired through portal API.
+
+- **Conditional UPDATE in PATCH /settings:** Only updates `available_models` column when the field is present in the request body (undefined check), avoiding accidental nulling of existing data when callers only want to update provider config.
+- **formatAgent always returns availableModels:** Defaults to `null` if column is absent, ensuring backward compat with any query that doesn't SELECT `available_models`.
+- **NULL vs empty array semantics:** NULL = "use frontend defaults (COMMON_MODELS)", `[]` = "no models configured (fall back to defaults)", non-empty = "explicit model list". Stored as JSONB so Postgres can index/query into it if needed later.
+
+### 2026-XX-XX: Sandbox Chat Trace Recording
+
+**Implemented:** `traceRecorder.record()` in `POST /v1/portal/agents/:id/chat`
+
+- Added `import { traceRecorder } from '../tracing.js'` to `src/routes/portal.ts`
+- After successful provider response, calls `traceRecorder.record()` fire-and-forget with full trace payload (tenantId, agentId, model, provider, requestBody, responseBody, latencyMs, statusCode, token counts, ttfbMs, gatewayOverheadMs)
+- `provider.name` is available on all provider implementations via abstract base class in `src/providers/base.ts`
+- Supersedes Phase 2 deferral noted in 2026-02-27 entry — sandbox traces now appear in the traces list
+- Purely additive: no behavior changes to request/response path
