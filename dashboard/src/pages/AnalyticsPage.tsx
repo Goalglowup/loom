@@ -1,22 +1,13 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { getAdminToken, ADMIN_BASE, adminAuthHeaders, type AdminTenant } from '../utils/adminApi';
-import AnalyticsSummary, { type WindowHours } from '../components/AnalyticsSummary';
-import TimeseriesCharts from '../components/TimeseriesCharts';
+import { AnalyticsPage as SharedAnalyticsPage } from '@shared/analytics';
+import type { SummaryData, TimeseriesData, Tenant } from '@shared/analytics';
+import { BUCKET_MINUTES } from '@shared/analytics';
+import type { WindowHours } from '@shared/analytics';
 import './AnalyticsPage.css';
 
 function AnalyticsPage() {
   const [hasToken] = useState(() => !!getAdminToken());
-  const [win, setWin] = useState<WindowHours>(24);
-  const [tenants, setTenants] = useState<AdminTenant[]>([]);
-  const [tenantId, setTenantId] = useState('');
-
-  useEffect(() => {
-    if (!hasToken) return;
-    fetch(`${ADMIN_BASE}/v1/admin/tenants`, { headers: adminAuthHeaders() })
-      .then(r => r.ok ? r.json() : Promise.reject())
-      .then((data: { tenants: AdminTenant[] }) => setTenants(data.tenants))
-      .catch(() => {});
-  }, [hasToken]);
 
   if (!hasToken) {
     return (
@@ -31,35 +22,46 @@ function AnalyticsPage() {
     );
   }
 
+  async function fetchSummary(tenantId?: string, window?: string): Promise<SummaryData> {
+    const params = new URLSearchParams();
+    if (window) params.set('window', window);
+    if (tenantId) params.set('tenant_id', tenantId);
+    const res = await fetch(`${ADMIN_BASE}/v1/admin/analytics/summary?${params}`, { headers: adminAuthHeaders() });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return res.json() as Promise<SummaryData>;
+  }
+
+  async function fetchTimeseries(tenantId?: string, window?: string): Promise<TimeseriesData[]> {
+    const params = new URLSearchParams();
+    if (window) params.set('window', window);
+    if (window) {
+      const bucket = BUCKET_MINUTES[parseInt(window) as WindowHours];
+      if (bucket) params.set('bucket', String(bucket));
+    }
+    if (tenantId) params.set('tenant_id', tenantId);
+    const res = await fetch(`${ADMIN_BASE}/v1/admin/analytics/timeseries?${params}`, { headers: adminAuthHeaders() });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return res.json() as Promise<TimeseriesData[]>;
+  }
+
+  async function fetchTenants(): Promise<Tenant[]> {
+    const res = await fetch(`${ADMIN_BASE}/v1/admin/tenants`, { headers: adminAuthHeaders() });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = (await res.json()) as { tenants: AdminTenant[] };
+    return data.tenants.map(t => ({ id: t.id, name: t.name }));
+  }
+
   return (
     <div className="page">
-      <div className="page-header">
-        <h2 className="page-title">Analytics</h2>
-      </div>
-
-      <div style={{ marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-        <label htmlFor="tenant-filter-analytics" style={{ fontSize: '0.875rem', color: '#6b7280' }}>
-          Tenant
-        </label>
-        <select
-          id="tenant-filter-analytics"
-          className="filter-select"
-          value={tenantId}
-          onChange={e => setTenantId(e.target.value)}
-        >
-          <option value="">All tenants</option>
-          {tenants.map(t => (
-            <option key={t.id} value={t.id}>{t.name}</option>
-          ))}
-        </select>
-      </div>
-
-      <div className="analytics-sections">
-        <AnalyticsSummary adminMode tenantId={tenantId || undefined} win={win} onWinChange={setWin} />
-        <TimeseriesCharts adminMode tenantId={tenantId || undefined} win={win} />
-      </div>
+      <SharedAnalyticsPage
+        isAdmin={true}
+        fetchSummary={fetchSummary}
+        fetchTimeseries={fetchTimeseries}
+        fetchTenants={fetchTenants}
+      />
     </div>
   );
 }
 
 export default AnalyticsPage;
+

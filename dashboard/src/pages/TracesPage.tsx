@@ -58,6 +58,7 @@ function TracesPage() {
       <TracesTable
         adminMode
         tenantId={tenantId || undefined}
+        tenants={tenants}
         onRowClick={setSelectedTrace}
       />
 

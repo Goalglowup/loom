@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { API_BASE, authHeaders } from '../utils/api';
-import { ADMIN_BASE, adminAuthHeaders } from '../utils/adminApi';
+import { ADMIN_BASE, adminAuthHeaders, type AdminTenant } from '../utils/adminApi';
 import './TracesTable.css';
 
 export interface Trace {
@@ -21,6 +21,7 @@ interface TracesTableProps {
   onRowClick: (trace: Trace) => void;
   adminMode?: boolean;
   tenantId?: string;
+  tenants?: AdminTenant[];
 }
 
 export function statusClass(code: number | null): string {
@@ -43,10 +44,10 @@ function formatTime(isoStr: string): string {
 
 const SKELETON_COUNT = 8;
 
-function SkeletonRow() {
+function SkeletonRow({ cols }: { cols: number }) {
   return (
     <tr className="skeleton-row" aria-hidden="true">
-      {[1, 2, 3, 4, 5, 6, 7, 8].map(i => (
+      {Array.from({ length: cols }, (_, i) => (
         <td key={i}>
           <span className="skeleton-cell" />
         </td>
@@ -55,7 +56,7 @@ function SkeletonRow() {
   );
 }
 
-function TracesTable({ onRowClick, adminMode, tenantId }: TracesTableProps) {
+function TracesTable({ onRowClick, adminMode, tenantId, tenants }: TracesTableProps) {
   const [traces, setTraces] = useState<Trace[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -63,6 +64,8 @@ function TracesTable({ onRowClick, adminMode, tenantId }: TracesTableProps) {
   const [modelFilter, setModelFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState<'all' | '2xx' | '4xx' | '5xx'>('all');
   const sentinelRef = useRef<HTMLDivElement>(null);
+
+  const tenantMap = Object.fromEntries((tenants ?? []).map(t => [t.id, t.name]));
 
   const fetchTraces = useCallback(async (cursor?: string) => {
     const isInitial = !cursor;
@@ -160,6 +163,7 @@ function TracesTable({ onRowClick, adminMode, tenantId }: TracesTableProps) {
           <thead>
             <tr>
               <th>Time</th>
+              {adminMode && <th>Tenant</th>}
               <th>Model</th>
               <th>Provider</th>
               <th>Status</th>
@@ -171,10 +175,10 @@ function TracesTable({ onRowClick, adminMode, tenantId }: TracesTableProps) {
           </thead>
           <tbody>
             {loading ? (
-              Array.from({ length: SKELETON_COUNT }, (_, i) => <SkeletonRow key={i} />)
+              Array.from({ length: SKELETON_COUNT }, (_, i) => <SkeletonRow key={i} cols={adminMode ? 9 : 8} />)
             ) : filtered.length === 0 ? (
               <tr>
-                <td colSpan={8} className="empty-state">
+                <td colSpan={adminMode ? 9 : 8} className="empty-state">
                   No traces yet. Make your first API call.
                 </td>
               </tr>
@@ -190,6 +194,9 @@ function TracesTable({ onRowClick, adminMode, tenantId }: TracesTableProps) {
                   aria-label={`Open trace ${trace.id}`}
                 >
                   <td className="timestamp">{formatTime(trace.created_at)}</td>
+                  {adminMode && (
+                    <td className="tenant">{tenantMap[trace.tenant_id] ?? trace.tenant_id}</td>
+                  )}
                   <td className="model">{trace.model}</td>
                   <td className="provider">{trace.provider}</td>
                   <td>
@@ -210,7 +217,7 @@ function TracesTable({ onRowClick, adminMode, tenantId }: TracesTableProps) {
                 </tr>
               ))
             )}
-            {loadingMore && Array.from({ length: 3 }, (_, i) => <SkeletonRow key={`more-${i}`} />)}
+            {loadingMore && Array.from({ length: 3 }, (_, i) => <SkeletonRow key={`more-${i}`} cols={adminMode ? 9 : 8} />)}
           </tbody>
         </table>
       </div>
