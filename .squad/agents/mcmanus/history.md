@@ -754,3 +754,42 @@ Used `adminMode?: boolean` prop pattern instead of passing full URLs/header fact
 - `EditorState` discriminated union (`closed | create | edit`) for type-safe editor mode
 - `useCallback` + `useEffect` for data loading, matching MembersPage pattern
 - Subtenants nav entry is owner-gated (same as Members); Agents is visible to all roles
+
+### 2026-02-27: Wave 4 Implementation — Subtenants & Agents UI, Portal Updates
+
+**Scope:** Subtenant and agent UI pages, portal page updates for agent-scoped API keys and analytics rollup.
+
+**SubtenantsPage + AgentsPage + AgentEditor:**
+- SubtenantsPage: table (id, name, status), create button, owner-gated nav link
+- AgentsPage: table (id, name, provider, hasApiKey), inline AgentEditor panel above list
+- AgentEditor: discriminated union state (closed | create | edit); forms for agent name, provider_config, system_prompt, skills (array of {name, params}), mcp_endpoints (array of {url, capabilities})
+- Resolved config panel (collapsible) loaded lazily on expand, cached in component state
+- Sidebar nav: 🏢 Subtenants (owner-only), 🤖 Agents (all roles) added to AppLayout
+
+**ApiKeysPage Updates:**
+- Agent selector dropdown (required) in create form
+- Agents fetched on page load via GET /v1/portal/agents
+- Create button disabled with message if no agents exist ("Create an agent first before generating API keys")
+- "Agent" column added to keys table (agentName resolved client-side if API doesn't provide it)
+- createApiKey call updated: body now `{ name: string; agentId: string }`
+
+**AnalyticsPage Updates:**
+- New "Scope" dropdown: "All — roll up subtenants + agents" (default, rollup=true) vs. "This org only"
+- All three fetch functions (summary, timeseries, models) append `?rollup=true` when selected
+- Component remounted on scope toggle (key prop changed) to force clean lifecycle + re-fetch
+
+**SettingsPage Renamed:**
+- Title: "Provider settings" → "Org Defaults"
+- Subtitle: "Default settings inherited by agents. Agents can override these or leave them blank to use these values."
+- Note: "These settings are inherited by all agents in this org unless the agent defines its own."
+
+## Learnings
+
+- **Discriminated unions:** EditorState type as `{ mode: 'closed' } | { mode: 'create' } | { mode: 'edit'; agent: Agent }` is type-safe, exhaustive, avoids null ambiguity
+- **Inline editor pattern:** Keeps agents list visible for context, matches existing MembersPage, simpler than modal/route
+- **Role-based nav:** Subtenants gated to owner; Agents visible to all — mirrors API Keys pattern
+- **Lazy loading resolved config:** Only fetch `getResolvedAgentConfig` on expand; avoids extra API call on every edit form open
+- **API type consolidation:** Single api.ts file for all interfaces (Subtenant, Agent, etc.) maintains single source of truth
+- **Component remount strategy:** Changing key prop forces React remount, which is cleaner than patching internal state in a shared component
+- **Scope selector:** Rollup toggle is natural UX; remount ensures clean fetch without complex internal state patching
+

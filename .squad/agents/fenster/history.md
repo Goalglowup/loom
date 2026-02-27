@@ -732,3 +732,46 @@ if (tenantId) {
 - **INSERT parameter index drift**: Adding `agent_id` at position 2 in the INSERT shifted all downstream `$N` indices. Tests that hardcode parameter indices must be updated simultaneously — always audit the full array+column list when extending the schema.
 - **Mock SQL matching by distinctive clause**: The admin test mock matched on `from   api_keys ak` + `join   tenants` whitespace, which broke when query whitespace changed. Switching to `ak.key_hash = $1` (unique to auth lookup) is far more robust against formatting changes.
 - **MCP only on non-streaming**: Tool calls in streaming responses require buffering the full stream before routing — complex and high-latency. Limiting MCP round-trip to non-streaming (JSON) responses is the correct Phase 1 scope.
+
+### 2026-02-27: Wave 4 Implementation — Subtenant Hierarchy + Agents, Analytics Rollup, Gateway Integration
+
+**Scope:** Subtenant multi-tenancy with agent-scoped configuration, provider isolation, and recursive analytics.
+
+**Migration (1000000000012):**
+- Added `tenants.parent_id` (nullable self-FK, ON DELETE CASCADE) enabling subtenant hierarchy
+- Created `agents` table with `id, tenant_id, name, provider_config (JSONB), system_prompt, skills, mcp_endpoints, merge_policies (JSONB), created_at, updated_at`
+- Added `api_keys.agent_id` (NOT NULL, FK) — every key bound to exactly one agent
+- Added `traces.agent_id` (nullable, FK) — historical rows have NULL, new rows always record agent
+- Seeded "Default" agent per existing tenant before enforcing NOT NULL on api_keys.agent_id
+- Down migration reverses in strict FK dependency order: traces → api_keys → agents → tenants
+
+**Portal Routes (9 new endpoints):**
+- POST /v1/portal/subtenants — Create subtenant with owner membership (transactional)
+- GET /v1/portal/subtenants — List subtenants (parent_id-based)
+- GET/POST /v1/portal/agents — List / create agents in current tenant
+- GET/PUT/DELETE /v1/portal/agents/:id — Agent CRUD (membership-gated via JOIN tenant_memberships)
+- GET /v1/portal/agents/:id/resolved — Get agent config with inheritance chain applied
+- Extended GET /v1/portal/me — Now includes agents array + subtenants array
+
+**Agent Config Encryption:** Applied same encrypt-on-write / sanitize-on-read pattern as tenant settings. `prepareAgentProviderConfig()` encrypts plain `apiKey` field; `sanitizeAgentProviderConfig()` exposes only `hasApiKey: boolean`.
+
+**Analytics Rollup:** Added `rollup?: boolean` parameter to `getAnalyticsSummary`, `getTimeseriesMetrics`, `getModelBreakdown`. When true, prepends `WITH RECURSIVE subtenant_tree` CTE walking `tenants.parent_id`. CTE restricted to tenants table only (preserves partition pruning on traces table).
+
+**Gateway Agent-Aware Injection:**
+- Two-query lookup: immediate tenant chain via JOIN query, parent chain via separate recursive CTE (skipped if no parent)
+- Chain resolution in TypeScript: `.find(non-null)` for providerConfig/systemPrompt, union+dedup for skills/mcpEndpoints
+- Provider cache keyed by agentId (fallback tenantId); reverse tenantId → Set<cacheKey> index preserves `evictProvider(tenantId)` API for admin routes
+- `applyAgentToRequest()` applies merge policies to outbound request before provider (immutable, no mutation of request.body)
+- `handleMcpRoundTrip()` on non-streaming responses only (streaming MCP deferred to Phase 2)
+- `agentId` recorded on every trace (nullable for backward compatibility)
+
+## Learnings
+
+- **Subtenant hierarchy:** Self-FK with ON DELETE CASCADE is sufficient for linear parent-child model; avoids join table complexity
+- **Agent provider isolation:** Each agent can have its own provider config, encrypted same as tenant settings; per-agent caching required for correctness
+- **CTE + partition pruning:** Keep recursive CTE on non-partitioned tables only; reference result set in WHERE subquery to preserve PostgreSQL partition elimination
+- **Inheritance patterns:** First-non-null vs. union semantics cleaner in application code than SQL; ordered chain array with .find() is readable and testable
+- **Two-query pattern:** Separating immediate chain (one JOIN) from parent chain (recursive CTE) is simpler, more testable, and faster for non-parent tenants
+- **Transaction boundaries:** Wrap multi-step creates (subtenant + membership) in explicit transaction to prevent orphaned rows
+- **API key enforcement:** DB-level NOT NULL on api_keys.agent_id prevents orphaned keys; seeded Default agent enables safe migration without full backfill
+

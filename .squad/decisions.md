@@ -1,5 +1,146 @@
 # Team Decisions
 
+## 2026-02-27: Subtenant Hierarchy with Self-Foreign Key
+
+**By:** Fenster (Backend)  
+**What:** Added `parent_id` column to `tenants` table (nullable self-FK) with ON DELETE CASCADE  
+**Why:** Product requires subtenant hierarchy; single-parent tree avoids complexity of multi-parent graphs  
+**Impact:** Tenants can form a parent-child hierarchy; deleting a parent cascades to all subtenants; portal operators manage parent tenant + all descendants  
+**Alternatives Considered:** Separate join table (rejected: overkill for linear hierarchy)  
+
+## 2026-02-27: Agent System Architecture
+
+**By:** Fenster (Backend)  
+**What:** Implemented agents table with per-agent `provider_config`, `system_prompt`, `skills`, `mcp_endpoints`, and `merge_policies` (JSONB). Every API key bound to exactly one agent (NOT NULL FK). Every trace records which agent processed it (nullable for historical rows).  
+**Why:** Product requires configurable agents with isolated provider configs; API keys must be agent-scoped; audit requires recording which agent handled each request  
+**Impact:** Agents enable multi-agent workflows; per-agent provider configs; API key access control scoped to agents, not just tenants; traces linked to agents for analytics  
+**Decisions:**
+- `agents.merge_policies` is NOT NULL with application-level default (avoids null-checks in gateway)
+- Seeded "Default" agent for every existing tenant before enforcing `api_keys.agent_id NOT NULL`
+- `traces.agent_id` is nullable (preserves historical data integrity)
+- Down migration reverses in strict FK dependency order
+
+## 2026-02-27: Agent Provider Config Encryption
+
+**By:** Fenster (Backend)  
+**What:** Agent `provider_config` JSONB field encrypted on write (AES-256-GCM) and sanitized on read (returns `hasApiKey: boolean` instead of raw key)  
+**Why:** API keys inside agent config must be protected; consistency with existing tenant settings pattern  
+**Impact:** Zero new encryption logic; same encrypt-on-write / sanitize-on-read as tenant settings; sensitive data never exposed in API responses  
+
+## 2026-02-27: Portal Agent Routes — Membership-Based Access Control
+
+**By:** Fenster (Backend)  
+**What:** Agent GET/PUT/DELETE endpoints verify access via `JOIN tenant_memberships` on agent's tenant, not tenantId equality  
+**Why:** Users can be members of multiple tenants; should access agents from any tenant they're a member of  
+**Impact:** More permissive and flexible for multi-tenant users; agent access tied to tenant membership, not JWT tenant context  
+
+## 2026-02-27: Portal Agent Routes — Dynamic SET Builder for Partial Updates
+
+**By:** Fenster (Backend)  
+**What:** PUT /v1/portal/agents/:id uses dynamic SET clause builder; only supplied fields updated (plus always-updated `updated_at`)  
+**Why:** Support partial updates without coalescing (which would silently drop null inputs); avoids read-then-write  
+**Impact:** Clean parameterized SQL, no injection risk, explicit control over which fields are updated  
+
+## 2026-02-27: Agent Config Inheritance — JavaScript Layer
+
+**By:** Fenster (Backend)  
+**What:** Resolved agent config computed in TypeScript (not SQL). Build ordered array [agent, immediate_tenant, parent_chain...]. Use `.find(non-null)` for providerConfig/systemPrompt, union+dedup for skills/mcpEndpoints, agent-only for mergePolicies.  
+**Why:** Mixed inheritance semantics (first-non-null vs. union) cleaner in application code than monolithic SQL; tenant chain typically shallow (depth 1-5); keeps queries simple and testable  
+**Impact:** Readable inheritance logic; easy to test and debug; no complex CASE/COALESCE chains  
+
+## 2026-02-27: Subtenant Creation with Transaction
+
+**By:** Fenster (Backend)  
+**What:** POST /v1/portal/subtenants wraps tenant INSERT + membership INSERT in explicit BEGIN/COMMIT/ROLLBACK transaction  
+**Why:** Prevent orphaned tenant if membership insert fails  
+**Impact:** Atomic subtenant creation; consistent with existing signup transaction pattern  
+
+## 2026-02-27: Analytics Rollup with Recursive CTE
+
+**By:** Fenster (Backend)  
+**What:** Added optional `rollup?: boolean` parameter to three analytics functions (`getAnalyticsSummary`, `getTimeseriesMetrics`, `getModelBreakdown`). When true, prepend `WITH RECURSIVE subtenant_tree` CTE to walk `tenants.parent_id` and aggregate traces across all descendants.  
+**Why:** Portal operators managing a parent tenant need aggregate analytics across all subtenants; backward compatible (rollup defaults to false)  
+**Impact:** Parent tenant dashboard shows rolled-up metrics; partition pruning preserved (CTE restricted to tenants table); no impact on existing callers  
+**Alternatives Considered:** Materialised view of tenant trees (rejected: overkill, stale-data issues); JOIN on tenants at query time (rejected: complex, potential index miss)  
+
+## 2026-02-27: Gateway Agent-Aware Lookup — Two-Query Pattern
+
+**By:** Fenster (Backend)  
+**What:** Split agent config resolution into two queries: (1) api_keys → agents → immediate tenant (one JOIN), (2) separate recursive CTE for parent chain if parent_id non-null  
+**Why:** Simpler than monolithic CTE; parent chain query skipped entirely for common case (no parent); keeps each query readable and independently testable  
+**Impact:** Clean separation of concerns; better performance on non-parent tenants  
+
+## 2026-02-27: Provider Cache Keyed by Agent ID
+
+**By:** Fenster (Backend)  
+**What:** `providerCache` keyed by `agentId` (fallback to `tenantId`). Added `tenantIndex: Map<tenantId, Set<cacheKey>>` to allow `evictProvider(tenantId)` to clear all agent-level providers for a tenant without changing the public API.  
+**Why:** Agents can have their own provider configs; need per-agent caching. Reverse index allows admin routes to continue using existing `evictProvider(tenantId)` signature.  
+**Impact:** Correct per-agent provider instances; existing admin callers unaffected; zero API changes  
+
+## 2026-02-27: MCP Tool Routing on Non-Streaming Only
+
+**By:** Fenster (Backend)  
+**What:** `handleMcpRoundTrip()` called only on non-streaming (JSON) responses. Streaming responses not eligible for MCP routing in Phase 1.  
+**Why:** Streaming + tool_calls requires buffering full SSE stream before routing to MCP and re-streaming follow-up. Significant complexity and latency. Common agentic pattern (tool use) typically non-streaming.  
+**Impact:** Tool calling works on JSON responses; streaming MCP support deferred to Phase 2  
+
+## 2026-02-27: Agent Merge Policies Applied at Request-Time
+
+**By:** Fenster (Backend)  
+**What:** `applyAgentToRequest()` in `src/agent.ts` applies merge policies to outbound request body before provider. Original `request.body` not mutated.  
+**Why:** Keeps providers clean (see plain OpenAI-format requests); immutability avoids side effects  
+**Impact:** Providers receive consistent OpenAI format; no surprises for middleware or test code reading request.body  
+
+## 2026-02-27: SubtenantsPage Navigation Gated by Owner Role
+
+**By:** McManus (Frontend)  
+**What:** Subtenants nav link only visible to `currentRole === 'owner'`. Agents nav visible to all authenticated users.  
+**Why:** Creating subtenants is administrative; agents are tenant-scoped configs that all members may need. Mirrors API Keys visibility (all roles).  
+**Impact:** Role-based nav structure; members see Agents but not Subtenants; owners see both  
+
+## 2026-02-27: AgentEditor as Inline Panel (Not Modal)
+
+**By:** McManus (Frontend)  
+**What:** AgentEditor renders as inline panel on AgentsPage (above table) with discriminated union state: `{ mode: 'closed' } | { mode: 'create' } | { mode: 'edit'; agent: Agent }`  
+**Why:** Simpler state management; keeps agents list visible for context; matches existing MembersPage pattern; no animation primitives needed  
+**Impact:** Cleaner UX; full agents list visible while editing; type-safe editor state  
+
+## 2026-02-27: Agent Resolved Config Lazy-Loaded
+
+**By:** McManus (Frontend)  
+**What:** `getResolvedAgentConfig` API call only made when user expands "View inherited config"; cached in component state for session  
+**Why:** Avoid extra API call on every editor open; resolved config is informational/debugging, not required for saving  
+**Impact:** Fewer API calls; better perceived performance on page load  
+
+## 2026-02-27: API Types Consolidated in api.ts
+
+**By:** McManus (Frontend)  
+**What:** All new interfaces (`Subtenant`, `Agent`, `AgentConfig`, `ResolvedAgentConfig`, etc.) added to bottom of `portal/src/lib/api.ts` (not separate file)  
+**Why:** Single source of truth for API contracts; consistent with existing pattern  
+**Impact:** Easier to maintain API contracts; import from one file  
+
+## 2026-02-27: API Keys Agent Selector Required
+
+**By:** McManus (Frontend)  
+**What:** ApiKeysPage now requires agent selection in create form. If no agents exist, create button disabled with message "Create an agent first before generating API keys". API call updated: `{ name: string; agentId: string }`.  
+**Why:** Product enforces agent_id NOT NULL; every API key must be bound to an agent  
+**Impact:** Users cannot create API keys without an agent; clear error messaging  
+
+## 2026-02-27: Analytics Rollup Scope Selector
+
+**By:** McManus (Frontend)  
+**What:** AnalyticsPage new "Scope" dropdown: "All — roll up subtenants + agents" (default, `rollup=true`) vs. "This org only" (no param). All three fetch functions append `?rollup=true` when selected. Component remounted (via `key` change) on scope toggle.  
+**Why:** Parent tenant operators need to see rolled-up metrics; scope toggle is a natural UX pattern  
+**Impact:** Analytics correctly reflects scope; component remount ensures clean fetch on scope change  
+
+## 2026-02-27: Settings Page Renamed to Org Defaults
+
+**By:** McManus (Frontend)  
+**What:** SettingsPage title: "Provider settings" → "Org Defaults". Subtitle clarifies defaults are inherited by agents. Note added: "These settings are inherited by all agents in this org unless the agent defines its own."  
+**Why:** Clarify relationship between org-level defaults and agent-level overrides  
+**Impact:** User understanding of inheritance model improved  
+
+
 ## 2026-02-26T16:52:15Z: User directive — Commit After Every Major Update
 
 **By:** Michael Brown (via Copilot)  
