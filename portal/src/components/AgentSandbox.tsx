@@ -11,7 +11,7 @@ interface Message {
 
 interface AgentSandboxProps {
   agent: Agent;
-  onClose: () => void;
+  onClose?: () => void;
 }
 
 export default function AgentSandbox({ agent, onClose }: AgentSandboxProps) {
@@ -66,13 +66,15 @@ export default function AgentSandbox({ agent, onClose }: AgentSandboxProps) {
         <span className="text-sm font-semibold text-gray-100">
           Sandbox — <span className="text-indigo-400">{agent.name}</span>
         </span>
-        <button
-          onClick={onClose}
-          className="text-gray-500 hover:text-gray-300 text-sm transition-colors"
-          aria-label="Close sandbox"
-        >
-          ✕
-        </button>
+        {onClose && (
+          <button
+            onClick={onClose}
+            className="text-gray-500 hover:text-gray-300 text-sm transition-colors"
+            aria-label="Close sandbox"
+          >
+            ✕
+          </button>
+        )}
       </div>
 
       {/* Message list */}

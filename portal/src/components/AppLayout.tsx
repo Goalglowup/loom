@@ -58,6 +58,9 @@ export default function AppLayout() {
           <NavLink to="/app/agents" className={navLinkClass}>
             🤖 <span>Agents</span>
           </NavLink>
+          <NavLink to="/app/sandbox" className={navLinkClass}>
+            🧪 <span>Sandbox</span>
+          </NavLink>
         </nav>
 
         {/* Footer */}

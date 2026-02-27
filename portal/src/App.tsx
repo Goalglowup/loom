@@ -12,6 +12,7 @@ import AnalyticsPage from './pages/AnalyticsPage';
 import MembersPage from './pages/MembersPage';
 import SubtenantsPage from './pages/SubtenantsPage';
 import AgentsPage from './pages/AgentsPage';
+import SandboxPage from './pages/SandboxPage';
 import AuthGuard from './components/AuthGuard';
 
 export default function App() {
@@ -30,6 +31,7 @@ export default function App() {
           <Route path="members" element={<MembersPage />} />
           <Route path="subtenants" element={<SubtenantsPage />} />
           <Route path="agents" element={<AgentsPage />} />
+          <Route path="sandbox" element={<SandboxPage />} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
