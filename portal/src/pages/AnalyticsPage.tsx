@@ -41,8 +41,8 @@ export default function AnalyticsPage() {
     setLoading(true);
     const bucket = BUCKET_MINUTES[win];
     Promise.all([
-      fetch(`/v1/analytics/summary?window=${win}`, { headers: { Authorization: `Bearer ${token}` } }),
-      fetch(`/v1/analytics/timeseries?window=${win}&bucket=${bucket}`, { headers: { Authorization: `Bearer ${token}` } }),
+      fetch(`/v1/portal/analytics/summary?window=${win}`, { headers: { Authorization: `Bearer ${token}` } }),
+      fetch(`/v1/portal/analytics/timeseries?window=${win}&bucket=${bucket}`, { headers: { Authorization: `Bearer ${token}` } }),
     ])
       .then(async ([sr, tr]) => {
         if (!sr.ok) throw new Error(`Summary HTTP ${sr.status}`);

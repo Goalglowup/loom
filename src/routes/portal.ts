@@ -7,6 +7,8 @@ import { registerPortalAuthMiddleware } from '../middleware/portalAuth.js';
 import { invalidateCachedKey } from '../auth.js';
 import { encryptTraceBody } from '../encryption.js';
 import { evictProvider } from '../providers/registry.js';
+import { getAnalyticsSummary, getTimeseriesMetrics } from '../analytics.js';
+import { query } from '../db.js';
 
 const PORTAL_JWT_SECRET = process.env.PORTAL_JWT_SECRET || 'unsafe-portal-secret-change-in-production';
 const signPortalToken = createSigner({ key: PORTAL_JWT_SECRET, expiresIn: 86400000 }); // 24h in ms
@@ -358,4 +360,63 @@ export function registerPortalRoutes(fastify: FastifyInstance, pool: pg.Pool): v
       return reply.code(204).send();
     }
   );
+
+  // ── GET /v1/portal/traces ────────────────────────────────────────────────────
+  fastify.get('/v1/portal/traces', { preHandler: authRequired }, async (request, reply) => {
+    const { tenantId } = request.portalUser!;
+    const qs = request.query as Record<string, string>;
+    const limit = Math.min(parseInt(qs.limit ?? '50', 10), 200);
+    const cursor = qs.cursor;
+
+    let result;
+    if (cursor) {
+      result = await query(
+        `SELECT id, tenant_id, model, provider, status_code, latency_ms,
+                prompt_tokens, completion_tokens, ttfb_ms, gateway_overhead_ms, created_at
+         FROM   traces
+         WHERE  tenant_id = $1
+           AND  created_at < $2::timestamptz
+         ORDER  BY created_at DESC
+         LIMIT  $3`,
+        [tenantId, cursor, limit],
+      );
+    } else {
+      result = await query(
+        `SELECT id, tenant_id, model, provider, status_code, latency_ms,
+                prompt_tokens, completion_tokens, ttfb_ms, gateway_overhead_ms, created_at
+         FROM   traces
+         WHERE  tenant_id = $1
+         ORDER  BY created_at DESC
+         LIMIT  $2`,
+        [tenantId, limit],
+      );
+    }
+
+    const traces = result.rows;
+    const nextCursor =
+      traces.length === limit
+        ? (traces[traces.length - 1].created_at as Date).toISOString()
+        : null;
+
+    return reply.send({ traces, nextCursor });
+  });
+
+  // ── GET /v1/portal/analytics/summary ────────────────────────────────────────
+  fastify.get('/v1/portal/analytics/summary', { preHandler: authRequired }, async (request, reply) => {
+    const { tenantId } = request.portalUser!;
+    const qs = request.query as Record<string, string>;
+    const windowHours = parseInt(qs.window ?? '24', 10);
+    const summary = await getAnalyticsSummary(tenantId, windowHours);
+    return reply.send(summary);
+  });
+
+  // ── GET /v1/portal/analytics/timeseries ─────────────────────────────────────
+  fastify.get('/v1/portal/analytics/timeseries', { preHandler: authRequired }, async (request, reply) => {
+    const { tenantId } = request.portalUser!;
+    const qs = request.query as Record<string, string>;
+    const windowHours   = parseInt(qs.window ?? '24', 10);
+    const bucketMinutes = parseInt(qs.bucket ?? '60', 10);
+    const timeseries = await getTimeseriesMetrics(tenantId, windowHours, bucketMinutes);
+    return reply.send(timeseries);
+  });
 }

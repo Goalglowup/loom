@@ -45,7 +45,7 @@ export default function TracesPage() {
     try {
       const params = new URLSearchParams({ limit: '50' });
       if (cursor) params.set('cursor', cursor);
-      const res = await fetch(`/v1/traces?${params}`, {
+      const res = await fetch(`/v1/portal/traces?${params}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
