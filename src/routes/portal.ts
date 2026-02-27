@@ -137,7 +137,6 @@ export function registerPortalRoutes(fastify: FastifyInstance, pool: pg.Pool): v
       }
 
       const passwordHash = await hashPassword(password);
-      const { rawKey, keyHash, keyPrefix } = generateApiKey();
 
       await pool.query('BEGIN');
       try {
@@ -157,9 +156,10 @@ export function registerPortalRoutes(fastify: FastifyInstance, pool: pg.Pool): v
           `INSERT INTO tenant_memberships (user_id, tenant_id, role) VALUES ($1, $2, 'owner')`,
           [user.id, tenant.id]
         );
+        // Create a Default agent so API keys created later have an agent to reference
         await pool.query(
-          `INSERT INTO api_keys (tenant_id, name, key_prefix, key_hash) VALUES ($1, 'Default', $2, $3)`,
-          [tenant.id, keyPrefix, keyHash]
+          `INSERT INTO agents (tenant_id, name) VALUES ($1, 'Default')`,
+          [tenant.id]
         );
         await pool.query('COMMIT');
 
@@ -168,7 +168,6 @@ export function registerPortalRoutes(fastify: FastifyInstance, pool: pg.Pool): v
           token,
           user: { id: user.id, email: user.email },
           tenant: { id: tenant.id, name: tenant.name },
-          apiKey: rawKey,
         });
       } catch (err) {
         await pool.query('ROLLBACK');
@@ -387,15 +386,27 @@ export function registerPortalRoutes(fastify: FastifyInstance, pool: pg.Pool): v
   });
 
   // ── POST /v1/portal/api-keys ─────────────────────────────────────────────────
-  fastify.post<{ Body: { name: string } }>(
+  fastify.post<{ Body: { name: string; agentId: string } }>(
     '/v1/portal/api-keys',
     { preHandler: ownerRequired },
     async (request, reply) => {
       const { tenantId } = request.portalUser!;
-      const { name } = request.body;
+      const { name, agentId } = request.body;
 
       if (!name || typeof name !== 'string' || name.trim().length === 0) {
         return reply.code(400).send({ error: 'API key name is required' });
+      }
+      if (!agentId || typeof agentId !== 'string') {
+        return reply.code(400).send({ error: 'agentId is required' });
+      }
+
+      // Verify agent belongs to this tenant
+      const agentCheck = await pool.query(
+        'SELECT id FROM agents WHERE id = $1 AND tenant_id = $2',
+        [agentId, tenantId]
+      );
+      if (agentCheck.rows.length === 0) {
+        return reply.code(400).send({ error: 'Invalid agentId' });
       }
 
       const { rawKey, keyHash, keyPrefix } = generateApiKey();
@@ -407,10 +418,10 @@ export function registerPortalRoutes(fastify: FastifyInstance, pool: pg.Pool): v
         status: string;
         created_at: string;
       }>(
-        `INSERT INTO api_keys (tenant_id, name, key_prefix, key_hash)
-         VALUES ($1, $2, $3, $4)
+        `INSERT INTO api_keys (tenant_id, agent_id, name, key_prefix, key_hash)
+         VALUES ($1, $2, $3, $4, $5)
          RETURNING id, name, key_prefix, status, created_at`,
-        [tenantId, name.trim(), keyPrefix, keyHash]
+        [tenantId, agentId, name.trim(), keyPrefix, keyHash]
       );
 
       const row = result.rows[0];
