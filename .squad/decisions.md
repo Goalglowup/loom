@@ -879,3 +879,296 @@ Chart order and expanded state are stored in `localStorage` under key `loom-char
 
 - `shared/analytics/TimeseriesCharts.tsx`
 - `shared/analytics/TimeseriesCharts.css`
+
+---
+
+# Multi-User Multi-Tenant Architecture
+
+**Author:** Keaton (Lead)  
+**Date:** 2026-02-26  
+**Status:** Proposed — awaiting Michael Brown approval  
+**Requested by:** Michael Brown  
+**Scope:** Multiple users per org/tenant via invite links; users can belong to multiple tenants
+
+## 1. Problem Statement
+
+Current model: `tenant_users` table enforces 1:1 user↔tenant (email is `UNIQUE`). A user signs up, creates a tenant, and can never belong to another. Org owners cannot invite collaborators.
+
+**Required:**
+1. Org owner creates invite links → other users sign up or join under that invite
+2. A single user (email) can belong to multiple tenants
+3. Users can switch between their tenants in the portal UI
+
+## 2. Schema Changes
+
+### 2.1 New `users` Table (Auth Identity)
+
+Separates authentication identity from tenant membership. Email is the unique auth key.
+
+```sql
+CREATE TABLE users (
+  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  email         VARCHAR(255) NOT NULL UNIQUE,
+  password_hash VARCHAR(255) NOT NULL,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  last_login    TIMESTAMPTZ
+);
+
+CREATE INDEX idx_users_email ON users (email);
+```
+
+### 2.2 New `tenant_memberships` Junction Table
+
+Replaces the 1:1 `tenant_users` table. One user can have multiple memberships.
+
+```sql
+CREATE TABLE tenant_memberships (
+  id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id    UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  tenant_id  UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  role       VARCHAR(50) NOT NULL DEFAULT 'member',
+  joined_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE(user_id, tenant_id)
+);
+
+CREATE INDEX idx_tenant_memberships_user_id   ON tenant_memberships (user_id);
+CREATE INDEX idx_tenant_memberships_tenant_id ON tenant_memberships (tenant_id);
+```
+
+**Roles:** `owner` | `member`
+- **owner:** manage invites, manage members, manage settings, manage API keys, view traces/analytics
+- **member:** view traces/analytics (read-only)
+
+This maps cleanly to the existing `ownerRequired` vs `authRequired` preHandler pattern in portal routes.
+
+### 2.3 New `invites` Table
+
+```sql
+CREATE TABLE invites (
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id   UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  token       VARCHAR(64) NOT NULL UNIQUE,
+  created_by  UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  max_uses    INTEGER,          -- NULL = unlimited
+  use_count   INTEGER NOT NULL DEFAULT 0,
+  expires_at  TIMESTAMPTZ NOT NULL,
+  revoked_at  TIMESTAMPTZ,      -- NULL = active; set = revoked
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_invites_token     ON invites (token);
+CREATE INDEX idx_invites_tenant_id ON invites (tenant_id);
+```
+
+**Invite token format:** 32 bytes, base64url-encoded (43 chars). Generated via `crypto.randomBytes(32).toString('base64url')`.
+
+**Invite link URL:** `{PORTAL_BASE_URL}/signup?invite={token}`
+
+### 2.4 Drop `tenant_users` Table
+
+The old `tenant_users` table is fully replaced by `users` + `tenant_memberships`. Data migrated before drop.
+
+## 3. JWT Strategy
+
+### Decision: Keep `tenantId` in JWT, Switch via New Token
+
+**Current JWT payload:** `{ sub: userId, tenantId: string, role: string }`  
+**New JWT payload:** `{ sub: userId, tenantId: string, role: string }` — **identical structure**
+
+**Rationale:** Every existing portal route reads `request.portalUser.tenantId` from the JWT. Keeping `tenantId` in the JWT means zero changes to middleware and zero changes to any existing route handler. The multi-tenant capability is additive.
+
+**How switching works:**
+1. Login returns `tenants[]` alongside the JWT (JWT issued for the first/default tenant)
+2. Frontend stores the tenants list in memory/state
+3. User clicks a different tenant in the switcher
+4. Frontend calls `POST /v1/portal/auth/switch-tenant { tenantId }` 
+5. Backend validates membership, issues a new JWT with the new `tenantId`
+6. Frontend replaces the stored token and refreshes data
+
+## 4. API Endpoints (15 total)
+
+### Modified Endpoints
+- `POST /v1/portal/auth/signup` — added `inviteToken` branch
+- `POST /v1/portal/auth/login` — returns `tenants[]` array
+- `GET /v1/portal/me` — returns `tenants[]` array
+
+### New Auth Endpoint
+- `POST /v1/portal/auth/switch-tenant` — switch active tenant, get new JWT
+
+### New Invite Endpoints
+- `POST /v1/portal/invites` — create invite (owner only)
+- `GET /v1/portal/invites` — list invites (owner only)
+- `DELETE /v1/portal/invites/:id` — revoke invite (owner only)
+- `GET /v1/portal/invites/:token/info` — public, no auth
+
+### New Member Management Endpoints
+- `GET /v1/portal/members` — list members (any role)
+- `PATCH /v1/portal/members/:userId` — update role (owner only)
+- `DELETE /v1/portal/members/:userId` — remove member (owner only)
+
+### New Tenant List / Leave Endpoints
+- `GET /v1/portal/tenants` — list user's tenants
+- `POST /v1/portal/tenants/:tenantId/leave` — leave tenant
+
+## 5. Frontend Changes
+
+### TenantSwitcher Component (Sidebar)
+- Dropdown showing current tenant (or static text if only 1)
+- List of all tenants from `tenants[]`
+- Click triggers `POST /v1/portal/auth/switch-tenant`
+
+### Updated Signup Flow
+- Route: `/signup?invite={token}`
+- Call `GET /v1/portal/invites/:token/info` to display tenant name
+- Show "Join {tenantName}" form instead of org creation form
+- Submit with `inviteToken` branch
+
+### Members & Invites Page (`/app/members`)
+- Members list with role badges, joined date, last login
+- Invite management (create, list with use counts, revoke)
+- Owner-only actions (role change, member removal)
+
+### AuthContext
+- Unified state: `token`, `user`, `tenant`, `tenants[]`, `loading`
+- `useAuth()` hook for all components
+- Handles `switchTenant()` action
+
+### Navigation Updates
+- Add Members link (owner-only visibility)
+- Keep existing API Keys link
+
+## 6. Migration Strategy
+
+Single migration `1000000000011_multi_tenant_users.cjs`:
+1. Create `users` table from `tenant_users` data
+2. Create `tenant_memberships` junction table from `tenant_users` relationships
+3. Create `invites` table (starts empty)
+4. Drop `tenant_users` table
+
+Data preserved: all existing users remain owners of their current tenant.
+
+## 7. Risks & Mitigations
+
+| Risk | Impact | Mitigation |
+|------|--------|------------|
+| Migration data loss on rollback | Users with multiple memberships lose all but first | Document as known limitation; take DB backup |
+| JWT tenantId stale after removal | User removed but JWT still valid | JWT has 24h expiry; membership check on sensitive ops |
+| Invite token brute force | Attacker guesses tokens | 32-byte random = 256-bit entropy; rate limit deferred to Phase 2 |
+| Last-owner removal race condition | Two owners demote each other simultaneously | Use `SELECT ... FOR UPDATE` deferred to Phase 2 |
+
+## 8. Phase 2 Deferred
+
+- Email notifications for invites
+- Invite role customization
+- Tenant creation limits per user
+- Transfer tenant ownership
+- User profile management (change email, change password)
+- Rate limiting on invite endpoints
+- Audit logging for membership changes
+- Last-owner race condition fix
+
+---
+
+# Multi-User Multi-Tenant: Backend Implementation Decisions
+
+**Author:** Fenster (Backend Dev)  
+**Date:** 2026-02-26
+
+## Decision 1: `inviteToken` branch silently ignores `tenantName`
+
+**Context:** The spec says "When inviteToken is present, tenantName is ignored." The body type was widened to make `tenantName` optional.
+
+**Decision:** No error is returned if `tenantName` is supplied alongside `inviteToken`. It is simply unused. This is the least-friction path for frontend clients that might always send all fields.
+
+## Decision 2: Existing user joining via invite does NOT re-hash password
+
+**Context:** When an existing user joins a second tenant via invite (email already exists in `users`), the invite flow skips password hashing entirely.
+
+**Decision:** The existing user's credentials are untouched. The signup-via-invite path for existing users is essentially "add membership to my existing account." The password field in that case is superfluous.
+
+## Decision 3: Login returns 403 (not 401) for zero active memberships
+
+**Context:** A user could exist in `users` with no active tenant memberships (e.g., all tenants deleted).
+
+**Decision:** Return 403 with `{ error: 'No active tenant memberships' }`. Authentication succeeded; the user simply has no accessible tenants. This is an authorization failure, not authentication.
+
+## Decision 4: `PORTAL_BASE_URL` declared inside `registerPortalRoutes`
+
+**Context:** The spec calls for `PORTAL_BASE_URL` from env, defaulting to `http://localhost:3000`.
+
+**Decision:** Read `process.env.PORTAL_BASE_URL` inside the function body. This ensures the value is captured after `.env` file loading and allows test overrides without module re-imports.
+
+## Decision 5: Soft-revoke only for invites
+
+**Context:** Spec says `DELETE /v1/portal/invites/:id` sets `revoked_at = now()`.
+
+**Decision:** Implemented exactly as spec. Hard-delete was not used because preserving revoked invites maintains an audit trail. The `isActive` computed field correctly reflects revoked status.
+
+## Decision 6: `GET /v1/portal/invites/:token/info` — 404 for unknown, `isValid: false` for expired
+
+**Context:** Spec says "Always returns `isValid: false` (not 404) for expired/revoked/exhausted tokens — prevents token enumeration."
+
+**Decision:** Unknown token → 404. Known token but invalid (expired/revoked/exhausted/tenant inactive) → 200 with `isValid: false`.
+
+## Decision 7: No `SELECT ... FOR UPDATE` on last-owner checks
+
+**Context:** Spec notes a risk of race condition on last-owner count check.
+
+**Decision:** Deferred to Phase 2 per spec. Missing FOR UPDATE means concurrent requests could both read "2 owners" and both proceed to demote, leaving zero owners. Acceptable for initial release.
+
+## Decision 8: Migration preserves `tenant_users.id` as `users.id`
+
+**Context:** Audit reveals no other tables reference `tenant_users.id`.
+
+**Decision:** IDs are preserved verbatim in migration INSERT. Any existing JWTs (which embed `userId` = old `tenant_users.id`) remain valid immediately after migration without token refresh.
+
+---
+
+# Multi-User Multi-Tenant: Frontend Implementation Decisions
+
+**Author:** McManus (Frontend Dev)  
+**Date:** 2026-02-26
+
+## Decision 1: AuthContext as Single Source of Auth Truth
+
+**Context:** Previously, each page component individually called `api.me()` on mount. Tenant switching requires replacing the token and refreshing state app-wide.
+
+**Decision:** Created `portal/src/context/AuthContext.tsx` wrapping the entire app. All components use `useAuth()` hook. AuthContext owns: `token`, `user`, `tenant`, `tenants[]`, `loading`.
+
+**Rationale:** Tenant switching needs to propagate instantly to all components. A context is the minimal correct solution.
+
+## Decision 2: `currentRole` Derivation Strategy
+
+**Context:** Role lives in JWT but also in `tenants[]` list returned from login/me.
+
+**Decision:** `currentRole` is derived as:
+```ts
+tenants.find(t => t.id === tenant?.id)?.role ?? user?.role ?? null
+```
+Falls back to `user.role` for backward compatibility.
+
+## Decision 3: Members Nav Link — Hide vs. Gate
+
+**Choice:** Hide the Members nav link entirely for non-owners (not show disabled).
+
+**Rationale:** Members without the link visible won't try to navigate there. The page itself still gates API. Consistent with how API Keys work.
+
+## Decision 4: Invite Signup → Redirect to `/app/traces`
+
+**Per spec:** On successful invite-based signup, navigate to `/app/traces` (not API key reveal, since members don't get keys).
+
+**Implementation:** API `signup` response `apiKey` made optional (`apiKey?`).
+
+## Decision 5: Tenant Switcher — No Page Reload
+
+**Decision:** `switchTenant()` calls `POST /v1/portal/auth/switch-tenant`, replaces token, then calls `api.me()` to refresh context. No `window.location.reload()`.
+
+**Rationale:** In-place state update is smoother UX. Any component subscribed to context will re-render automatically.
+
+**Known limitation:** Pages that fetched data on mount will show stale data until navigation/refresh. Acceptable for Phase 1.
+
+## Decision 6: Revoked Invites — Collapsed `<details>`
+
+**Decision:** Revoked/expired invites shown in collapsed `<details>` element below active invites table.
+
+**Rationale:** Keeps page clean. Owners rarely need historical revoked invites. No new dependencies.

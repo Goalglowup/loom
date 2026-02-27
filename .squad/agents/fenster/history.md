@@ -619,3 +619,33 @@ if (tenantId) {
 - Rate limiting on `/v1/portal/invites/:token/info` (noted in spec as Phase 2)
 - `SELECT ... FOR UPDATE` on last-owner count check (race condition mitigation, noted in spec risks)
 - Email notifications for invite creation (Phase 2)
+
+---
+
+## 2026-02-27: Multi-User Multi-Tenant Backend Implementation
+
+**Status:** Complete, 13 endpoints + migration implemented
+
+**Scope:** Backend implementation of multi-user multi-tenant architecture per Keaton's spec.
+
+**Deliverables:**
+- Migration `1000000000011_multi_tenant_users.cjs` (users, tenant_memberships, invites tables + data migration)
+- 13 API endpoints:
+  - Auth: signup (invite branch), login, switch-tenant, /me
+  - Invites: create, list, revoke, public info
+  - Members: list, update role, remove
+  - Tenants: list, leave
+
+**Key Decisions Recorded:**
+- inviteToken branch silently ignores tenantName (no-friction for client)
+- Existing user joining via invite does NOT re-hash password
+- Login returns 403 for zero active memberships (authorization failure, not auth)
+- PORTAL_BASE_URL read at runtime (allows test overrides)
+- Soft-revoke only for invites (audit trail)
+- Unknown token → 404, expired/revoked/exhausted → 200 isValid:false
+- No FOR UPDATE on last-owner checks (Phase 2 deferred)
+- Migration preserves tenant_users.id as users.id (JWT compatibility)
+
+**Decision Log:** `.squad/decisions.md` (fenster-multi-user-impl.md merged)
+
+**Next:** Awaiting frontend integration & Hockney tests

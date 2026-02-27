@@ -687,3 +687,31 @@ Used `adminMode?: boolean` prop pattern instead of passing full URLs/header fact
 - Members nav link hidden entirely for non-owners (not just gated on the page) — cleaner UX. Page still shows permission error if navigated directly.
 - Clipboard copy uses `navigator.clipboard` with `execCommand` fallback for older browser support.
 - Build: ✅ TypeScript clean, ✅ Vite production build succeeds
+
+---
+
+## 2026-02-27: Multi-User Multi-Tenant Frontend Implementation
+
+**Status:** Complete, AuthContext + TenantSwitcher + MembersPage + SignupPage updates
+
+**Scope:** Frontend implementation of multi-user multi-tenant capabilities per Keaton's spec.
+
+**Deliverables:**
+- AuthContext.tsx: unified auth state (token, user, tenant, tenants[], loading, switchTenant action)
+- TenantSwitcher component (sidebar dropdown, no page reload)
+- MembersPage (/app/members): members list, invite creation/management (owner-only), revoked invites collapsed
+- Updated SignupPage: invite token detection, public invite info fetch, conditional form layout
+- portal/src/lib/api.ts: new methods (switchTenant, invites CRUD, members CRUD, tenants list/leave)
+- Navigation: Members link (owner-only visibility)
+
+**Key Decisions Recorded:**
+- AuthContext as single source of auth truth (enables instant tenant switching app-wide)
+- currentRole derived from tenants[] lookup, fallback to user.role
+- Members nav link hidden for non-owners (not disabled, cleaner UX)
+- Invite signup redirects to /app/traces (no API key reveal for members)
+- Tenant switching in-place (no page reload), known limitation: stale data on invite-based signup
+- Revoked invites in collapsed <details> element (clean page, native HTML)
+
+**Decision Log:** `.squad/decisions.md` (mcmanus-multi-user-frontend.md merged)
+
+**Next:** Awaiting Hockney tests & Michael Brown UAT

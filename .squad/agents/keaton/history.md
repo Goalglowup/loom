@@ -319,3 +319,23 @@ Each issue includes:
 - Migration rollback is lossy for users with multiple memberships (known limitation)
 
 **Design doc:** `.squad/decisions/inbox/keaton-multi-user-tenant-arch.md`
+
+---
+
+## 2026-02-27: Multi-User Multi-Tenant Architecture (Approved, Implemented)
+
+**Status:** Spec complete, backend & frontend implemented, awaiting testing
+
+**Scope:** Designed comprehensive architecture for multiple users per tenant, tenant invites, and tenant switching.
+
+**Deliverable:** `.squad/decisions.md` merged from inbox (keaton-multi-user-tenant-arch.md)
+
+**Implementation Status:**
+- Backend (Fenster): 13 endpoints + migration ✓
+- Frontend (McManus): AuthContext, TenantSwitcher, MembersPage, SignupPage updates ✓
+- Testing (Hockney): Awaiting test suite execution
+
+**Critical Path Completed:** F-MU1 (migration) → F-MU3, F-MU4 (auth) → M-MU2, M-MU6 (switcher + state)
+
+**Deferred to Phase 2:**
+- Email notifications, invite role customization, tenant transfer, user profile mgmt, rate limiting, audit logging, last-owner race condition fix
