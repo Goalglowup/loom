@@ -9,6 +9,16 @@ interface Message {
   usage?: { total_tokens: number };
 }
 
+const COMMON_MODELS = [
+  'gpt-4o-mini',
+  'gpt-4o',
+  'gpt-4-turbo',
+  'gpt-3.5-turbo',
+  'claude-3-5-sonnet-latest',
+  'claude-3-haiku-20240307',
+  'ollama/llama3',
+];
+
 interface AgentSandboxProps {
   agent: Agent;
   onClose?: () => void;
@@ -19,8 +29,13 @@ export default function AgentSandbox({ agent, onClose }: AgentSandboxProps) {
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [model, setModel] = useState('gpt-4o-mini');
+  const [customModel, setCustomModel] = useState('');
+  const [useCustom, setUseCustom] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const token = getToken()!;
+
+  const activeModel = useCustom ? customModel.trim() || 'gpt-4o-mini' : model;
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -40,7 +55,7 @@ export default function AgentSandbox({ agent, onClose }: AgentSandboxProps) {
     setError('');
 
     try {
-      const res = await api.sandboxChat(token, agent.id, next.map(m => ({ role: m.role, content: m.content })));
+      const res = await api.sandboxChat(token, agent.id, next.map(m => ({ role: m.role, content: m.content })), activeModel);
       setMessages(prev => [
         ...prev,
         { role: 'assistant', content: res.message.content, usage: res.usage },
@@ -62,14 +77,42 @@ export default function AgentSandbox({ agent, onClose }: AgentSandboxProps) {
   return (
     <div className="bg-gray-900 border border-gray-700 rounded-xl overflow-hidden">
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-gray-700">
-        <span className="text-sm font-semibold text-gray-100">
+      <div className="flex items-center justify-between px-4 py-3 border-b border-gray-700 gap-3 flex-wrap">
+        <span className="text-sm font-semibold text-gray-100 shrink-0">
           Sandbox — <span className="text-indigo-400">{agent.name}</span>
         </span>
+        <div className="flex items-center gap-2 flex-1 min-w-0 justify-end">
+          {useCustom ? (
+            <input
+              type="text"
+              value={customModel}
+              onChange={e => setCustomModel(e.target.value)}
+              placeholder="e.g. gpt-4o"
+              className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-200 focus:outline-none focus:border-indigo-500 w-40"
+            />
+          ) : (
+            <select
+              value={model}
+              onChange={e => setModel(e.target.value)}
+              className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-200 focus:outline-none focus:border-indigo-500"
+            >
+              {COMMON_MODELS.map(m => (
+                <option key={m} value={m}>{m}</option>
+              ))}
+            </select>
+          )}
+          <button
+            onClick={() => setUseCustom(v => !v)}
+            className="text-xs text-gray-500 hover:text-gray-300 transition-colors shrink-0"
+            title={useCustom ? 'Pick from list' : 'Enter custom model'}
+          >
+            {useCustom ? '← list' : 'custom'}
+          </button>
+        </div>
         {onClose && (
           <button
             onClick={onClose}
-            className="text-gray-500 hover:text-gray-300 text-sm transition-colors"
+            className="text-gray-500 hover:text-gray-300 text-sm transition-colors shrink-0"
             aria-label="Close sandbox"
           >
             ✕
