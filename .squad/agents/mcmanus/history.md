@@ -793,3 +793,23 @@ Used `adminMode?: boolean` prop pattern instead of passing full URLs/header fact
 - **Component remount strategy:** Changing key prop forces React remount, which is cleaner than patching internal state in a shared component
 - **Scope selector:** Rollup toggle is natural UX; remount ensures clean fetch without complex internal state patching
 
+
+### Sandbox Chat Panel (AgentSandbox)
+- Added `sandboxChat` to `portal/src/lib/api.ts` — POSTs to `/v1/portal/agents/:id/chat`
+- Created `portal/src/components/AgentSandbox.tsx`: self-contained chat panel with scrollable message list, user/assistant bubble layout, thinking indicator, error display, token usage readout, and empty state
+- Updated `portal/src/pages/AgentsPage.tsx`: added `SandboxState` type, `sandbox` state, "Test" button per agent row, and `<AgentSandbox>` rendered below agents table
+- Test/Edit/Delete buttons are mutually exclusive (all disabled when editor or sandbox is open)
+- Conversation history is accumulated across turns within a session; closing the panel resets it
+
+### 2026-02-27: Agent Sandbox Chat Panel
+
+**Decision:** Sandbox and editor panels are mutually exclusive; no model selector exposed in Phase 1.
+
+- Implemented `AgentSandbox.tsx` component: dark-themed chat panel with conversation history
+- Multi-turn chat: accumulates messages, sends full array on each request
+- Token usage displayed per message
+- Loading indicator and error banner
+- Integrates with backend `POST /v1/portal/agents/:id/chat` endpoint
+- Panel rendered below agents table (not replacing editor) for clear spatial separation
+- Edit/Test buttons are mutually exclusive — opening one disables the other
+- If model picker is needed, deferred to follow-up work (Fenster/Keaton can define spec)

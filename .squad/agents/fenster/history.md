@@ -775,3 +775,19 @@ if (tenantId) {
 - **Transaction boundaries:** Wrap multi-step creates (subtenant + membership) in explicit transaction to prevent orphaned rows
 - **API key enforcement:** DB-level NOT NULL on api_keys.agent_id prevents orphaned keys; seeded Default agent enables safe migration without full backfill
 
+- **Portal sandbox chat endpoint re-uses resolved CTE logic**: `POST /v1/portal/agents/:id/chat` duplicates the tenant hierarchy walk from the `/resolved` endpoint to build a full `TenantContext`. This keeps each route self-contained and avoids introducing a shared helper that crosses auth/portal boundaries. The `getProviderForTenant` registry handles API key decryption transparently (same as gateway).
+- **stream: false must be set explicitly in sandbox body**: `applyAgentToRequest` passes through the body as-is; callers must set `stream: false` before calling it to prevent the provider from returning an SSE stream that would be mishandled in the portal sandbox context.
+- **TenantContext.name comes from first tenant chain row**: For portal-constructed contexts, `tenantChain[0]?.name` (the agent's immediate tenant) is the right value for the `name` field, falling back to `tenant_id` if the chain is somehow empty.
+
+### 2026-02-27: Agent Sandbox Chat Endpoint
+
+**Implemented:** `POST /v1/portal/agents/:id/chat`  
+**Decision:** No trace recording — sandbox chats are developer testing, not production traffic.
+
+- Resolves agent hierarchy (agent → tenant → parent chain) into `TenantContext`
+- Applies system prompt + skills via `applyAgentToRequest()` with `stream: false`
+- Calls provider non-streaming
+- Returns `{ message, model, usage }`
+- Portal auth gated (JWT, not API key) so safe from production gateway confusion
+- Errors: 400 (invalid request), 404 (agent not found), 502 (provider error)
+- Future trace recording of sandbox calls requires explicit `sandbox: true` flag in schema (Phase 2)

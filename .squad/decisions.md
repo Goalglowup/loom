@@ -1,5 +1,33 @@
 # Team Decisions
 
+## 2026-02-27: Portal Sandbox Chat Endpoint — No Trace Recording
+
+**By:** Fenster (Backend)  
+**What:** `POST /v1/portal/agents/:id/chat` is a sandbox endpoint that calls the upstream provider directly without recording a trace.  
+**Why:** Sandbox chats are developer testing sessions, not production traffic. Recording them would pollute tenant analytics and inflate token cost estimates. The endpoint is portal-auth gated (JWT, not API key) so it cannot be confused with production gateway traffic.  
+**Impact:** Sandbox calls are fire-and-forget from a telemetry standpoint. If trace recording for sandbox calls is needed in future, add an explicit `sandbox: true` flag to the trace schema first.  
+**Alternatives Considered:** Recording with a `sandbox` flag (deferred — schema change needed); recording to a separate table (overkill for Phase 1).
+
+## 2026-02-27: Agent Sandbox Chat Panel
+
+**Date:** 2026-02-27  
+**Author:** McManus (Frontend Dev)
+
+### Context
+
+Users need a way to interactively test an agent immediately after defining it (or from the agents list) without leaving the portal.
+
+### Decision
+
+- Added a `AgentSandbox` component that renders as a panel below the agents table when "Test" is clicked.
+- The sandbox accumulates conversation history within a session (multi-turn chat), sending the full `messages` array on each request to match the backend contract.
+- Sandbox and editor panels are mutually exclusive — opening one disables the other's entry points and vice versa, keeping the UI unambiguous.
+- No model selector exposed in the UI for now; `model` param is left undefined (server picks the default). If Fenster or Keaton want a model picker, that's a follow-up.
+
+### Rationale
+
+Keeping the sandbox below the table (rather than replacing the editor area) avoids conflating editing and testing flows and gives users a clear spatial separation between the two concerns.
+
 ## 2026-02-27: Subtenant Hierarchy with Self-Foreign Key
 
 **By:** Fenster (Backend)  
