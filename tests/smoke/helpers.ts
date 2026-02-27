@@ -1,162 +1,163 @@
-import { Builder, By, WebDriver, WebElement, until } from 'selenium-webdriver';
-import chrome from 'selenium-webdriver/chrome.js';
+import { chromium, Browser, BrowserContext, Page } from 'playwright';
+import { mkdirSync, writeFileSync } from 'fs';
+import { join } from 'path';
 
 // ---------------------------------------------------------------------------
-// Config (override via env vars)
+// Config
 // ---------------------------------------------------------------------------
-// Use LOOM_BASE_URL to avoid collision with Vite's built-in BASE_URL env var
 export const BASE_URL = process.env['LOOM_BASE_URL'] ?? 'http://localhost:3000';
 export const ADMIN_USERNAME = process.env.ADMIN_USERNAME ?? 'admin';
 export const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD ?? 'changeme';
 export const HEADLESS = process.env.HEADLESS !== 'false';
+export const DOCS_MODE = process.env.DOCS_MODE === 'true';
 
 // ---------------------------------------------------------------------------
-// Driver factory
+// Browser/page lifecycle
 // ---------------------------------------------------------------------------
-export function buildDriver(): WebDriver {
-  const options = new chrome.Options();
-  if (HEADLESS) {
-    options.addArguments('--headless=new', '--disable-gpu');
-  }
-  options.addArguments(
-    '--no-sandbox',
-    '--disable-dev-shm-usage',
-    '--window-size=1280,900',
+export async function launchBrowser(): Promise<Browser> {
+  return chromium.launch({ headless: HEADLESS });
+}
+
+export async function newPage(browser: Browser): Promise<Page> {
+  const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+  return context.newPage();
+}
+
+// ---------------------------------------------------------------------------
+// Screenshot helper for docs
+// ---------------------------------------------------------------------------
+const SCREENSHOTS_DIR = join(process.cwd(), 'docs', 'screenshots');
+
+export async function screenshotIfDocsMode(
+  page: Page,
+  name: string,
+  caption: string,
+  section: string = 'General'
+): Promise<void> {
+  if (!DOCS_MODE) return;
+  mkdirSync(SCREENSHOTS_DIR, { recursive: true });
+  await page.screenshot({ path: join(SCREENSHOTS_DIR, `${name}.png`), fullPage: false });
+  writeFileSync(
+    join(SCREENSHOTS_DIR, `${name}.json`),
+    JSON.stringify({ caption, section, name, timestamp: new Date().toISOString() }, null, 2)
   );
-  return new Builder().forBrowser('chrome').setChromeOptions(options).build();
 }
 
 // ---------------------------------------------------------------------------
 // Wait helpers
 // ---------------------------------------------------------------------------
-export async function waitForUrl(driver: WebDriver, pattern: RegExp, timeout = 10000) {
-  await driver.wait(async () => {
-    const url = await driver.getCurrentUrl();
-    return pattern.test(url);
-  }, timeout, `URL did not match ${pattern} within ${timeout}ms`);
+export async function waitForUrl(page: Page, pattern: RegExp, timeout = 10000) {
+  await page.waitForURL(pattern, { timeout });
 }
 
-export async function waitForText(
-  driver: WebDriver,
-  locator: ReturnType<typeof By.css>,
-  text: string,
-  timeout = 10000,
-): Promise<WebElement> {
-  return driver.wait(until.elementTextContains(driver.findElement(locator), text), timeout);
+export async function waitForVisible(page: Page, selector: string, timeout = 10000) {
+  await page.locator(selector).waitFor({ state: 'visible', timeout });
 }
 
-export async function waitForElement(
-  driver: WebDriver,
-  locator: ReturnType<typeof By.css>,
-  timeout = 10000,
-): Promise<WebElement> {
-  return driver.wait(until.elementLocated(locator), timeout);
+export async function waitForElement(page: Page, selector: string, timeout = 10000) {
+  await page.locator(selector).waitFor({ state: 'attached', timeout });
 }
 
-export async function waitForVisible(
-  driver: WebDriver,
-  locator: ReturnType<typeof By.css>,
-  timeout = 10000,
-): Promise<WebElement> {
-  const el = await waitForElement(driver, locator, timeout);
-  await driver.wait(until.elementIsVisible(el), timeout);
-  return el;
+export async function waitForText(page: Page, selector: string, text: string, timeout = 10000) {
+  await page.locator(selector).filter({ hasText: text }).waitFor({ state: 'visible', timeout });
 }
 
 // ---------------------------------------------------------------------------
 // Login helpers
 // ---------------------------------------------------------------------------
-
-/** Log in to the admin dashboard. Navigates to /dashboard/admin and submits credentials. */
-export async function adminLogin(driver: WebDriver): Promise<void> {
-  await driver.get(`${BASE_URL}/dashboard/admin`);
-  const userField = await waitForVisible(driver, By.css('input[type="text"][placeholder="Username"], input[aria-label="Username"]'));
-  await userField.sendKeys(ADMIN_USERNAME);
-  const passField = await driver.findElement(By.css('input[type="password"]'));
-  await passField.sendKeys(ADMIN_PASSWORD);
-  const submitBtn = await driver.findElement(By.css('button[type="submit"]'));
-  await submitBtn.click();
-  // Wait for the admin panel to appear (login overlay disappears)
-  await waitForElement(driver, By.css('.admin-page, .admin-header, button.admin-logout-btn'));
-  await driver.sleep(500); // let React settle
+export async function adminLogin(page: Page) {
+  await page.goto(`${BASE_URL}/admin`);
+  await page.locator('input[name="username"], input[placeholder*="username" i], input[type="text"]').first().fill(ADMIN_USERNAME);
+  await page.locator('input[type="password"]').fill(ADMIN_PASSWORD);
+  await page.locator('button[type="submit"]').click();
+  await waitForUrl(page, /\/admin\/dashboard|\/admin\/traces/);
 }
 
-/** Log in to the tenant portal. Returns the JWT token stored in localStorage. */
-export async function portalLogin(
-  driver: WebDriver,
-  email: string,
-  password: string,
-): Promise<void> {
-  await driver.get(`${BASE_URL}/login`);
-  const emailField = await waitForVisible(driver, By.css('input[type="email"]'));
-  await emailField.sendKeys(email);
-  const passField = await driver.findElement(By.css('input[type="password"]'));
-  await passField.sendKeys(password);
-  await passField.submit();
-  await waitForUrl(driver, /\/app/);
-  await driver.sleep(500);
+export async function portalLogin(page: Page, email: string, password: string): Promise<void> {
+  await page.goto(`${BASE_URL}/login`);
+  await page.locator('input[type="email"]').fill(email);
+  await page.locator('input[type="password"]').fill(password);
+  await page.locator('button[type="submit"]').click();
+  await waitForUrl(page, /\/dashboard|\/traces|\/analytics|\/app/);
 }
 
-/** Sign up a new tenant on the portal. Returns the created email/password. */
 export async function portalSignup(
-  driver: WebDriver,
+  page: Page,
+  opts: { email: string; password: string; tenantName?: string }
+): Promise<void>;
+export async function portalSignup(
+  page: Page,
   email: string,
   password: string,
-  tenantName: string,
+  tenantName?: string
+): Promise<void>;
+export async function portalSignup(
+  page: Page,
+  emailOrOpts: string | { email: string; password: string; tenantName?: string },
+  password?: string,
+  tenantName?: string
 ): Promise<void> {
-  await driver.get(`${BASE_URL}/signup`);
-  await waitForVisible(driver, By.css('input[type="email"]'));
+  let email: string;
+  let pass: string;
+  let name: string | undefined;
 
-  // Fill org name field first (it appears before email in the DOM)
-  try {
-    const nameField = await driver.findElement(
-      By.css('input[type="text"], input[placeholder*="Acme" i], input[placeholder*="corp" i], input[placeholder*="company" i], input[placeholder*="organization" i]'),
-    );
-    await nameField.sendKeys(tenantName);
-  } catch {
-    // Field may not exist — tenant name auto-derived from email domain
+  if (typeof emailOrOpts === 'string') {
+    email = emailOrOpts;
+    pass = password!;
+    name = tenantName;
+  } else {
+    email = emailOrOpts.email;
+    pass = emailOrOpts.password;
+    name = emailOrOpts.tenantName;
   }
 
-  await driver.findElement(By.css('input[type="email"]')).sendKeys(email);
-  await driver.findElement(By.css('input[type="password"]')).sendKeys(password);
+  await page.goto(`${BASE_URL}/signup`);
+  if (name) {
+    const nameInput = page.locator('input[name="tenantName"], input[placeholder*="org" i], input[placeholder*="company" i], input[placeholder*="tenant" i], input[placeholder*="Acme" i], input[placeholder*="corp" i], input[placeholder*="organization" i]').first();
+    const count = await nameInput.count();
+    if (count > 0) await nameInput.fill(name);
+  }
+  await page.locator('input[type="email"]').fill(email);
+  await page.locator('input[type="password"]').fill(pass);
+  await page.locator('button[type="submit"]').click();
 
-  const submitBtn = await driver.findElement(By.css('button[type="submit"]'));
-  await submitBtn.click();
+  // Handle API key reveal modal if present, then redirect to /app
+  await page.waitForFunction(
+    () => {
+      const url = window.location.href;
+      if (url.includes('/app')) return true;
+      const btns = Array.from(document.querySelectorAll('button'));
+      return btns.some(b => b.textContent?.includes('saved'));
+    },
+    { timeout: 15000 }
+  );
 
-  // After signup the API may return an API key which shows a modal before redirecting.
-  // Wait for either the dismiss button or the /app URL.
-  await driver.wait(async () => {
-    const url = await driver.getCurrentUrl();
-    if (url.includes('/app')) return true;
-    const btns = await driver.findElements(By.xpath("//button[contains(., 'saved')]"));
-    return btns.length > 0;
-  }, 15000, 'Signup did not redirect or show API key modal');
-
-  // Click the dismiss button if it's showing the API key reveal modal
-  const dismissBtns = await driver.findElements(By.xpath("//button[contains(., 'saved')]"));
-  if (dismissBtns.length > 0) {
-    await dismissBtns[0].click();
+  const dismissBtns = page.locator('button:has-text("saved")');
+  const dismissCount = await dismissBtns.count();
+  if (dismissCount > 0) {
+    await dismissBtns.first().click();
   }
 
-  await waitForUrl(driver, /\/app/);
-  await driver.sleep(500);
+  await waitForUrl(page, /\/app/);
 }
 
-/** Accept an invite link by navigating to it and completing signup. */
 export async function acceptInvite(
-  driver: WebDriver,
+  page: Page,
   inviteUrl: string,
   email: string,
-  password: string,
+  password: string
 ): Promise<void> {
-  await driver.get(inviteUrl);
-  await waitForVisible(driver, By.css('input[type="email"]'));
-  await driver.findElement(By.css('input[type="email"]')).sendKeys(email);
-  await driver.findElement(By.css('input[type="password"]')).sendKeys(password);
-  const submitBtn = await driver.findElement(By.css('button[type="submit"]'));
-  await submitBtn.click();
-  await waitForUrl(driver, /\/app/);
-  await driver.sleep(500);
+  await page.goto(inviteUrl);
+  await page.locator('input[type="email"]').fill(email);
+  await page.locator('input[type="password"]').fill(password);
+  await page.locator('button[type="submit"]').click();
+  await waitForUrl(page, /\/app/);
+}
+
+export async function portalLogout(page: Page) {
+  const logoutBtn = page.locator('button:has-text("Logout"), button:has-text("Sign out"), a:has-text("Logout"), a:has-text("Sign out")').first();
+  await logoutBtn.click();
+  await waitForUrl(page, /\/login|\/$/);
 }
 
 // ---------------------------------------------------------------------------

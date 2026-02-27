@@ -12,96 +12,85 @@
  */
 
 import { describe, it, beforeAll, afterAll, expect } from 'vitest';
-import { By } from 'selenium-webdriver';
+import type { Browser, Page } from 'playwright';
 import {
-  buildDriver,
+  launchBrowser,
+  newPage,
   adminLogin,
   waitForVisible,
-  waitForUrl,
+  screenshotIfDocsMode,
   BASE_URL,
 } from './helpers.js';
-import type { WebDriver } from 'selenium-webdriver';
 
 describe('Admin Dashboard smoke tests', () => {
-  let driver: WebDriver;
+  let browser: Browser;
+  let page: Page;
 
   beforeAll(async () => {
-    driver = buildDriver();
+    browser = await launchBrowser();
+    page = await newPage(browser);
   });
 
   afterAll(async () => {
-    await driver.quit();
+    await browser.close();
   });
 
   // -------------------------------------------------------------------------
   it('admin login → lands on dashboard', async () => {
-    await adminLogin(driver);
-    const url = await driver.getCurrentUrl();
-    expect(url).toMatch(/\/dashboard/);
+    await adminLogin(page);
+    await screenshotIfDocsMode(page, 'admin-login', 'Admin dashboard after login', 'Authentication');
+    const url = page.url();
+    expect(url).toMatch(/\/admin/);
   });
 
   // -------------------------------------------------------------------------
   it('traces list renders with table', async () => {
-    await driver.get(`${BASE_URL}/dashboard`);
-    // The default dashboard route shows traces — wait for a table or list element
-    const tableOrList = await waitForVisible(
-      driver,
-      By.css('table, [data-testid="traces-list"], .traces-table, .trace-row'),
-      15000,
-    );
-    expect(tableOrList).toBeTruthy();
+    await page.goto(`${BASE_URL}/dashboard`);
+    await waitForVisible(page, 'table, [data-testid="traces-list"], .traces-table, .trace-row', 15000);
+    await screenshotIfDocsMode(page, 'admin-traces', 'Admin traces list', 'Traces');
+    const el = page.locator('table, [data-testid="traces-list"], .traces-table, .trace-row').first();
+    expect(await el.count()).toBeGreaterThan(0);
   });
 
   // -------------------------------------------------------------------------
   it('analytics page renders with charts', async () => {
-    await driver.get(`${BASE_URL}/dashboard/analytics`);
-    // Recharts renders SVG elements — wait for at least one
-    const chart = await waitForVisible(
-      driver,
-      By.css('.recharts-wrapper, svg.recharts-surface, [data-testid="chart"]'),
-      15000,
-    );
-    expect(chart).toBeTruthy();
+    await page.goto(`${BASE_URL}/dashboard/analytics`);
+    await waitForVisible(page, '.recharts-wrapper, svg.recharts-surface, [data-testid="chart"]', 15000);
+    await screenshotIfDocsMode(page, 'admin-analytics', 'Admin analytics charts', 'Analytics');
+    const chart = page.locator('.recharts-wrapper, svg.recharts-surface, [data-testid="chart"]').first();
+    expect(await chart.count()).toBeGreaterThan(0);
   });
 
   // -------------------------------------------------------------------------
   it('analytics summary cards visible', async () => {
-    await driver.get(`${BASE_URL}/dashboard/analytics`);
-    // Summary section contains metric cards
-    const cards = await driver.findElements(
-      By.css('.summary-card, [data-testid="summary-card"], .metric-card'),
-    );
-    // Fallback: any element containing "Requests" text
-    if (cards.length === 0) {
-      const page = await driver.getPageSource();
-      expect(page).toMatch(/Requests|Total Requests/i);
+    await page.goto(`${BASE_URL}/dashboard/analytics`);
+    const cards = page.locator('.summary-card, [data-testid="summary-card"], .metric-card');
+    const count = await cards.count();
+    if (count === 0) {
+      const content = await page.content();
+      expect(content).toMatch(/Requests|Total Requests/i);
     } else {
-      expect(cards.length).toBeGreaterThan(0);
+      expect(count).toBeGreaterThan(0);
     }
   });
 
   // -------------------------------------------------------------------------
   it('admin page renders tenant list', async () => {
-    await driver.get(`${BASE_URL}/dashboard/admin`);
-    // Admin page has tenant management — wait for tenant list or create button
-    const tenantSection = await waitForVisible(
-      driver,
-      By.css(
-        '[data-testid="tenant-list"], .tenant-row, table, button[data-testid="create-tenant"], button',
-      ),
+    await page.goto(`${BASE_URL}/dashboard/admin`);
+    await waitForVisible(
+      page,
+      '[data-testid="tenant-list"], .tenant-row, table, button[data-testid="create-tenant"], button',
       15000,
     );
-    expect(tenantSection).toBeTruthy();
+    const el = page.locator('[data-testid="tenant-list"], .tenant-row, table, button').first();
+    expect(await el.count()).toBeGreaterThan(0);
   });
 
   // -------------------------------------------------------------------------
   it('tenant selector dropdown present on analytics page', async () => {
-    await driver.get(`${BASE_URL}/dashboard/analytics`);
-    const selector = await waitForVisible(
-      driver,
-      By.css('select, [data-testid="tenant-selector"], .tenant-select'),
-      15000,
-    );
-    expect(selector).toBeTruthy();
+    await page.goto(`${BASE_URL}/dashboard/analytics`);
+    await waitForVisible(page, 'select, [data-testid="tenant-selector"], .tenant-select', 15000);
+    const selector = page.locator('select, [data-testid="tenant-selector"], .tenant-select').first();
+    expect(await selector.count()).toBeGreaterThan(0);
   });
 });

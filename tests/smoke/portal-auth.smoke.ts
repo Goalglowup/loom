@@ -12,115 +12,110 @@
  */
 
 import { describe, it, beforeAll, afterAll, expect } from 'vitest';
-import { By } from 'selenium-webdriver';
+import type { Browser, Page } from 'playwright';
 import {
-  buildDriver,
+  launchBrowser,
+  newPage,
   portalSignup,
   portalLogin,
   waitForUrl,
   waitForVisible,
+  screenshotIfDocsMode,
   uniqueEmail,
   uniqueName,
   BASE_URL,
 } from './helpers.js';
-import type { WebDriver } from 'selenium-webdriver';
 
 describe('Portal auth smoke tests', () => {
-  let driver: WebDriver;
+  let browser: Browser;
+  let page: Page;
 
-  // Shared credentials created during signup test, reused for login test
   const email = uniqueEmail('smoke-auth');
   const password = 'SmokeTest1!';
   const tenantName = uniqueName('SmokeOrg');
 
   beforeAll(async () => {
-    driver = buildDriver();
+    browser = await launchBrowser();
+    page = await newPage(browser);
   });
 
   afterAll(async () => {
-    await driver.quit();
+    await browser.close();
   });
 
   // -------------------------------------------------------------------------
   it('signup page loads', async () => {
-    await driver.get(`${BASE_URL}/signup`);
-    const emailField = await waitForVisible(driver, By.css('input[type="email"]'));
-    expect(emailField).toBeTruthy();
+    await page.goto(`${BASE_URL}/signup`);
+    await waitForVisible(page, 'input[type="email"]');
+    const field = page.locator('input[type="email"]');
+    expect(await field.count()).toBeGreaterThan(0);
   });
 
   // -------------------------------------------------------------------------
   it('new user can sign up and lands on /app', async () => {
-    await portalSignup(driver, email, password, tenantName);
-    const url = await driver.getCurrentUrl();
+    await portalSignup(page, email, password, tenantName);
+    await screenshotIfDocsMode(page, 'portal-signup-success', 'Portal after signup', 'Authentication');
+    const url = page.url();
     expect(url).toMatch(/\/app/);
   });
 
   // -------------------------------------------------------------------------
   it('authenticated page shows user/tenant info', async () => {
-    // Should already be on /app after signup — just verify we're in the app
-    const url = await driver.getCurrentUrl();
+    const url = page.url();
     expect(url).toMatch(/\/app/);
-    // Page should not show a login form
-    const loginForms = await driver.findElements(By.css('form input[type="email"]'));
-    expect(loginForms).toHaveLength(0);
+    const loginForms = page.locator('form input[type="email"]');
+    expect(await loginForms.count()).toBe(0);
   });
 
   // -------------------------------------------------------------------------
   it('user can log out', async () => {
-    // Look for a logout button/link
-    const logoutBtn = await waitForVisible(
-      driver,
-      By.css('[data-testid="logout"], button[aria-label*="logout" i], a[href*="logout"], button'),
-      10000,
-    );
-    // Try clicking the first element that might be logout — fall back to navigating directly
     try {
-      // Attempt to find a specific logout element
-      const specific = await driver.findElement(
-        By.xpath('//*[contains(text(), "Logout") or contains(text(), "Sign out") or contains(text(), "Log out")]'),
-      );
-      await specific.click();
-      await waitForUrl(driver, /\/(login|$)/, 8000);
+      const logoutEl = page.locator(':text("Logout"), :text("Sign out"), :text("Log out")').first();
+      const count = await logoutEl.count();
+      if (count > 0) {
+        await logoutEl.click();
+        await waitForUrl(page, /\/(login|$)/, 8000);
+      } else {
+        throw new Error('no logout element');
+      }
     } catch {
-      // If we can't find logout button by text, navigate to login directly
-      // (logout via clearing storage is acceptable for smoke purposes)
-      await driver.executeScript('localStorage.clear(); sessionStorage.clear();');
-      await driver.get(`${BASE_URL}/login`);
+      await page.evaluate(() => { localStorage.clear(); sessionStorage.clear(); });
+      await page.goto(`${BASE_URL}/login`);
     }
 
-    const url = await driver.getCurrentUrl();
+    const url = page.url();
     expect(url).toMatch(/\/(login|signup|$)/);
   });
 
   // -------------------------------------------------------------------------
   it('login page renders', async () => {
-    await driver.get(`${BASE_URL}/login`);
-    const emailField = await waitForVisible(driver, By.css('input[type="email"]'));
-    expect(emailField).toBeTruthy();
+    await page.goto(`${BASE_URL}/login`);
+    await waitForVisible(page, 'input[type="email"]');
+    const field = page.locator('input[type="email"]');
+    expect(await field.count()).toBeGreaterThan(0);
   });
 
   // -------------------------------------------------------------------------
   it('valid credentials → lands on /app', async () => {
-    await portalLogin(driver, email, password);
-    const url = await driver.getCurrentUrl();
+    await portalLogin(page, email, password);
+    await screenshotIfDocsMode(page, 'portal-login-success', 'Portal after login', 'Authentication');
+    const url = page.url();
     expect(url).toMatch(/\/app/);
   });
 
   // -------------------------------------------------------------------------
   it('invalid credentials show an error', async () => {
-    await driver.get(`${BASE_URL}/login`);
-    await waitForVisible(driver, By.css('input[type="email"]'));
-    await driver.findElement(By.css('input[type="email"]')).sendKeys('nobody@test.loom.local');
-    await driver.findElement(By.css('input[type="password"]')).sendKeys('wrongpassword');
-    await driver.findElement(By.css('button[type="submit"]')).click();
+    await page.goto(`${BASE_URL}/login`);
+    await waitForVisible(page, 'input[type="email"]');
+    await page.locator('input[type="email"]').fill('nobody@test.loom.local');
+    await page.locator('input[type="password"]').fill('wrongpassword');
+    await page.locator('button[type="submit"]').click();
 
-    // Should NOT navigate to /app
-    await driver.sleep(2000);
-    const url = await driver.getCurrentUrl();
+    await page.waitForTimeout(2000);
+    const url = page.url();
     expect(url).not.toMatch(/\/app/);
 
-    // Should show an error message
-    const page = await driver.getPageSource();
-    expect(page).toMatch(/invalid|incorrect|wrong|error|not found/i);
+    const content = await page.content();
+    expect(content).toMatch(/invalid|incorrect|wrong|error|not found/i);
   });
 });

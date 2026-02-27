@@ -13,142 +13,122 @@
  */
 
 import { describe, it, beforeAll, afterAll, expect } from 'vitest';
-import { By } from 'selenium-webdriver';
+import type { Browser, Page } from 'playwright';
 import {
-  buildDriver,
+  launchBrowser,
+  newPage,
   portalSignup,
   waitForVisible,
-  waitForUrl,
-  waitForText,
+  screenshotIfDocsMode,
   uniqueEmail,
   uniqueName,
   BASE_URL,
 } from './helpers.js';
-import type { WebDriver } from 'selenium-webdriver';
 
 describe('Portal app smoke tests', () => {
-  let driver: WebDriver;
+  let browser: Browser;
+  let page: Page;
 
   const email = uniqueEmail('smoke-app');
   const password = 'SmokeTest1!';
 
   beforeAll(async () => {
-    driver = buildDriver();
-    // Sign up a fresh tenant for this test suite
-    await portalSignup(driver, email, password, uniqueName('AppOrg'));
+    browser = await launchBrowser();
+    page = await newPage(browser);
+    await portalSignup(page, email, password, uniqueName('AppOrg'));
   });
 
   afterAll(async () => {
-    await driver.quit();
+    await browser.close();
   });
 
   // -------------------------------------------------------------------------
   it('traces page renders', async () => {
-    await driver.get(`${BASE_URL}/app/traces`);
-    // Page loads — check for traces heading or empty state
-    await waitForVisible(driver, By.css('body'), 5000);
-    const page = await driver.getPageSource();
-    expect(page).toMatch(/trace|request|No traces/i);
+    await page.goto(`${BASE_URL}/app/traces`);
+    await waitForVisible(page, 'body', 5000);
+    await screenshotIfDocsMode(page, 'portal-traces', 'Portal traces page', 'Traces');
+    const content = await page.content();
+    expect(content).toMatch(/trace|request|No traces/i);
   });
 
   // -------------------------------------------------------------------------
   it('analytics page renders summary cards', async () => {
-    await driver.get(`${BASE_URL}/app/analytics`);
-    // Wait for a card or any heading-like element
-    await waitForVisible(driver, By.css('body'), 5000);
-    const page = await driver.getPageSource();
-    expect(page).toMatch(/Requests|Tokens|Latency|Analytics/i);
+    await page.goto(`${BASE_URL}/app/analytics`);
+    await waitForVisible(page, 'body', 5000);
+    await screenshotIfDocsMode(page, 'portal-analytics', 'Portal analytics page', 'Analytics');
+    const content = await page.content();
+    expect(content).toMatch(/Requests|Tokens|Latency|Analytics/i);
   });
 
   // -------------------------------------------------------------------------
   it('analytics page renders charts', async () => {
-    await driver.get(`${BASE_URL}/app/analytics`);
-    const chart = await waitForVisible(
-      driver,
-      By.css('.recharts-wrapper, svg.recharts-surface, [data-testid="chart"]'),
-      20000,
-    );
-    expect(chart).toBeTruthy();
+    await page.goto(`${BASE_URL}/app/analytics`);
+    await waitForVisible(page, '.recharts-wrapper, svg.recharts-surface, [data-testid="chart"]', 20000);
+    const chart = page.locator('.recharts-wrapper, svg.recharts-surface, [data-testid="chart"]').first();
+    expect(await chart.count()).toBeGreaterThan(0);
   });
 
   // -------------------------------------------------------------------------
   it('API keys page renders', async () => {
-    await driver.get(`${BASE_URL}/app/api-keys`);
-    await waitForVisible(driver, By.css('body'), 5000);
-    const page = await driver.getPageSource();
-    expect(page).toMatch(/API Key|api.key|Create|Generate/i);
+    await page.goto(`${BASE_URL}/app/api-keys`);
+    await waitForVisible(page, 'body', 5000);
+    await screenshotIfDocsMode(page, 'portal-api-keys', 'Portal API keys page', 'API Keys');
+    const content = await page.content();
+    expect(content).toMatch(/API Key|api.key|Create|Generate/i);
   });
 
   // -------------------------------------------------------------------------
   it('API key can be created', async () => {
-    await driver.get(`${BASE_URL}/app/api-keys`);
+    await page.goto(`${BASE_URL}/app/api-keys`);
 
-    // Click the "+ New key" button to open the creation form
-    const newKeyBtn = await waitForVisible(
-      driver,
-      By.xpath('//*[contains(text(), "New key")]'),
-      10000,
-    );
-    await newKeyBtn.click();
+    // Click the "+ New key" button
+    await page.locator(':text("New key")').first().click();
 
-    // Wait for the agent select to appear — confirms agents have loaded.
-    // A Default agent is seeded at signup so it will be pre-selected.
-    await waitForVisible(driver, By.css('select[required]'), 8000);
+    // Wait for agent select (confirms agents loaded)
+    await waitForVisible(page, 'select[required]', 8000);
 
-    // Fill in a key name (input placeholder: "Key name (e.g. production)")
-    const keyNameInput = await waitForVisible(
-      driver,
-      By.css('input[placeholder*="production" i]'),
-      5000,
-    );
-    await keyNameInput.sendKeys('smoke-test-key');
+    // Fill key name
+    await page.locator('input[placeholder*="production" i]').fill('smoke-test-key');
 
-    // Submit — agent is already pre-selected; just click Create
-    const submitBtn = await driver.findElement(
-      By.xpath('//button[@type="submit"][contains(., "Create")]'),
-    );
-    await submitBtn.click();
+    // Submit
+    await page.locator('button[type="submit"]:has-text("Create")').click();
 
-    // Wait for reveal modal or key entry to appear
-    await driver.sleep(2000);
-    const page = await driver.getPageSource();
-    // API keys typically start with "sk-" or "loom_"
-    expect(page).toMatch(/sk-|loom_|key|Key/i);
+    await page.waitForTimeout(2000);
+    const content = await page.content();
+    expect(content).toMatch(/sk-|loom_|key|Key/i);
   });
 
   // -------------------------------------------------------------------------
   it('settings page renders provider config form', async () => {
-    await driver.get(`${BASE_URL}/app/settings`);
-    await waitForVisible(driver, By.css('body'), 5000);
-    const page = await driver.getPageSource();
-    expect(page).toMatch(/provider|OpenAI|Azure|Ollama|API/i);
+    await page.goto(`${BASE_URL}/app/settings`);
+    await waitForVisible(page, 'body', 5000);
+    await screenshotIfDocsMode(page, 'portal-settings', 'Portal settings page', 'Settings');
+    const content = await page.content();
+    expect(content).toMatch(/provider|OpenAI|Azure|Ollama|API/i);
   });
 
   // -------------------------------------------------------------------------
   it('settings form has provider selection', async () => {
-    await driver.get(`${BASE_URL}/app/settings`);
-    const providerInput = await waitForVisible(
-      driver,
-      By.css('select, input[name*="provider" i], [data-testid="provider-select"]'),
-      10000,
-    );
-    expect(providerInput).toBeTruthy();
+    await page.goto(`${BASE_URL}/app/settings`);
+    await waitForVisible(page, 'select, input[name*="provider" i], [data-testid="provider-select"]', 10000);
+    const providerInput = page.locator('select, input[name*="provider" i], [data-testid="provider-select"]').first();
+    expect(await providerInput.count()).toBeGreaterThan(0);
   });
 
   // -------------------------------------------------------------------------
   it('members page renders', async () => {
-    await driver.get(`${BASE_URL}/app/members`);
-    await waitForVisible(driver, By.css('body'), 5000);
-    const page = await driver.getPageSource();
-    expect(page).toMatch(/Members?|Team|Invite/i);
+    await page.goto(`${BASE_URL}/app/members`);
+    await waitForVisible(page, 'body', 5000);
+    await screenshotIfDocsMode(page, 'portal-members', 'Portal members page', 'Members');
+    const content = await page.content();
+    expect(content).toMatch(/Members?|Team|Invite/i);
   });
 
   // -------------------------------------------------------------------------
   it('members page shows current user', async () => {
-    await driver.get(`${BASE_URL}/app/members`);
-    await driver.sleep(2000);
-    const page = await driver.getPageSource();
-    // The signed-up email should appear in the member list
-    expect(page).toMatch(new RegExp(email.replace(/[+.]/g, '\\$&'), 'i'));
+    await page.goto(`${BASE_URL}/app/members`);
+    await page.waitForTimeout(2000);
+    const content = await page.content();
+    expect(content).toMatch(new RegExp(email.replace(/[+.]/g, '\\$&'), 'i'));
   });
 });

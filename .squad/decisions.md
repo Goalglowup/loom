@@ -1,5 +1,44 @@
 # Team Decisions
 
+## 2026-02-27T22:00:36Z: Migrate Smoke Tests from Selenium to Playwright
+
+**Date:** 2026-02-27  
+**Author:** Hockney (Tester)  
+**Status:** Implemented
+
+### Decision
+
+Replace `selenium-webdriver` + `chromedriver` with `playwright` (Chromium) in all smoke tests. Keep Vitest as the test runner.
+
+### Rationale
+
+- Playwright has superior auto-waiting, reducing flaky explicit waits
+- Playwright's `page.locator()` API is more composable and readable
+- Chromium managed via `npx playwright install chromium` (no npm package version pinning needed)
+- Single `Browser` / `Page` object per test suite is simpler than WebDriver builder pattern
+
+### What Changed
+
+- `devDependencies`: removed `selenium-webdriver`, `chromedriver`; added `playwright`
+- `tests/smoke/helpers.ts`: fully rewritten with Playwright API
+- All 6 smoke test files rewritten (Vitest `describe`/`it` structure unchanged)
+- Added `docs:screenshots`, `docs:generate`, `docs:build` npm scripts
+- Added `scripts/generate-ui-docs.ts` for automated UI docs from screenshots
+- Added `docs/` directory
+
+### Constraints Respected
+
+- Vitest remains the test runner (`vitest.smoke.config.ts` unchanged)
+- `singleFork` serial execution preserved
+- All existing test scenarios and assertions preserved
+- `playwright` in `devDependencies` only (not `dependencies`)
+
+### Notes for Future Test Authors
+
+- Use `page.locator(':text("Button Label")')` for text-based selectors (replaces XPath `contains(text(), ...)`)
+- `screenshotIfDocsMode(page, name, caption, section)` is async — always `await` it
+- Run `npx playwright install chromium` after `npm install` in fresh environments
+
 ## 2026-02-27T21:45:09Z: Enable Trace Recording for Sandbox Chat Endpoint
 
 **By:** Fenster (Backend Dev)  

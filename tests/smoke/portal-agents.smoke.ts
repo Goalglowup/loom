@@ -14,20 +14,21 @@
  */
 
 import { describe, it, beforeAll, afterAll, expect } from 'vitest';
-import { By } from 'selenium-webdriver';
+import type { Browser, Page } from 'playwright';
 import {
-  buildDriver,
+  launchBrowser,
+  newPage,
   portalSignup,
   waitForVisible,
-  waitForElement,
+  screenshotIfDocsMode,
   uniqueEmail,
   uniqueName,
   BASE_URL,
 } from './helpers.js';
-import type { WebDriver } from 'selenium-webdriver';
 
 describe('Portal agents smoke tests', () => {
-  let driver: WebDriver;
+  let browser: Browser;
+  let page: Page;
 
   const email = uniqueEmail('smoke-agents');
   const password = 'SmokeTest1!';
@@ -36,102 +37,79 @@ describe('Portal agents smoke tests', () => {
   let subtenantName: string;
 
   beforeAll(async () => {
-    driver = buildDriver();
+    browser = await launchBrowser();
+    page = await newPage(browser);
     agentName = uniqueName('TestAgent');
     subtenantName = uniqueName('TestSubtenant');
-    await portalSignup(driver, email, password, uniqueName('AgentsOrg'));
+    await portalSignup(page, email, password, uniqueName('AgentsOrg'));
   });
 
   afterAll(async () => {
-    await driver.quit();
+    await browser.close();
   });
 
   // -------------------------------------------------------------------------
   it('owner can navigate to Agents page', async () => {
-    await driver.get(`${BASE_URL}/app/agents`);
-    await waitForVisible(driver, By.css('body'), 5000);
-    const page = await driver.getPageSource();
-    expect(page).toMatch(/Agents?/i);
+    await page.goto(`${BASE_URL}/app/agents`);
+    await waitForVisible(page, 'body', 5000);
+    await screenshotIfDocsMode(page, 'portal-agents', 'Portal agents page', 'Agents');
+    const content = await page.content();
+    expect(content).toMatch(/Agents?/i);
   });
 
   // -------------------------------------------------------------------------
   it('owner can create an agent', async () => {
-    await driver.get(`${BASE_URL}/app/agents`);
+    await page.goto(`${BASE_URL}/app/agents`);
 
-    // Click the "+ New Agent" button to open the editor panel
-    const newAgentBtn = await waitForVisible(
-      driver,
-      By.xpath('//*[contains(text(), "New Agent")]'),
-      10000,
-    );
-    await newAgentBtn.click();
+    // Click "+ New Agent"
+    await page.locator(':text("New Agent")').first().click();
 
-    // Wait for the AgentEditor form — name input has placeholder "e.g. customer-support-agent"
-    const nameInput = await waitForVisible(
-      driver,
-      By.css('input[placeholder*="customer-support" i]'),
-      8000,
-    );
-    await nameInput.sendKeys(agentName);
+    // Fill name input
+    await waitForVisible(page, 'input[placeholder*="customer-support" i]', 8000);
+    await screenshotIfDocsMode(page, 'portal-agent-editor', 'Agent editor form', 'Agents');
+    await page.locator('input[placeholder*="customer-support" i]').fill(agentName);
 
-    // Submit — button text is "Create agent" in create mode
-    const saveBtn = await driver.findElement(
-      By.xpath('//button[@type="submit"][contains(., "Create agent")]'),
-    );
-    await saveBtn.click();
+    // Submit
+    await page.locator('button[type="submit"]:has-text("Create agent")').click();
 
-    // Wait for the editor panel to close and agent to appear in table
-    await driver.sleep(2000);
+    await page.waitForTimeout(2000);
+    await screenshotIfDocsMode(page, 'portal-agent-created', 'Agent created in list', 'Agents');
   });
 
   // -------------------------------------------------------------------------
   it('agent appears in the agents list', async () => {
-    // Still on /app/agents after creation; table should reflect the new agent
-    const page = await driver.getPageSource();
-    expect(page).toMatch(new RegExp(agentName, 'i'));
+    const content = await page.content();
+    expect(content).toMatch(new RegExp(agentName, 'i'));
   });
 
   // -------------------------------------------------------------------------
   it('owner can navigate to Subtenants page', async () => {
-    await driver.get(`${BASE_URL}/app/subtenants`);
-    await waitForVisible(driver, By.css('body'), 5000);
-    const page = await driver.getPageSource();
-    expect(page).toMatch(/Subtenants?/i);
+    await page.goto(`${BASE_URL}/app/subtenants`);
+    await waitForVisible(page, 'body', 5000);
+    const content = await page.content();
+    expect(content).toMatch(/Subtenants?/i);
   });
 
   // -------------------------------------------------------------------------
   it('owner can create a subtenant', async () => {
-    await driver.get(`${BASE_URL}/app/subtenants`);
+    await page.goto(`${BASE_URL}/app/subtenants`);
 
-    // Click the "+ Create Subtenant" button to reveal the form
-    const createBtn = await waitForVisible(
-      driver,
-      By.xpath('//*[contains(text(), "Create Subtenant")]'),
-      10000,
-    );
-    await createBtn.click();
+    // Click "+ Create Subtenant"
+    await page.locator(':text("Create Subtenant")').first().click();
 
-    // Fill in the subtenant name — placeholder is "e.g. Engineering Team"
-    const nameInput = await waitForVisible(
-      driver,
-      By.css('input[placeholder*="Engineering" i]'),
-      8000,
-    );
-    await nameInput.sendKeys(subtenantName);
+    // Fill name input
+    await waitForVisible(page, 'input[placeholder*="Engineering" i]', 8000);
+    await page.locator('input[placeholder*="Engineering" i]').fill(subtenantName);
 
     // Submit
-    const submitBtn = await driver.findElement(
-      By.xpath('//button[@type="submit"][contains(., "Create")]'),
-    );
-    await submitBtn.click();
+    await page.locator('button[type="submit"]:has-text("Create")').click();
 
-    await driver.sleep(2000);
+    await page.waitForTimeout(2000);
   });
 
   // -------------------------------------------------------------------------
   it('subtenant appears in the list', async () => {
-    // Still on /app/subtenants after creation; table should reflect the new subtenant
-    const page = await driver.getPageSource();
-    expect(page).toMatch(new RegExp(subtenantName, 'i'));
+    const content = await page.content();
+    expect(content).toMatch(new RegExp(subtenantName, 'i'));
   });
 });

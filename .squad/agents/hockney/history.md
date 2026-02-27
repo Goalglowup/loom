@@ -213,3 +213,40 @@
 - Test patterns established for future admin features (RBAC, audit logging, usage limits)
 - Cache invalidation testing methodology proven; can extend to other entities
 - Integration test infrastructure handles complex mocking scenarios (encryption, status transitions)
+
+## Learnings
+
+### 2026-XX-XX: Playwright Migration (Selenium → Playwright)
+
+**Changes made:**
+- Removed `selenium-webdriver` and `chromedriver` from devDependencies; added `playwright` (not `@playwright/test` — kept Vitest as runner)
+- Rewrote `tests/smoke/helpers.ts` entirely: `chromium.launch()` + `browser.newContext()` + `context.newPage()` replace `Builder().forBrowser('chrome').build()`
+- Rewrote all 6 smoke test files (`admin`, `portal-auth`, `portal-app`, `portal-agents`, `portal-tenant`, `portal-invite`) replacing all Selenium patterns with Playwright equivalents
+- Added `screenshotIfDocsMode()` helper that captures screenshots + JSON metadata only when `DOCS_MODE=true`
+- Created `scripts/generate-ui-docs.ts` — reads JSON metadata from `docs/screenshots/` and assembles `docs/ui-reference.md`
+- Added `docs:screenshots`, `docs:generate`, `docs:build` npm scripts
+- Created `docs/` directory with `.gitkeep`
+- Updated `tests/smoke/README.md` to document Playwright setup and docs generation
+
+**Key Translation Patterns:**
+- `driver = buildDriver()` → `browser = await launchBrowser(); page = await newPage(browser)`
+- `driver.quit()` → `await browser.close()`
+- `driver.get(url)` → `page.goto(url)`
+- `driver.findElement(By.css(sel)).click()` → `page.locator(sel).click()`
+- `driver.findElement(By.css(sel)).sendKeys(text)` → `page.locator(sel).fill(text)`
+- `driver.wait(until.elementLocated(...))` → removed (Playwright auto-waits)
+- `driver.getCurrentUrl()` → `page.url()`
+- `driver.getPageSource()` → `page.content()`
+- `driver.executeScript('localStorage.clear()')` → `page.evaluate(() => { localStorage.clear(); })`
+- `driver.sleep(ms)` → `page.waitForTimeout(ms)`
+- `By.xpath('//*[contains(text(), "X")]')` → `page.locator(':text("X")')`
+- `element.getAttribute('value')` → `locator.getAttribute('value')`
+- `driver.findElements(By.css(sel)).length` → `page.locator(sel).count()`
+
+**portalSignup overload:** Added function overloads so existing callers using `(page, email, password, tenantName)` positional signature still work alongside the new object-based `{ email, password, tenantName }` signature from the spec.
+
+**acceptInvite kept in helpers:** `portal-tenant.smoke.ts` and `portal-invite.smoke.ts` both import `acceptInvite`. Added Playwright version alongside the other login helpers.
+
+**DOCS_MODE pipeline:** `screenshotIfDocsMode` is gated by `DOCS_MODE=true` env var — zero overhead in normal test runs. Screenshots saved as PNG + JSON metadata sidecar. `generate-ui-docs.ts` groups by section and emits Markdown with relative image paths.
+
+**Build:** `npm run build` (tsc) passes cleanly. Smoke test files type-check without errors.
