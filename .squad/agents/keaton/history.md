@@ -292,3 +292,30 @@ Each issue includes:
 - SPA fallback ordering (must not catch `/v1/*` 404s as HTML)
 - Email uniqueness = one user per tenant (simple now, junction table refactor if multi-tenant-per-user needed later)
 - Rate limiting on signup/login deferred but noted as TODO
+
+### Multi-User Multi-Tenant Architecture (2026-02-26)
+
+**Request:** Michael Brown asked for multiple users per org/tenant via invite links, and users belonging to multiple tenants.
+
+**Key Architecture Decisions:**
+
+1. **Separate identity from membership:** Split `tenant_users` into `users` (auth identity, email UNIQUE) + `tenant_memberships` (junction table, UNIQUE(user_id, tenant_id)). This is the junction table refactor noted as a future possibility in the portal architecture.
+
+2. **Keep tenantId in JWT:** Existing JWT payload `{ sub, tenantId, role }` stays identical. This means zero changes to `portalAuth.ts` middleware and zero changes to any existing route handler. Multi-tenant switching works by issuing a new JWT via `POST /v1/portal/auth/switch-tenant`.
+
+3. **Invite token model:** New `invites` table with 256-bit random tokens, optional max_uses, configurable expiry (default 7 days), soft revocation. Invite URL format: `{PORTAL_BASE_URL}/signup?invite={token}`.
+
+4. **Two roles only:** `owner` (full access) and `member` (read-only traces/analytics). Maps to existing `ownerRequired` vs `authRequired` preHandler pattern.
+
+5. **Signup dual-path:** `POST /v1/portal/auth/signup` accepts optional `inviteToken`. Without invite: existing flow (creates tenant + user + API key). With invite: creates/links user, adds membership as `member`, no API key generated.
+
+6. **Migration strategy:** Single migration (1000000000011) creates `users` + `tenant_memberships` tables, migrates data from `tenant_users`, creates `invites` table, drops `tenant_users`. Existing users preserve their IDs and become owners of their current tenant.
+
+**Work Breakdown:** 7 backend (Fenster), 6 frontend (McManus), 5 testing (Hockney). 4 execution waves. Critical path: F-MU1 → F-MU3+F-MU4 → M-MU2+M-MU6.
+
+**Risk Notes:**
+- JWT tenantId can go stale after member removal (24h expiry window) — mitigated by membership checks on sensitive operations
+- Last-owner race condition on concurrent demotion — requires SELECT FOR UPDATE
+- Migration rollback is lossy for users with multiple memberships (known limitation)
+
+**Design doc:** `.squad/decisions/inbox/keaton-multi-user-tenant-arch.md`
