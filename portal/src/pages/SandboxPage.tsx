@@ -52,8 +52,8 @@ export default function SandboxPage() {
                 }`}
               >
                 <p className="font-medium text-sm">{agent.name}</p>
-                {agent.description && (
-                  <p className="text-xs mt-0.5 opacity-70 truncate">{agent.description}</p>
+                {agent.systemPrompt && (
+                  <p className="text-xs mt-0.5 opacity-70 truncate">{agent.systemPrompt}</p>
                 )}
               </button>
             ))}
