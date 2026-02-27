@@ -3,6 +3,7 @@ import { api } from '../lib/api';
 import type { Agent } from '../lib/api';
 import { getToken } from '../lib/auth';
 import AgentEditor from '../components/AgentEditor';
+import AgentSandbox from '../components/AgentSandbox';
 
 function truncate(str: string | null | undefined, len: number): string {
   if (!str) return '—';
@@ -14,11 +15,16 @@ type EditorState =
   | { mode: 'create' }
   | { mode: 'edit'; agent: Agent };
 
+type SandboxState =
+  | { mode: 'closed' }
+  | { mode: 'open'; agent: Agent };
+
 export default function AgentsPage() {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [editor, setEditor] = useState<EditorState>({ mode: 'closed' });
+  const [sandbox, setSandbox] = useState<SandboxState>({ mode: 'closed' });
   const [deleting, setDeleting] = useState<Record<string, boolean>>({});
 
   const token = getToken()!;
@@ -63,6 +69,7 @@ export default function AgentsPage() {
   }
 
   const isEditorOpen = editor.mode !== 'closed';
+  const isSandboxOpen = sandbox.mode !== 'closed';
 
   return (
     <div className="p-8 max-w-5xl space-y-6">
@@ -136,15 +143,22 @@ export default function AgentsPage() {
                   <td className="px-4 py-3 text-gray-400">{agent.mcpEndpoints?.length ?? 0}</td>
                   <td className="px-4 py-3 flex gap-3">
                     <button
+                      onClick={() => { setSandbox({ mode: 'open', agent }); }}
+                      disabled={isEditorOpen || isSandboxOpen}
+                      className="text-xs text-emerald-400 hover:text-emerald-300 disabled:opacity-40 transition-colors"
+                    >
+                      Test
+                    </button>
+                    <button
                       onClick={() => setEditor({ mode: 'edit', agent })}
-                      disabled={isEditorOpen}
+                      disabled={isEditorOpen || isSandboxOpen}
                       className="text-xs text-indigo-400 hover:text-indigo-300 disabled:opacity-40 transition-colors"
                     >
                       Edit
                     </button>
                     <button
                       onClick={() => handleDelete(agent.id)}
-                      disabled={deleting[agent.id] || isEditorOpen}
+                      disabled={deleting[agent.id] || isEditorOpen || isSandboxOpen}
                       className="text-xs text-red-500 hover:text-red-400 disabled:opacity-40 transition-colors"
                     >
                       {deleting[agent.id] ? 'Deleting…' : 'Delete'}
@@ -156,6 +170,14 @@ export default function AgentsPage() {
           </table>
         </div>
       ) : null}
+
+      {/* Sandbox panel */}
+      {isSandboxOpen && sandbox.mode === 'open' && (
+        <AgentSandbox
+          agent={sandbox.agent}
+          onClose={() => setSandbox({ mode: 'closed' })}
+        />
+      )}
     </div>
   );
 }

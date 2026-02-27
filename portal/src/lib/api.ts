@@ -52,6 +52,11 @@ export const api = {
   getResolvedAgentConfig: (token: string, id: string) =>
     request<{ resolved: ResolvedAgentConfig }>('GET', `/v1/portal/agents/${id}/resolved`, undefined, token),
 
+  sandboxChat: (token: string, agentId: string, messages: Array<{role: string; content: string}>, model?: string) =>
+    request<{ message: { role: string; content: string }; model: string; usage: { prompt_tokens: number; completion_tokens: number; total_tokens: number } }>(
+      'POST', `/v1/portal/agents/${agentId}/chat`, { messages, model }, token
+    ),
+
 
   signup: (body: { tenantName?: string; email: string; password: string; inviteToken?: string }) =>
     request<{ token: string; user: User; tenant: Tenant; apiKey?: string; tenants?: TenantMembership[] }>('POST', '/v1/portal/auth/signup', body),

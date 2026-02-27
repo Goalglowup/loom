@@ -5,8 +5,10 @@ import pg from 'pg';
 import { createSigner } from 'fast-jwt';
 import { registerPortalAuthMiddleware } from '../middleware/portalAuth.js';
 import { invalidateCachedKey } from '../auth.js';
+import type { TenantContext } from '../auth.js';
 import { encryptTraceBody } from '../encryption.js';
-import { evictProvider } from '../providers/registry.js';
+import { evictProvider, getProviderForTenant } from '../providers/registry.js';
+import { applyAgentToRequest } from '../agent.js';
 import { getAnalyticsSummary, getTimeseriesMetrics, getModelBreakdown } from '../analytics.js';
 import { query } from '../db.js';
 
@@ -1320,6 +1322,158 @@ export function registerPortalRoutes(fastify: FastifyInstance, pool: pg.Pool): v
           inheritanceChain,
         },
       });
+    }
+  );
+
+  // ── POST /v1/portal/agents/:id/chat ──────────────────────────────────────────
+  fastify.post<{ Params: { id: string }; Body: { messages?: unknown[]; model?: string } }>(
+    '/v1/portal/agents/:id/chat',
+    { preHandler: authRequired },
+    async (request, reply) => {
+      const { userId } = request.portalUser!;
+      const { id } = request.params;
+      const body = request.body as { messages?: unknown[]; model?: string };
+
+      if (!body.messages || !Array.isArray(body.messages) || body.messages.length === 0) {
+        return reply.code(400).send({ error: 'messages array is required and must not be empty' });
+      }
+
+      // Fetch agent + verify membership
+      const agentResult = await pool.query<{
+        id: string; name: string; tenant_id: string;
+        provider_config: Record<string, unknown> | null;
+        system_prompt: string | null;
+        skills: unknown[] | null;
+        mcp_endpoints: unknown[] | null;
+        merge_policies: Record<string, unknown>;
+      }>(
+        `SELECT a.id, a.name, a.tenant_id, a.provider_config, a.system_prompt, a.skills, a.mcp_endpoints, a.merge_policies
+         FROM agents a
+         JOIN tenant_memberships tm ON tm.tenant_id = a.tenant_id
+         WHERE a.id = $1 AND tm.user_id = $2`,
+        [id, userId]
+      );
+
+      if (agentResult.rows.length === 0) {
+        return reply.code(404).send({ error: 'Agent not found' });
+      }
+      const agent = agentResult.rows[0];
+
+      // Walk tenant hierarchy upward via recursive CTE
+      const chainResult = await pool.query<{
+        id: string; name: string;
+        provider_config: Record<string, unknown> | null;
+        system_prompt: string | null;
+        skills: unknown[] | null;
+        mcp_endpoints: unknown[] | null;
+        depth: number;
+      }>(
+        `WITH RECURSIVE tenant_chain AS (
+           SELECT id, name, parent_id, provider_config, system_prompt, skills, mcp_endpoints, 0 AS depth
+           FROM tenants WHERE id = $1
+           UNION ALL
+           SELECT t.id, t.name, t.parent_id, t.provider_config, t.system_prompt, t.skills, t.mcp_endpoints, tc.depth + 1
+           FROM tenants t
+           JOIN tenant_chain tc ON t.id = tc.parent_id
+         )
+         SELECT id, name, provider_config, system_prompt, skills, mcp_endpoints, depth
+         FROM tenant_chain ORDER BY depth ASC`,
+        [agent.tenant_id]
+      );
+      const tenantChain = chainResult.rows;
+
+      // Resolve providerConfig: agent first, then tenant chain
+      let resolvedProviderConfig: Record<string, unknown> | null = agent.provider_config ?? null;
+      if (!resolvedProviderConfig) {
+        for (const t of tenantChain) {
+          if (t.provider_config) { resolvedProviderConfig = t.provider_config; break; }
+        }
+      }
+
+      if (!resolvedProviderConfig && !process.env.OPENAI_API_KEY) {
+        return reply.code(400).send({ error: 'Agent has no provider configured' });
+      }
+
+      // Resolve systemPrompt
+      let resolvedSystemPrompt: string | null = agent.system_prompt ?? null;
+      if (!resolvedSystemPrompt) {
+        for (const t of tenantChain) {
+          if (t.system_prompt) { resolvedSystemPrompt = t.system_prompt; break; }
+        }
+      }
+
+      // Resolve skills union
+      const skillsUnion: unknown[] = [];
+      const skillsSeen = new Set<string>();
+      const addSkills = (arr: unknown[] | null) => {
+        if (!arr) return;
+        for (const s of arr) {
+          const key = JSON.stringify(s);
+          if (!skillsSeen.has(key)) { skillsSeen.add(key); skillsUnion.push(s); }
+        }
+      };
+      addSkills(agent.skills);
+      for (const t of tenantChain) addSkills(t.skills);
+
+      // Resolve mcpEndpoints union
+      const endpointsUnion: unknown[] = [];
+      const endpointsSeen = new Set<string>();
+      const addEndpoints = (arr: unknown[] | null) => {
+        if (!arr) return;
+        for (const e of arr) {
+          const key = JSON.stringify(e);
+          if (!endpointsSeen.has(key)) { endpointsSeen.add(key); endpointsUnion.push(e); }
+        }
+      };
+      addEndpoints(agent.mcp_endpoints);
+      for (const t of tenantChain) addEndpoints(t.mcp_endpoints);
+
+      const mergePolicies = (agent.merge_policies as any) ?? { system_prompt: 'prepend', skills: 'merge' };
+
+      const tenantCtx: TenantContext = {
+        tenantId: agent.tenant_id,
+        name: tenantChain[0]?.name ?? agent.tenant_id,
+        agentId: agent.id,
+        providerConfig: resolvedProviderConfig as any,
+        resolvedSystemPrompt: resolvedSystemPrompt ?? undefined,
+        resolvedSkills: skillsUnion.length > 0 ? skillsUnion : undefined,
+        resolvedMcpEndpoints: endpointsUnion.length > 0 ? endpointsUnion : undefined,
+        mergePolicies,
+      };
+
+      const provider = getProviderForTenant(tenantCtx);
+      const model = body.model ?? 'gpt-4o-mini';
+
+      const effectiveBody = applyAgentToRequest(
+        { model, messages: body.messages, stream: false },
+        tenantCtx,
+      );
+
+      try {
+        const response = await provider.proxy({
+          url: '/v1/chat/completions',
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: effectiveBody,
+        });
+
+        if (response.status >= 400) {
+          return reply.code(502).send({ error: 'Provider returned an error', details: response.body });
+        }
+
+        const choice = response.body?.choices?.[0];
+        if (!choice) {
+          return reply.code(502).send({ error: 'Provider returned no choices' });
+        }
+
+        return reply.send({
+          message: choice.message,
+          model: response.body.model ?? model,
+          usage: response.body.usage ?? null,
+        });
+      } catch (err: any) {
+        return reply.code(502).send({ error: 'Provider call failed', details: err?.message ?? String(err) });
+      }
     }
   );
 }
