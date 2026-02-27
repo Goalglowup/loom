@@ -1316,8 +1316,8 @@ export function registerPortalRoutes(fastify: FastifyInstance, pool: pg.Pool): v
         resolved: {
           providerConfig: sanitizeAgentProviderConfig(resolvedProviderConfig),
           systemPrompt: resolvedSystemPrompt,
-          skills: skillsUnion.length > 0 ? skillsUnion : null,
-          mcpEndpoints: endpointsUnion.length > 0 ? endpointsUnion : null,
+          skills: skillsUnion,
+          mcpEndpoints: endpointsUnion,
           mergePolicies: agent.merge_policies,
           inheritanceChain,
         },
