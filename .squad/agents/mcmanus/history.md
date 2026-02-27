@@ -667,3 +667,23 @@ Used `adminMode?: boolean` prop pattern instead of passing full URLs/header fact
 - Used `useRef` for `dragSrcId` (not state) to avoid unnecessary re-renders during drag
 - `chart-block` cards now have `border`, `padding`, `border-radius` — slight visual upgrade for card feel
 - Kept all existing recharts logic untouched; only wrapped in data-driven structure
+
+### Multi-User Multi-Tenant Frontend (2026-02-26)
+
+**Implemented:**
+- `portal/src/context/AuthContext.tsx` — New React context providing `token`, `user`, `tenant`, `tenants[]`, `currentRole`, `setLoginData()`, `switchTenant()`, `logout()`, `refresh()`. Context bootstraps by calling `api.me()` on mount; persists tenants list to localStorage via `loom_portal_tenants` key.
+- `portal/src/lib/auth.ts` — Added `getStoredTenants()`/`setStoredTenants()` helpers; `clearToken()` now also clears tenants.
+- `portal/src/lib/api.ts` — Added `TenantMembership`, `InviteInfo`, `Invite`, `Member` types; new API methods: `switchTenant`, `getInviteInfo`, `listInvites`, `createInvite`, `revokeInvite`, `listMembers`, `updateMemberRole`, `removeMember`. Updated `signup` response to `apiKey?` (optional) and `tenants?`. Updated `login` and `me` responses to include `tenants[]`.
+- `portal/src/components/TenantSwitcher.tsx` — Shows tenant name as static text (1 tenant) or `<select>` dropdown (multiple). Calls `switchTenant()` on change with loading state.
+- `portal/src/components/AppLayout.tsx` — Refactored to use `useAuth()` context (removed local state + `api.me()` call). Added `TenantSwitcher` in sidebar header. Added Members nav link (only shown when `currentRole === 'owner'`).
+- `portal/src/pages/SignupPage.tsx` — Reads `?invite=TOKEN` query param on mount. Fetches `GET /v1/portal/invites/:token/info`. If valid: shows "Join {tenantName}" form (email+password only). If invalid: shows error with link to fresh signup. On submit with token: navigates to `/app/traces` instead of revealing API key.
+- `portal/src/pages/MembersPage.tsx` — New page at `/app/members`. Owner-gated (shows permission error for non-owners). Members table with role dropdown (with last-owner guard), remove button (guarded against self and last owner). Invite management: create form with max uses + expiry selector, generated link with clipboard copy, active invites table with revoke, revoked/expired invites in collapsed `<details>`.
+- `portal/src/App.tsx` — Wrapped in `<AuthProvider>`. Added `/app/members` route.
+- `portal/src/pages/LoginPage.tsx` — Updated to use `setLoginData()` from AuthContext.
+
+**Key Decisions:**
+- No dedicated `AuthContext.tsx` file existed before — created from scratch. Chose to put all auth state in a single context rather than scattered local state to support cross-component tenant switching.
+- `currentRole` derived from `tenants[]` array by matching `tenant.id` — falls back to `user.role` for backward compatibility.
+- Members nav link hidden entirely for non-owners (not just gated on the page) — cleaner UX. Page still shows permission error if navigated directly.
+- Clipboard copy uses `navigator.clipboard` with `execCommand` fallback for older browser support.
+- Build: ✅ TypeScript clean, ✅ Vite production build succeeds

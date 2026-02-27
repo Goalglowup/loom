@@ -1,28 +1,13 @@
-import { useEffect, useState } from 'react';
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
-import { getToken, clearToken } from '../lib/auth';
-import { api } from '../lib/api';
-import type { User, TenantDetail } from '../lib/api';
+import { useAuth } from '../context/AuthContext';
+import TenantSwitcher from './TenantSwitcher';
 
 export default function AppLayout() {
   const navigate = useNavigate();
-  const [user, setUser] = useState<User | null>(null);
-  const [tenant, setTenant] = useState<TenantDetail | null>(null);
-
-  useEffect(() => {
-    const token = getToken();
-    if (!token) return;
-    api.me(token).then(({ user, tenant }) => {
-      setUser(user);
-      setTenant(tenant);
-    }).catch(() => {
-      clearToken();
-      navigate('/login');
-    });
-  }, [navigate]);
+  const { user, logout, currentRole } = useAuth();
 
   function handleLogout() {
-    clearToken();
+    logout();
     navigate('/');
   }
 
@@ -37,12 +22,10 @@ export default function AppLayout() {
     <div className="flex h-screen bg-gray-950 text-gray-100">
       {/* Sidebar */}
       <aside className="w-60 flex flex-col bg-gray-900 border-r border-gray-700">
-        {/* Branding */}
+        {/* Branding + Tenant Switcher */}
         <div className="px-5 py-5 border-b border-gray-700">
           <span className="text-xl font-bold tracking-tight text-white">⧖ Loom</span>
-          {tenant && (
-            <p className="text-xs text-gray-400 mt-1 truncate">{tenant.name}</p>
-          )}
+          <TenantSwitcher />
         </div>
 
         {/* Nav */}
@@ -62,6 +45,11 @@ export default function AppLayout() {
           <NavLink to="/app/api-keys" className={navLinkClass}>
             🔑 <span>API Keys</span>
           </NavLink>
+          {currentRole === 'owner' && (
+            <NavLink to="/app/members" className={navLinkClass}>
+              👥 <span>Members</span>
+            </NavLink>
+          )}
         </nav>
 
         {/* Footer */}

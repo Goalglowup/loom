@@ -1,12 +1,16 @@
-import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useState, useEffect } from 'react';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '../lib/api';
-import type { ApiKeyCreated } from '../lib/api';
-import { setToken } from '../lib/auth';
+import type { ApiKeyCreated, InviteInfo } from '../lib/api';
+import { useAuth } from '../context/AuthContext';
 import ApiKeyReveal from '../components/ApiKeyReveal';
 
 export default function SignupPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const inviteToken = searchParams.get('invite');
+  const { setLoginData } = useAuth();
+
   const [tenantName, setTenantName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -14,23 +18,53 @@ export default function SignupPage() {
   const [error, setError] = useState('');
   const [newKey, setNewKey] = useState<ApiKeyCreated | null>(null);
 
+  // Invite-mode state
+  const [inviteInfo, setInviteInfo] = useState<InviteInfo | null>(null);
+  const [inviteLoading, setInviteLoading] = useState(!!inviteToken);
+  const [inviteError, setInviteError] = useState('');
+
+  useEffect(() => {
+    if (!inviteToken) return;
+    api.getInviteInfo(inviteToken)
+      .then(info => {
+        if (!info.isValid) {
+          setInviteError('This invite link is invalid or has expired.');
+        } else {
+          setInviteInfo(info);
+        }
+      })
+      .catch(() => setInviteError('This invite link is invalid or has expired.'))
+      .finally(() => setInviteLoading(false));
+  }, [inviteToken]);
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true);
     setError('');
     try {
-      const result = await api.signup({ tenantName, email, password });
-      setToken(result.token);
-      // Build a fake ApiKeyCreated shape for the reveal component
-      setNewKey({
-        id: '',
-        name: 'Default',
-        key: result.apiKey,
-        keyPrefix: result.apiKey.slice(0, 12),
-        status: 'active',
-        createdAt: new Date().toISOString(),
-        revokedAt: null,
-      });
+      if (inviteToken) {
+        // Invite signup: no org name, skip API key reveal
+        const result = await api.signup({ email, password, inviteToken });
+        setLoginData(result.token, result.user, null, result.tenants ?? []);
+        navigate('/app/traces');
+      } else {
+        // Normal signup: requires org name, shows API key
+        const result = await api.signup({ tenantName, email, password });
+        setLoginData(result.token, result.user, null, result.tenants ?? []);
+        if (result.apiKey) {
+          setNewKey({
+            id: '',
+            name: 'Default',
+            key: result.apiKey,
+            keyPrefix: result.apiKey.slice(0, 12),
+            status: 'active',
+            createdAt: new Date().toISOString(),
+            revokedAt: null,
+          });
+        } else {
+          navigate('/app');
+        }
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Signup failed');
     } finally {
@@ -52,13 +86,45 @@ export default function SignupPage() {
     );
   }
 
+  // Invite token present but still loading invite info
+  if (inviteToken && inviteLoading) {
+    return (
+      <div className="min-h-screen bg-gray-950 flex items-center justify-center px-4">
+        <p className="text-gray-400 animate-pulse">Validating invite…</p>
+      </div>
+    );
+  }
+
+  // Invite token invalid/expired
+  if (inviteToken && inviteError) {
+    return (
+      <div className="min-h-screen bg-gray-950 flex items-center justify-center px-4">
+        <div className="w-full max-w-sm text-center space-y-4">
+          <p className="text-2xl font-bold text-white">⧖ Loom</p>
+          <div className="bg-red-950/30 border border-red-800 rounded-xl p-6">
+            <p className="text-red-400 font-medium">{inviteError}</p>
+            <p className="text-gray-500 text-sm mt-2">
+              Ask your team to send you a new invite link.
+            </p>
+          </div>
+          <p className="text-sm text-gray-500">
+            Want to create your own org?{' '}
+            <Link to="/signup" className="text-indigo-400 hover:text-indigo-300">Sign up free</Link>
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-gray-950 flex items-center justify-center px-4">
       <div className="w-full max-w-sm space-y-6">
         {/* Logo */}
         <div className="text-center">
           <Link to="/" className="text-2xl font-bold text-white">⧖ Loom</Link>
-          <p className="text-gray-400 mt-2 text-sm">Create your account</p>
+          <p className="text-gray-400 mt-2 text-sm">
+            {inviteInfo ? `Join ${inviteInfo.tenantName}` : 'Create your account'}
+          </p>
         </div>
 
         {/* Form */}
@@ -66,24 +132,28 @@ export default function SignupPage() {
           onSubmit={handleSubmit}
           className="bg-gray-900 border border-gray-700 rounded-xl p-6 space-y-4"
         >
-          <div>
-            <label className="block text-sm text-gray-400 mb-1">Organization name</label>
-            <input
-              type="text"
-              required
-              autoFocus
-              value={tenantName}
-              onChange={e => setTenantName(e.target.value)}
-              className="w-full bg-gray-950 border border-gray-700 rounded-lg px-3 py-2 text-gray-100 placeholder-gray-600 focus:outline-none focus:border-indigo-500"
-              placeholder="Acme Corp"
-            />
-          </div>
+          {/* Org name only for fresh signups */}
+          {!inviteToken && (
+            <div>
+              <label className="block text-sm text-gray-400 mb-1">Organization name</label>
+              <input
+                type="text"
+                required
+                autoFocus
+                value={tenantName}
+                onChange={e => setTenantName(e.target.value)}
+                className="w-full bg-gray-950 border border-gray-700 rounded-lg px-3 py-2 text-gray-100 placeholder-gray-600 focus:outline-none focus:border-indigo-500"
+                placeholder="Acme Corp"
+              />
+            </div>
+          )}
 
           <div>
             <label className="block text-sm text-gray-400 mb-1">Email</label>
             <input
               type="email"
               required
+              autoFocus={!!inviteToken}
               value={email}
               onChange={e => setEmail(e.target.value)}
               className="w-full bg-gray-950 border border-gray-700 rounded-lg px-3 py-2 text-gray-100 placeholder-gray-600 focus:outline-none focus:border-indigo-500"
@@ -115,7 +185,9 @@ export default function SignupPage() {
             disabled={loading}
             className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-medium rounded-lg transition-colors"
           >
-            {loading ? 'Creating account…' : 'Create account'}
+            {loading
+              ? (inviteToken ? 'Joining…' : 'Creating account…')
+              : (inviteToken ? `Join ${inviteInfo?.tenantName ?? 'team'}` : 'Create account')}
           </button>
         </form>
 

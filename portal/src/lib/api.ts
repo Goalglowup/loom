@@ -26,14 +26,17 @@ async function request<T>(
 }
 
 export const api = {
-  signup: (body: { tenantName: string; email: string; password: string }) =>
-    request<{ token: string; user: User; tenant: Tenant; apiKey: string }>('POST', '/v1/portal/auth/signup', body),
+  signup: (body: { tenantName?: string; email: string; password: string; inviteToken?: string }) =>
+    request<{ token: string; user: User; tenant: Tenant; apiKey?: string; tenants?: TenantMembership[] }>('POST', '/v1/portal/auth/signup', body),
 
   login: (body: { email: string; password: string }) =>
-    request<{ token: string; user: User; tenant: Tenant }>('POST', '/v1/portal/auth/login', body),
+    request<{ token: string; user: User; tenant: Tenant; tenants: TenantMembership[] }>('POST', '/v1/portal/auth/login', body),
 
   me: (token: string) =>
-    request<{ user: User; tenant: TenantDetail }>('GET', '/v1/portal/me', undefined, token),
+    request<{ user: User; tenant: TenantDetail; tenants: TenantMembership[] }>('GET', '/v1/portal/me', undefined, token),
+
+  switchTenant: (token: string, body: { tenantId: string }) =>
+    request<{ token: string; user: User; tenant: Tenant; tenants: TenantMembership[] }>('POST', '/v1/portal/auth/switch-tenant', body, token),
 
   updateSettings: (token: string, body: ProviderConfig) =>
     request<{ providerConfig: ProviderConfigSafe }>('PATCH', '/v1/portal/settings', body, token),
@@ -46,6 +49,29 @@ export const api = {
 
   revokeApiKey: (token: string, id: string) =>
     request<void>('DELETE', `/v1/portal/api-keys/${id}`, undefined, token),
+
+  // Invites
+  getInviteInfo: (inviteToken: string) =>
+    request<InviteInfo>('GET', `/v1/portal/invites/${inviteToken}/info`),
+
+  listInvites: (token: string) =>
+    request<{ invites: Invite[] }>('GET', '/v1/portal/invites', undefined, token),
+
+  createInvite: (token: string, body: { maxUses?: number; expiresInHours?: number }) =>
+    request<Invite>('POST', '/v1/portal/invites', body, token),
+
+  revokeInvite: (token: string, id: string) =>
+    request<void>('DELETE', `/v1/portal/invites/${id}`, undefined, token),
+
+  // Members
+  listMembers: (token: string) =>
+    request<{ members: Member[] }>('GET', '/v1/portal/members', undefined, token),
+
+  updateMemberRole: (token: string, userId: string, body: { role: string }) =>
+    request<Member>('PATCH', `/v1/portal/members/${userId}`, body, token),
+
+  removeMember: (token: string, userId: string) =>
+    request<void>('DELETE', `/v1/portal/members/${userId}`, undefined, token),
 };
 
 export interface User { id: string; email: string; role: string; }
@@ -53,6 +79,7 @@ export interface Tenant { id: string; name: string; }
 export interface TenantDetail extends Tenant {
   providerConfig: ProviderConfigSafe;
 }
+export interface TenantMembership { id: string; name: string; role: string; }
 export interface ProviderConfig {
   provider: 'openai' | 'azure' | 'ollama';
   apiKey?: string;
@@ -76,3 +103,27 @@ export interface ApiKeyEntry {
   revokedAt: string | null;
 }
 export interface ApiKeyCreated extends ApiKeyEntry { key: string; }
+export interface InviteInfo {
+  tenantName: string;
+  expiresAt: string;
+  isValid: boolean;
+}
+export interface Invite {
+  id: string;
+  token: string;
+  inviteUrl: string;
+  maxUses: number | null;
+  useCount: number;
+  expiresAt: string;
+  revokedAt: string | null;
+  createdAt: string;
+  createdBy?: { id: string; email: string };
+  isActive?: boolean;
+}
+export interface Member {
+  id: string;
+  email: string;
+  role: string;
+  joinedAt: string;
+  lastLogin: string | null;
+}

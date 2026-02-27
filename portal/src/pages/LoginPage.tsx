@@ -1,10 +1,11 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
-import { setToken } from '../lib/auth';
+import { useAuth } from '../context/AuthContext';
 
 export default function LoginPage() {
   const navigate = useNavigate();
+  const { setLoginData } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -15,8 +16,8 @@ export default function LoginPage() {
     setLoading(true);
     setError('');
     try {
-      const { token } = await api.login({ email, password });
-      setToken(token);
+      const result = await api.login({ email, password });
+      setLoginData(result.token, result.user, null, result.tenants ?? []);
       navigate('/app');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Login failed');
