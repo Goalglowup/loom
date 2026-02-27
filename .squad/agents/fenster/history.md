@@ -649,3 +649,86 @@ if (tenantId) {
 **Decision Log:** `.squad/decisions.md` (fenster-multi-user-impl.md merged)
 
 **Next:** Awaiting frontend integration & Hockney tests
+
+---
+
+## 2026-02-27: Subtenant Hierarchy + Agents Migration
+
+**Status:** Complete
+
+**Scope:** Database migration `1000000000012_subtenant-hierarchy-and-agents.cjs` adding subtenant hierarchy and per-tenant agent configurations.
+
+**Deliverables:**
+- Migration file `migrations/1000000000012_subtenant-hierarchy-and-agents.cjs`
+
+**Key Decisions:**
+- `agents.merge_policies` is NOT NULL with default `{"system_prompt":"prepend","skills":"merge","mcp_endpoints":"merge"}` — every agent always has a merge policy.
+- `api_keys.agent_id` is NOT NULL — every key must be bound to an agent. Populated via a Default agent seeded for every existing tenant before the NOT NULL constraint is applied.
+- `traces.agent_id` is nullable — backward compatibility; existing rows retain null.
+- `tenants.parent_id` self-references with ON DELETE CASCADE — deleting a parent tenant cascades to all subtenants.
+- Down migration drops columns/tables in strict reverse order to satisfy FK dependencies.
+
+### Learnings
+
+**pgm.func for JSONB defaults** — node-pg-migrate requires `pgm.func(...)` to emit a raw SQL expression. For a JSONB literal default, wrap the quoted JSON string: `pgm.func("'{"key":"val"}'")` so the migration emits the literal without double-quoting it as a string parameter.
+
+**Nullable-then-populate-then-NOT-NULL pattern** — Adding a column as nullable, running an UPDATE to fill it, then `alterColumn(..., { notNull: true })` is the safe way to backfill and enforce the constraint in one migration without a default that would persist on new rows.
+- **Subtenant rollup via recursive CTE**: When rolling up analytics across a tenant hierarchy, use a `WITH RECURSIVE subtenant_tree AS (SELECT id FROM tenants WHERE id = $1 UNION ALL SELECT t.id FROM tenants t JOIN subtenant_tree st ON t.parent_id = st.id)` CTE. Replace `WHERE tenant_id = $1` with `WHERE tenant_id IN (SELECT id FROM subtenant_tree)`. The `$1` parameter is reused by the CTE, keeping the parameter list unchanged.
+- **Partition-compatible CTEs**: On a partitioned `traces` table, the recursive CTE must not reference the partitioned table inside itself. Keeping the CTE restricted to the `tenants` table (non-partitioned) and only referencing `subtenant_tree` in the outer `WHERE … IN (subquery)` lets PostgreSQL still prune partitions on `created_at`.
+- **Rollup flag as trailing boolean param**: Adding `rollup = false` as the last parameter to analytics functions keeps backward compatibility — all existing callers work without change, and the portal routes opt in with `qs.rollup === 'true' || qs.rollup === '1'`.
+
+---
+
+## 2026-02-28: Subtenant + Agent Portal API Routes
+
+**Status:** Complete
+
+**Scope:** Added subtenant hierarchy and agent CRUD routes to `src/routes/portal.ts`, plus extended `GET /v1/portal/me`.
+
+**Deliverables:**
+- `GET /v1/portal/subtenants` — list direct children of current tenant
+- `POST /v1/portal/subtenants` (owner) — create subtenant + seed owner membership in transaction
+- `GET /v1/portal/agents` — list agents for current tenant
+- `POST /v1/portal/agents` — create agent (any role); encrypts providerConfig.apiKey if present
+- `GET /v1/portal/agents/:id` — get agent (membership-verified)
+- `PUT /v1/portal/agents/:id` — partial update (membership-verified, dynamic SET clauses)
+- `DELETE /v1/portal/agents/:id` (owner) — hard delete
+- `GET /v1/portal/agents/:id/resolved` — recursive CTE walks parent_id chain; returns merged config with inheritanceChain
+- Extended `GET /v1/portal/me` to include `agents` (id, name) and `subtenants` (id, name, status) via `Promise.all`
+
+**Key Decisions:**
+- agent providerConfig uses same encrypt-on-write / sanitize-on-read pattern as tenant providerConfig
+- PUT uses dynamic SET clause builder (index-tracked `$N` params) to support partial updates
+- resolved endpoint deduplicates skills/mcpEndpoints using JSON.stringify as set key
+- membership check for GET/PUT/resolved uses JOIN across agents + tenant_memberships (not just tenantId match) to support cross-tenant agent access within a user's memberships
+
+## Learnings
+
+- **Dynamic SET clause with index tracking**: Build `setClauses[]` and `values[]` in parallel, tracking `idx` manually. Push `id` and `tenantId` last so `WHERE id = $${idx} AND tenant_id = $${idx+1}` is always correct regardless of how many optional fields were updated.
+- **Promise.all for parallel sibling queries in /me**: Two independent SELECT queries (agents + subtenants) can run concurrently with `await Promise.all([...])` to reduce latency on the me endpoint.
+- **Recursive CTE for tenant hierarchy**: `WITH RECURSIVE tenant_chain AS (... UNION ALL ...)` starting from the agent's `tenant_id` walks `parent_id` upward cleanly. Returns rows ordered by depth, so index 0 is always the immediate tenant.
+- **JSON.stringify deduplication for union arrays**: Using `JSON.stringify(item)` as a Set key deduplicates skills/mcpEndpoints across hierarchy levels reliably, even for objects.
+
+---
+
+### 2026-02-26: Wave 4 — Agent-Aware Gateway
+
+**Task:** Make gateway fully agent-aware (agent_id on api_keys + traces migration has run).
+
+**Changes shipped:**
+- `src/auth.ts`: Expanded `TenantContext` with `agentId`, `agentSystemPrompt`, `agentSkills`, `agentMcpEndpoints`, `mergePolicies`, `resolvedSystemPrompt`, `resolvedSkills`, `resolvedMcpEndpoints`. New `lookupTenant()` JOINs agents table + walks tenant parent chain via recursive CTE (max 10 hops). Resolves `provider_config`/`system_prompt` (first non-null wins) and `skills`/`mcp_endpoints` (union, earlier in chain wins on name conflict).
+- `src/agent.ts` (new): `applyAgentToRequest()` applies merge_policies (prepend/append/overwrite/ignore for system prompt; merge/overwrite/ignore for skills). `handleMcpRoundTrip()` does one JSON-RPC POST to matching MCP endpoints and re-sends updated messages to provider.
+- `src/tracing.ts`: Added `agentId?` to `TraceInput` and `BatchRow`; updated INSERT to include `agent_id` column.
+- `src/streaming.ts`: Added `agentId?` to `StreamTraceContext`, passed through to `traceRecorder.record()`.
+- `src/index.ts`: Applies `applyAgentToRequest()` before forwarding; calls `handleMcpRoundTrip()` on non-streaming responses; passes `agentId` to all trace contexts.
+- `src/providers/registry.ts`: Caches by `agentId` (primary key) + maintains `tenantId → Set<cacheKey>` reverse index. `evictProvider(id)` handles both agentId and tenantId eviction.
+- Test fixes: Updated `encryption-at-rest.test.ts` IDX constants (+1 for new agent_id param), updated `admin.test.ts` mock to return full agent shape and use `ak.key_hash = $1` as match criterion.
+
+## Learnings
+
+- **Agent-aware lookup in one query**: JOIN `api_keys → agents → tenants` in a single query, then a separate recursive CTE for the parent chain if `parent_id` is non-null. Separating the two queries avoids a complex one-shot CTE and keeps the code readable.
+- **Resolve chain with ordered array**: Building a `chain[]` (agent → immediate tenant → parent chain rows) and calling `.find()` / `resolveArrayChain()` over it gives clean, testable resolution logic without multiple branching conditions.
+- **Provider cache keyed by agentId**: Caching by `agentId` (not `tenantId`) is required for correctness when agents within the same tenant have different `provider_config`. A reverse `tenantId → Set<cacheKey>` index keeps `evictProvider(tenantId)` working for all existing admin route callers without any change to the call sites.
+- **INSERT parameter index drift**: Adding `agent_id` at position 2 in the INSERT shifted all downstream `$N` indices. Tests that hardcode parameter indices must be updated simultaneously — always audit the full array+column list when extending the schema.
+- **Mock SQL matching by distinctive clause**: The admin test mock matched on `from   api_keys ak` + `join   tenants` whitespace, which broke when query whitespace changed. Switching to `ak.key_hash = $1` (unique to auth lookup) is far more robust against formatting changes.
+- **MCP only on non-streaming**: Tool calls in streaming responses require buffering the full stream before routing — complex and high-latency. Limiting MCP round-trip to non-streaming (JSON) responses is the correct Phase 1 scope.
