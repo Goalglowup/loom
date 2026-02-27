@@ -45,16 +45,21 @@
 }
 
 .chart-drag-handle {
-  font-size: 1rem;
-  color: #9ca3af;
+  font-size: 18px;
+  color: #4b5563;
   cursor: grab;
   user-select: none;
   flex-shrink: 0;
   line-height: 1;
+  padding: 0 0.25rem;
+}
+
+.chart-drag-handle:active {
+  cursor: grabbing;
 }
 
 .chart-drag-handle:hover {
-  color: #6366f1;
+  color: #111827;
 }
 
 .chart-title {
@@ -66,21 +71,22 @@
 }
 
 .chart-expand-btn {
-  background: none;
-  border: none;
+  background: #f3f4f6;
+  border: 1px solid #d1d5db;
   cursor: pointer;
-  font-size: 1rem;
-  color: #9ca3af;
-  padding: 0 0.25rem;
+  font-size: 20px;
+  color: #4b5563;
+  padding: 0.25rem 0.5rem;
   line-height: 1;
   flex-shrink: 0;
   border-radius: 4px;
-  transition: color 0.1s ease, background 0.1s ease;
+  transition: color 0.1s ease, background 0.1s ease, border-color 0.1s ease;
 }
 
 .chart-expand-btn:hover {
-  color: #6366f1;
-  background: #f5f3ff;
+  color: #111827;
+  background: #e5e7eb;
+  border-color: #9ca3af;
 }
 
 /* ── Loading skeleton ── */

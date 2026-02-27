@@ -176,7 +176,7 @@ function TimeseriesCharts({ data, loading, win }: TimeseriesChartsProps) {
   const chartData = buildChartData(data, win);
 
   const commonAxis = {
-    tick: { fontSize: 11, fill: '#9ca3af' },
+    tick: { fontSize: 12, fill: '#4b5563' },
     tickLine: false as const,
     axisLine: false as const,
   };
