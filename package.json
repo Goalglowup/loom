@@ -16,6 +16,7 @@
     "test:coverage": "vitest run --coverage",
     "test:smoke": "vitest run --config vitest.smoke.config.ts",
     "seed": "tsx scripts/seed.ts",
+    "smoke:cleanup": "tsx scripts/cleanup-smoke-data.ts",
     "build:portal": "cd portal && npm run build",
     "build:all": "npm run build:portal && cd dashboard && npm run build"
   },
