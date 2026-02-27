@@ -851,3 +851,31 @@ This pattern keeps the component API minimal. The alternative — passing full e
 - `portal/src/pages/AnalyticsPage.tsx` — new file
 - `portal/src/App.tsx` — two new routes
 - `portal/src/components/AppLayout.tsx` — two new nav links
+# Decision: Chart Interactions — Drag-to-Reorder & Expand Toggle
+
+**Date:** $(date -u +%Y-%m-%dT%H:%M:%SZ)
+**Author:** McManus (Frontend)
+**Status:** Implemented
+
+## Decision
+
+Used the native HTML5 Drag and Drop API for chart reordering instead of a third-party library (react-dnd, dnd-kit).
+
+## Rationale
+
+- Keeps bundle lean — no new dependencies
+- HTML5 DnD API is sufficient for a 4-card grid reorder scenario
+- Task constraint explicitly required this approach
+
+## Layout Change
+
+Migrated `TimeseriesCharts` from `flex-column` to a 2-column CSS grid. This is a visual change that affects how charts appear (side-by-side at ≥769px). Keaton should be aware in case this affects any screenshot tests or embedding contexts.
+
+## Persistence
+
+Chart order and expanded state are stored in `localStorage` under key `loom-chart-prefs` as `{ order: string[], expanded: string[] }`. No backend state required.
+
+## Files Changed
+
+- `shared/analytics/TimeseriesCharts.tsx`
+- `shared/analytics/TimeseriesCharts.css`

@@ -1,13 +1,60 @@
 .timeseries-charts {
-  display: flex;
-  flex-direction: column;
-  gap: 2rem;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.5rem;
+}
+
+@media (max-width: 768px) {
+  .timeseries-charts {
+    grid-template-columns: 1fr;
+  }
 }
 
 .chart-block {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 1rem;
+  cursor: grab;
+  transition: box-shadow 0.15s ease, opacity 0.15s ease;
+}
+
+.chart-block:active {
+  cursor: grabbing;
+}
+
+/* Full-width expanded state */
+.chart-block.chart-expanded {
+  grid-column: 1 / -1;
+}
+
+/* Drag feedback */
+.chart-block.chart-drag-over {
+  box-shadow: 0 0 0 2px #6366f1;
+  background: #f5f3ff;
+}
+
+/* ── Chart header row ── */
+.chart-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.chart-drag-handle {
+  font-size: 1rem;
+  color: #9ca3af;
+  cursor: grab;
+  user-select: none;
+  flex-shrink: 0;
+  line-height: 1;
+}
+
+.chart-drag-handle:hover {
+  color: #6366f1;
 }
 
 .chart-title {
@@ -15,6 +62,25 @@
   font-weight: 600;
   color: #374151;
   margin: 0;
+  flex: 1;
+}
+
+.chart-expand-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 1rem;
+  color: #9ca3af;
+  padding: 0 0.25rem;
+  line-height: 1;
+  flex-shrink: 0;
+  border-radius: 4px;
+  transition: color 0.1s ease, background 0.1s ease;
+}
+
+.chart-expand-btn:hover {
+  color: #6366f1;
+  background: #f5f3ff;
 }
 
 /* ── Loading skeleton ── */

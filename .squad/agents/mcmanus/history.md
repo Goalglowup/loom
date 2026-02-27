@@ -652,3 +652,18 @@ Used `adminMode?: boolean` prop pattern instead of passing full URLs/header fact
 - ✅ No console errors in either build
 - ✅ Props match Fenster's endpoint signatures exactly
 - ✅ Dark theme applied consistently across all new components
+
+### Chart Interactions: Drag-to-Reorder & Expand Toggle
+
+**Implemented:**
+- Refactored `shared/analytics/TimeseriesCharts.tsx` to data-driven pattern — charts defined as `CHART_DEFS` array with `id`, `title`, and `render` function
+- HTML5 Drag and Drop API (no new dependencies) for drag-to-reorder; drag handle (⠿) in header top-left
+- Expand toggle button (⤢/⤡) in header top-right; toggles `chart-expanded` class → `grid-column: 1 / -1`
+- `localStorage` persistence under key `loom-chart-prefs` as `{ order: string[], expanded: string[] }`
+- CSS grid (2-column) replaces old flex-column layout; `chart-drag-over` highlight with indigo ring; mobile breakpoint collapses to 1-column
+- Chart IDs: `requests`, `latency`, `error`, `cost`
+
+**Key Decisions:**
+- Used `useRef` for `dragSrcId` (not state) to avoid unnecessary re-renders during drag
+- `chart-block` cards now have `border`, `padding`, `border-radius` — slight visual upgrade for card feel
+- Kept all existing recharts logic untouched; only wrapped in data-driven structure
