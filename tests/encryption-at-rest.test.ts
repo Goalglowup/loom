@@ -67,20 +67,21 @@ function getInsertParams(callIndex = 0): unknown[] {
 // Parameter indices in the TraceRecorder INSERT statement:
 //   $1  tenant_id       → index 0
 //   $2  request_id      → index 1
-//   $3  model           → index 2
-//   $4  provider        → index 3
-//   $5  endpoint        → index 4
-//   $6  request_body_ct → index 5  (encrypted ciphertext)
-//   $7  request_iv      → index 6
-//   $8  response_body_ct→ index 7  (encrypted ciphertext)
-//   $9  response_iv     → index 8
-//   $10 latency_ms      → index 9
+//   $3  request_id      → index 2
+//   $4  model           → index 3
+//   $5  provider        → index 4
+//   $6  endpoint        → index 5
+//   $7  request_body_ct → index 6  (encrypted ciphertext)
+//   $8  request_iv      → index 7
+//   $9  response_body_ct→ index 8  (encrypted ciphertext)
+//   $10 response_iv     → index 9
+//   $11 latency_ms      → index 10
 const IDX = {
   tenantId: 0,
-  requestBodyCt: 5,
-  requestIv: 6,
-  responseBodyCt: 7,
-  responseIv: 8,
+  requestBodyCt: 6,
+  requestIv: 7,
+  responseBodyCt: 8,
+  responseIv: 9,
 } as const;
 
 // ── Tests ──────────────────────────────────────────────────────────────────

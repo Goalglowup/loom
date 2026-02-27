@@ -17,6 +17,7 @@ export interface StreamCapture {
 /** Context supplied by the gateway to record a trace once streaming completes. */
 export interface StreamTraceContext {
   tenantId: string;
+  agentId?: string;
   requestBody: unknown;
   model: string;
   provider: string;
@@ -127,6 +128,7 @@ export function createSSEProxy(options: StreamProxyOptions): Transform {
 
         traceRecorder.record({
           tenantId: tc.tenantId,
+          agentId: tc.agentId,
           model: tc.model,
           provider: tc.provider,
           requestBody: tc.requestBody,

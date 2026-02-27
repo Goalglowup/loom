@@ -8,6 +8,7 @@ import { query } from './db.js';
 
 export interface TraceInput {
   tenantId: string;
+  agentId?: string;
   /** Caller-supplied request ID; a UUID is generated if omitted. */
   requestId?: string;
   model: string;
@@ -32,6 +33,7 @@ export interface TraceInput {
 
 interface BatchRow {
   tenant_id: string;
+  agent_id: string | null;
   request_id: string;
   model: string;
   provider: string;
@@ -95,6 +97,7 @@ export class TraceRecorder {
 
       this.batch.push({
         tenant_id: trace.tenantId,
+        agent_id: trace.agentId ?? null,
         request_id: trace.requestId ?? randomUUID(),
         model: trace.model,
         provider: trace.provider,
@@ -135,19 +138,19 @@ export class TraceRecorder {
       for (const row of rows) {
         await query(
           `INSERT INTO traces
-             (tenant_id, request_id, model, provider, endpoint,
+             (tenant_id, agent_id, request_id, model, provider, endpoint,
               request_body, request_iv,
               response_body, response_iv,
               latency_ms, prompt_tokens, completion_tokens, total_tokens,
               status_code, ttfb_ms, gateway_overhead_ms, encryption_key_version)
            VALUES
-             ($1,$2,$3,$4,$5,
-              to_jsonb($6::text),$7,
-              to_jsonb($8::text),$9,
-              $10,$11,$12,$13,
-              $14,$15,$16,1)`,
+             ($1,$2,$3,$4,$5,$6,
+              to_jsonb($7::text),$8,
+              to_jsonb($9::text),$10,
+              $11,$12,$13,$14,
+              $15,$16,$17,1)`,
           [
-            row.tenant_id, row.request_id, row.model, row.provider, row.endpoint,
+            row.tenant_id, row.agent_id, row.request_id, row.model, row.provider, row.endpoint,
             row.request_body_ct, row.request_iv,
             row.response_body_ct, row.response_iv,
             row.latency_ms, row.prompt_tokens, row.completion_tokens, row.total_tokens,

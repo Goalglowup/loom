@@ -270,8 +270,7 @@ function buildMockPool(options: {
 
     // Auth middleware: lookup API key by hash
     // This matches the query in src/auth.ts lookupTenant()
-    if ((sqlLower.includes('from   api_keys ak') || sqlLower.includes('from api_keys ak')) && 
-        (sqlLower.includes('join   tenants') || sqlLower.includes('join tenants'))) {
+    if (sqlLower.includes('from   api_keys ak') && sqlLower.includes('ak.key_hash = $1')) {
       const keyHash = params?.[0] as string;
       const key = Array.from(apiKeys.values()).find((k) => k.key_hash === keyHash);
       if (!key || key.status !== 'active') {
@@ -281,11 +280,22 @@ function buildMockPool(options: {
       if (!tenant || tenant.status !== 'active') {
         return Promise.resolve({ rows: [] });
       }
+      const tenantProviderConfig = providerConfigs.get(tenant.id) || null;
       return Promise.resolve({
         rows: [{
           tenant_id: tenant.id,
           tenant_name: tenant.name,
-          provider_config: providerConfigs.get(tenant.id) || null,
+          tenant_parent_id: null,
+          agent_id: key.agent_id || null,
+          agent_provider_config: null,
+          agent_system_prompt: null,
+          agent_skills: null,
+          agent_mcp_endpoints: null,
+          merge_policies: { system_prompt: 'prepend', skills: 'merge' },
+          tenant_provider_config: tenantProviderConfig,
+          tenant_system_prompt: null,
+          tenant_skills: null,
+          tenant_mcp_endpoints: null,
         }],
       });
     }

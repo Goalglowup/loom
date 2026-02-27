@@ -4,8 +4,11 @@ import type { BaseProvider } from './base.js';
 import type { TenantContext } from '../auth.js';
 import { decryptTraceBody } from '../encryption.js';
 
-// Lazy-initialised provider instances keyed by tenantId.
+// Lazy-initialised provider instances.
+// Primary key: agentId (when available) or tenantId.
+// Secondary index: tenantId → Set of cache keys (for bulk eviction by tenant).
 const providerCache = new Map<string, BaseProvider>();
+const tenantIndex = new Map<string, Set<string>>(); // tenantId → cache keys
 
 /**
  * Return the correct provider instance for a tenant based on their
@@ -21,7 +24,8 @@ const providerCache = new Map<string, BaseProvider>();
  *   "encrypted:{ciphertext}:{iv}"
  */
 export function getProviderForTenant(tenantCtx: TenantContext): BaseProvider {
-  const cached = providerCache.get(tenantCtx.tenantId);
+  const cacheKey = tenantCtx.agentId ?? tenantCtx.tenantId;
+  const cached = providerCache.get(cacheKey);
   if (cached) return cached;
 
   const cfg = tenantCtx.providerConfig;
@@ -63,15 +67,31 @@ export function getProviderForTenant(tenantCtx: TenantContext): BaseProvider {
     });
   }
 
-  providerCache.set(tenantCtx.tenantId, provider);
+  providerCache.set(cacheKey, provider);
+
+  // Track cache key under tenantId for bulk eviction.
+  const keys = tenantIndex.get(tenantCtx.tenantId) ?? new Set<string>();
+  keys.add(cacheKey);
+  tenantIndex.set(tenantCtx.tenantId, keys);
+
   return provider;
 }
 
 /**
- * Evict a tenant's cached provider instance.
- * Call this when a tenant's provider_config changes so the next request
- * picks up the new configuration.
+ * Evict all cached provider instances associated with a tenant.
+ * Pass a tenantId to clear all agents; pass an agentId to clear one specific agent.
  */
-export function evictProvider(tenantId: string): void {
-  providerCache.delete(tenantId);
+export function evictProvider(id: string): void {
+  // Try as a direct cache key first (agentId or legacy tenantId key).
+  if (providerCache.has(id)) {
+    providerCache.delete(id);
+  }
+  // Also clear all cache keys registered under this tenantId.
+  const keys = tenantIndex.get(id);
+  if (keys) {
+    for (const k of keys) {
+      providerCache.delete(k);
+    }
+    tenantIndex.delete(id);
+  }
 }

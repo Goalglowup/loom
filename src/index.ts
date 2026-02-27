@@ -12,6 +12,7 @@ import { registerAuthMiddleware } from './auth.js';
 import { createSSEProxy } from './streaming.js';
 import { traceRecorder } from './tracing.js';
 import { getProviderForTenant } from './providers/registry.js';
+import { applyAgentToRequest, handleMcpRoundTrip } from './agent.js';
 import { registerDashboardRoutes } from './routes/dashboard.js';
 import { registerAdminRoutes } from './routes/admin.js';
 import { registerPortalRoutes } from './routes/portal.js';
@@ -120,11 +121,15 @@ fastify.post('/v1/chat/completions', async (request, reply) => {
     ? getProviderForTenant(tenant)
     : (() => { throw new Error('No tenant context'); })();
 
+  const rawBody = request.body as any;
+  // Apply agent merge policies (system prompt injection, skills merge) before forwarding.
+  const effectiveBody = tenant ? applyAgentToRequest(rawBody, tenant) : rawBody;
+
   const proxyReq: ProxyRequest = {
     url: '/v1/chat/completions',
     method: 'POST',
     headers: request.headers as Record<string, string>,
-    body: request.body,
+    body: effectiveBody,
   };
 
   const startTimeMs = Date.now();
@@ -140,15 +145,14 @@ fastify.post('/v1/chat/completions', async (request, reply) => {
 
     // Handle streaming response — pipe through SSE proxy for trace capture
     if (response.stream) {
-      const tenant = request.tenant;
-      const reqBody = request.body as any;
       const sseProxy = createSSEProxy({
         onComplete: () => {},
         traceContext: tenant
           ? {
               tenantId: tenant.tenantId,
-              requestBody: reqBody,
-              model: reqBody?.model ?? 'unknown',
+              agentId: tenant.agentId,
+              requestBody: effectiveBody,
+              model: effectiveBody?.model ?? 'unknown',
               provider: provider.name,
               statusCode: response.status,
               startTimeMs,
@@ -162,15 +166,25 @@ fastify.post('/v1/chat/completions', async (request, reply) => {
 
     // Handle regular JSON response
     if (tenant) {
+      // MCP round-trip: if the response has tool_calls matching agent MCP endpoints,
+      // call the MCP server and re-send to the provider (one round-trip only).
+      let finalBody = response.body;
+      try {
+        const mcp = await handleMcpRoundTrip(effectiveBody, response.body, tenant, provider, proxyReq);
+        finalBody = mcp.body;
+      } catch (mcpErr) {
+        fastify.log.error({ err: mcpErr }, '[mcp] round-trip failed; using original response');
+      }
+
       const latencyMs = Date.now() - startTimeMs;
-      const reqBody = request.body as any;
-      const usage = (response.body as any)?.usage;
+      const usage = (finalBody as any)?.usage;
       traceRecorder.record({
         tenantId: tenant.tenantId,
-        model: reqBody?.model ?? 'unknown',
+        agentId: tenant.agentId,
+        model: effectiveBody?.model ?? 'unknown',
         provider: provider.name,
-        requestBody: reqBody,
-        responseBody: response.body,
+        requestBody: effectiveBody,
+        responseBody: finalBody,
         latencyMs,
         statusCode: response.status,
         promptTokens: usage?.prompt_tokens,
@@ -179,6 +193,7 @@ fastify.post('/v1/chat/completions', async (request, reply) => {
         ttfbMs: latencyMs,
         gatewayOverheadMs: upstreamStartMs - startTimeMs,
       });
+      return reply.code(response.status).send(finalBody);
     }
     return reply.code(response.status).send(response.body);
   } catch (err: any) {
