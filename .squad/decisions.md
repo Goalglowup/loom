@@ -753,3 +753,101 @@ Both `tenants.status` and `api_keys.status` have dedicated indexes.
 **What:** Design decisions for portal React SPA: color palette matches dashboard (gray-950/900, indigo-600), ApiKeyReveal component reused in both signup and key creation, ProviderConfigForm extracted as reusable component, JWT stored as `loom_portal_token` (separate from `loom_admin_token`), no basename for React Router (portal serves at `/`)  
 **Why:** Visual consistency across both SPAs, reduce component duplication, clean auth domain separation, simplify production serving (no path prefix needed)  
 **Impact:** Unified Loom UI aesthetic; ApiKeyReveal establishes "show once" pattern for sensitive keys; ProviderConfigForm enables reuse in future admin dashboard; state-based navigation (selectedTenantId) supports scalable admin UI without URL routing complexity
+
+## 2026-02-26: Admin Trace & Analytics Endpoints
+
+**By:** Fenster (Backend Dev)  
+**Status:** Implemented  
+**Date:** 2026-02-26
+
+### Context
+
+The admin dashboard previously had no way to view traces across tenants — `/v1/traces` is scoped to the API key's tenant. Admin operators need visibility into all tenant activity.
+
+### Decisions
+
+**1. Separate admin analytics functions, not overloading existing ones**
+
+`getAnalyticsSummary` and `getTimeseriesMetrics` in `analytics.ts` take a required `tenantId`. Rather than making `tenantId` optional on the existing functions (which could mask callers that accidentally omit it), we added:
+- `getAdminAnalyticsSummary(tenantId?: string, windowHours?)`
+- `getAdminTimeseriesMetrics(tenantId?: string, windowHours?, bucketMinutes?)`
+
+Per-tenant dashboard routes remain unchanged and continue to pass a required `tenantId`.
+
+**2. Dynamic SQL parameter numbering via `params.push()`**
+
+Admin queries conditionally include a `tenant_id` filter. We use `params.push(value)` inside template literals — `Array.push` returns the new array length, giving us the correct `$N` placeholder inline. Clean and avoids string-splitting logic.
+
+**3. `$1` = `limit` in admin traces query**
+
+The `LIMIT` binding is always `$1` so it appears at the top of the query. All `WHERE` filter params are pushed after, yielding `$2`, `$3` etc. This keeps the query readable and consistent regardless of which filters are active.
+
+**4. Endpoints protected by `adminAuthMiddleware` (JWT)**
+
+All three new endpoints use the `authOpts = { preHandler: adminAuthMiddleware }` pattern already established in `admin.ts`. No API-key auth is involved — these are admin-only surfaces.
+
+### New Endpoints
+
+| Method | Path | Auth |
+|--------|------|------|
+| GET | `/v1/admin/traces` | Admin JWT |
+| GET | `/v1/admin/analytics/summary` | Admin JWT |
+| GET | `/v1/admin/analytics/timeseries` | Admin JWT |
+
+### Impact
+
+- `src/analytics.ts` — two new exported functions added (non-breaking)
+- `src/routes/admin.ts` — three new GET routes, two new imports (`getAdminAnalyticsSummary`, `getAdminTimeseriesMetrics`, `query`)
+
+## 2026-02-26: Admin Dashboard Split — Separate Auth + Tenant Filter
+
+**By:** McManus (Frontend Dev)  
+**Status:** Implemented  
+**Date:** 2026-02-26
+
+### Context
+
+The admin dashboard previously used an API key (stored in `localStorage.loom_api_key`) to call the tenant-scoped `/v1/traces` endpoint. This meant an admin could only see one tenant's data at a time — whichever tenant's API key they had loaded. There was no way to browse across tenants.
+
+Simultaneously, the tenant portal (portal/) had no traces or analytics UI — tenants couldn't see their own request history.
+
+### Decision
+
+**Admin Dashboard:**
+- Switch TracesPage and AnalyticsPage from API key auth to admin JWT (`localStorage.loom_admin_token`, managed by `adminApi.ts`)
+- Call the new admin endpoints: `/v1/admin/traces`, `/v1/admin/analytics/summary`, `/v1/admin/analytics/timeseries`
+- Add a tenant filter dropdown above traces/analytics; fetches tenant list from `/v1/admin/tenants`
+- No API key prompt shown for admin dashboard — if admin token missing, show a sign-in link instead
+
+**Portal:**
+- Add `/app/traces` → TracesPage (tenant-scoped, JWT auth, calls `/v1/traces`)
+- Add `/app/analytics` → AnalyticsPage (tenant-scoped, JWT auth, calls `/v1/analytics/summary` + timeseries)
+- Add Traces and Analytics nav links to AppLayout sidebar
+
+### Implementation Pattern
+
+Added `adminMode?: boolean` and `tenantId?: string` props to `TracesTable`, `AnalyticsSummary`, `TimeseriesCharts`. When `adminMode` is true:
+- Use `ADMIN_BASE` (from adminApi.ts) instead of `API_BASE`
+- Use `adminAuthHeaders()` (Bearer admin JWT) instead of `authHeaders()` (Bearer API key)
+- Append `?tenant_id=X` when a tenant is selected
+
+This pattern keeps the component API minimal. The alternative — passing full endpoint URLs and header factories as props — would cause useCallback dependency issues with inline functions.
+
+### Scope Boundaries
+
+- Did **not** build admin analytics charts for per-tenant comparison — deferred to future wave
+- Did **not** add real-time refresh to portal traces — not required for Phase 1
+- Portal analytics shows a data table (buckets) rather than recharts visualization — portal doesn't have recharts dep; table is sufficient for Phase 1 observability
+- Architecture decisions (endpoint shapes, auth model) remain Fenster's domain; this PR purely consumes Fenster's new admin endpoints
+
+### Files Changed
+
+- `dashboard/src/pages/TracesPage.tsx` — admin auth, tenant filter
+- `dashboard/src/pages/AnalyticsPage.tsx` — admin auth, tenant filter
+- `dashboard/src/components/TracesTable.tsx` — adminMode/tenantId props
+- `dashboard/src/components/AnalyticsSummary.tsx` — adminMode/tenantId props
+- `dashboard/src/components/TimeseriesCharts.tsx` — adminMode/tenantId props
+- `portal/src/pages/TracesPage.tsx` — new file
+- `portal/src/pages/AnalyticsPage.tsx` — new file
+- `portal/src/App.tsx` — two new routes
+- `portal/src/components/AppLayout.tsx` — two new nav links

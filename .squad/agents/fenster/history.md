@@ -494,3 +494,76 @@ Built all backend infrastructure for the tenant self-service portal per Keaton's
 - Added `import { query } from '../db.js'` to `admin.ts` — admin routes previously used only `pool.query`; cross-tenant trace query benefits from the shared `query` helper consistent with `dashboard.ts`.
 
 **Build Status:** ✅ `npm run build` (zero TypeScript errors)
+
+## Session: Admin Dashboard Split (2026-02-26)
+
+**Spawned as:** Background agent  
+**Coordination:** Paired with McManus (frontend split)  
+**Outcome:** ✅ All endpoints implemented, build clean, unblocks dashboard cross-tenant UI
+
+### Work Completed
+
+**1. Three new admin endpoints in `/v1/admin/*` (JWT-only)**
+
+- `GET /v1/admin/traces` — Paginated trace list with optional `tenant_id` query param
+  - Params: `limit`, `offset`, `tenant_id` (optional)
+  - Built using conditional SQL parameter binding (`params.push()`)
+  
+- `GET /v1/admin/analytics/summary` — Aggregated metrics (counts, latency, error rate)
+  - Params: `tenant_id` (optional), `window_hours` (default: 24)
+  - Uses new `getAdminAnalyticsSummary()` function in `analytics.ts`
+  
+- `GET /v1/admin/analytics/timeseries` — Time-bucketed charting data
+  - Params: `tenant_id` (optional), `window_hours`, `bucket_minutes` (default: 5)
+  - Uses new `getAdminTimeseriesMetrics()` function in `analytics.ts`
+
+All three endpoints:
+- Protected by existing `adminAuthMiddleware` (JWT required, no API key fallback)
+- Follow existing admin endpoint patterns (`authOpts = { preHandler: adminAuthMiddleware }`)
+- Support optional tenant filtering; omit `tenant_id` to aggregate across all tenants
+
+**2. Two new analytics functions (non-breaking exports)**
+
+- `getAdminAnalyticsSummary(tenantId?: string, windowHours = 24)` in `analytics.ts`
+  - Returns same shape as existing `getAnalyticsSummary(tenantId)` but with optional tenantId
+  - Deliberately separate from existing function (not optional param) to prevent tenant leakage via omission
+  
+- `getAdminTimeseriesMetrics(tenantId?: string, windowHours = 24, bucketMinutes = 5)` in `analytics.ts`
+  - Deliberately separate from existing `getTimeseriesMetrics(tenantId)` for same safety reason
+
+**3. SQL Parameter Binding Pattern**
+
+Discovered clean pattern for dynamic SQL parameter numbering:
+```typescript
+const params: unknown[] = [limit]; // $1 is always limit
+if (tenantId) {
+  queryStr += ` AND tenant_id = $${params.push(tenantId)}`; // $2, $3, etc. auto-numbered
+}
+```
+`Array.push()` returns the new array length, which maps directly to the next `$N` placeholder. Eliminates string manipulation and is more readable than manual counter variables.
+
+**4. Build & Integration**
+
+- ✅ `npm run build` passes zero TypeScript errors
+- Ready for McManus to consume on frontend
+- No breaking changes to existing tenant-scoped analytics endpoints
+
+### Key Learnings
+
+**SQL parameter binding cleanup** — Using `params.push()` return value directly in template literals beats manual counter state. Pattern is reusable for any future admin query needing conditional filters.
+
+**Endpoint vs. Function Separation** — Admin endpoints are separate from tenant-scoped routes. Admin analytics functions are separate from tenant analytics functions. This separation, while adding a few LOC, prevents the most likely source of tenant leakage bugs.
+
+**Deferrable Analyses** — Admin doesn't need cross-tenant comparison charts in Phase 1. Single-tenant summary view is sufficient for proving out the architecture. Future: composite charts (multiple tenants side-by-side).
+
+### Blocked / Deferred
+
+- None; this session unblocks McManus
+- Rate limiting on traces query (large `limit` values) — not in scope but noted for future optimization
+- Audit logging per admin query (who viewed what, when) — deferred to Phase 2
+
+### Coordination Notes
+
+- McManus now has three `/v1/admin/*` endpoints ready to call
+- Dashboard can implement tenant filter and cross-tenant traces view
+- Portal can launch without admin features; admin dashboard is separate domain

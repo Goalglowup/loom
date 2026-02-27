@@ -544,3 +544,111 @@ cd portal && npm run build
 
 **Pattern — admin prop escalation:**
 When a component must call different endpoints depending on caller context (admin vs tenant), a single `adminMode` boolean is cleaner than passing full URLs or header factories. The component internally selects the right base URL and auth method. If a third caller context emerges, this can be refactored to an explicit `context: 'admin' | 'tenant'` enum.
+
+## Session: Admin Dashboard Split + Portal Traces/Analytics (2026-02-26)
+
+**Spawned as:** Background agent  
+**Coordination:** Paired with Fenster (backend split)  
+**Outcome:** ✅ Dashboard migrated to admin JWT + tenant filter; portal launched with traces/analytics; both builds clean, commit 6b4df16
+
+### Work Completed
+
+**1. Admin Dashboard Migration (API key → JWT + tenant filter)**
+
+Updated `dashboard/src/pages/TracesPage.tsx` and `dashboard/src/pages/AnalyticsPage.tsx`:
+- Replaced API key check with admin JWT check (`localStorage.loom_admin_token`)
+- Added tenant dropdown above both pages; fetches from `/v1/admin/tenants`
+- Shows "Admin sign-in required" message (not API key prompt) when token missing
+- Passes selected `tenantId` to underlying components via props
+
+Updated shared components for admin context:
+- `dashboard/src/components/TracesTable.tsx` — added `adminMode?: boolean` + `tenantId?: string` props
+  - When `adminMode = true`: calls `/v1/admin/traces` (not `/v1/traces`)
+  - Uses `ADMIN_BASE` URL and `adminAuthHeaders()` (Bearer token, not API key)
+  - Appends `?tenant_id=X` to query string when tenantId is provided
+  
+- `dashboard/src/components/AnalyticsSummary.tsx` — same `adminMode`/`tenantId` props
+  - Calls `/v1/admin/analytics/summary` endpoint when in admin mode
+  
+- `dashboard/src/components/TimeseriesCharts.tsx` — same `adminMode`/`tenantId` props
+  - Calls `/v1/admin/analytics/timeseries` endpoint when in admin mode
+
+**2. Tenant Portal — Traces & Analytics Pages (New)**
+
+Created `portal/src/pages/TracesPage.tsx`:
+- Calls `/v1/traces` (tenant-scoped) with JWT Bearer auth
+- Displays 6-column table: Time, Model, Provider, Status, Latency, Tokens
+- Click row → side panel detail view (full request/response)
+- "Load more" button for cursor-based pagination
+- Dark theme: bg-gray-900, text-gray-200, border-gray-700
+
+Created `portal/src/pages/AnalyticsPage.tsx`:
+- Calls `/v1/analytics/summary` for 4 summary cards (requests, latency, error rate, cost)
+- Calls `/v1/analytics/timeseries` for time-bucketed data
+- Window selector: 1h, 6h, 24h, 7d
+- Displays analytics as data table (not recharts) — portal lacks recharts dependency
+- Time-series table shows bucket, count, avg latency, max latency per row
+- Same dark theme as TracesPage
+
+Updated `portal/src/App.tsx`:
+- Added route `/app/traces` → `<TracesPage />`
+- Added route `/app/analytics` → `<AnalyticsPage />`
+
+Updated `portal/src/components/AppLayout.tsx`:
+- Added nav link "Traces 📋" → `/app/traces`
+- Added nav link "Analytics 📊" → `/app/analytics`
+- Positioned between Home and Settings
+
+**3. Component Design Pattern**
+
+Used `adminMode?: boolean` prop pattern instead of passing full URLs/header factories:
+```typescript
+// Cleaner than:
+// <TracesTable baseUrl={} headers={() => ()} />
+// This avoids useCallback dependency hell with inline function factories
+
+<TracesTable adminMode={true} tenantId={selectedTenantId} />
+```
+
+**Rationale:**
+- Props stay minimal and typed
+- No referential identity issues with inline header functions
+- Component owns the logic for selecting correct endpoint/auth method
+- If a third caller context emerges, refactor to `context: 'admin' | 'tenant'` enum
+
+**4. Build & Commit**
+
+- ✅ Dashboard builds clean (711 modules compiled)
+- ✅ Portal builds clean (new components integrated, dark theme applied)
+- ✅ Commit `6b4df16` recorded
+
+### Key Learnings
+
+**Admin prop escalation pattern** — Single `adminMode` boolean on components is cleaner and safer than passing full endpoint URLs or header factory functions. Keeps prop API simple and avoids useCallback dependency tracking.
+
+**Table-based analytics for portal** — Portal doesn't have recharts; showing time-series data as a table (bucket, count, avg latency) is sufficient for Phase 1 operator observability. Charts can be added later if needed.
+
+**Separate auth domains** — Admin dashboard uses `loom_admin_token` (JWT from `/v1/admin/login`), portal pages use tenant JWT from portal signup/login. Clear separation prevents token leakage confusion.
+
+**Dark theme consistency** — Both dashboard and portal now use `bg-gray-900`, `text-gray-200`, `border-gray-700` for consistency. Single color palette across both admin and tenant surfaces.
+
+### Deferred (Phase 2+)
+
+- Admin multi-tenant comparison charts (side-by-side analytics for multiple tenants) — architecture supports it, UI not required for Phase 1
+- Real-time trace updates in portal — background polling not needed for Phase 1
+- Portal metrics exports (CSV, JSON) — can add in future observer requests
+- Admin audit logging (who viewed what, when) — Fenster noted this as future enhancement
+
+### Coordination Notes
+
+- Depends on Fenster's three new `/v1/admin/*` endpoints — all delivered and tested
+- Portal is now ready for UAT (user acceptance testing) with full observability
+- Dashboard is ready for cross-tenant admin testing
+- No regressions to tenant-scoped traces/analytics endpoints
+
+### Code Quality
+
+- ✅ TypeScript strict mode (no `any` types)
+- ✅ No console errors in either build
+- ✅ Props match Fenster's endpoint signatures exactly
+- ✅ Dark theme applied consistently across all new components
