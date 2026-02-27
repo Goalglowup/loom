@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { API_BASE, authHeaders } from '../utils/api';
+import { ADMIN_BASE, adminAuthHeaders } from '../utils/adminApi';
 import './TracesTable.css';
 
 export interface Trace {
@@ -18,6 +19,8 @@ export interface Trace {
 
 interface TracesTableProps {
   onRowClick: (trace: Trace) => void;
+  adminMode?: boolean;
+  tenantId?: string;
 }
 
 export function statusClass(code: number | null): string {
@@ -52,7 +55,7 @@ function SkeletonRow() {
   );
 }
 
-function TracesTable({ onRowClick }: TracesTableProps) {
+function TracesTable({ onRowClick, adminMode, tenantId }: TracesTableProps) {
   const [traces, setTraces] = useState<Trace[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -68,7 +71,11 @@ function TracesTable({ onRowClick }: TracesTableProps) {
     try {
       const params = new URLSearchParams({ limit: '50' });
       if (cursor) params.set('cursor', cursor);
-      const res = await fetch(`${API_BASE}/v1/traces?${params}`, { headers: authHeaders() });
+      if (adminMode && tenantId) params.set('tenant_id', tenantId);
+      const base = adminMode ? ADMIN_BASE : API_BASE;
+      const path = adminMode ? '/v1/admin/traces' : '/v1/traces';
+      const headers = adminMode ? adminAuthHeaders() : authHeaders();
+      const res = await fetch(`${base}${path}?${params}`, { headers });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = (await res.json()) as { traces: Trace[]; nextCursor: string | null };
       setTraces(prev => (isInitial ? data.traces : [...prev, ...data.traces]));
@@ -79,7 +86,7 @@ function TracesTable({ onRowClick }: TracesTableProps) {
       if (isInitial) setLoading(false);
       else setLoadingMore(false);
     }
-  }, []);
+  }, [adminMode, tenantId]);
 
   useEffect(() => {
     fetchTraces();

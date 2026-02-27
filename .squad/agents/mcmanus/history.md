@@ -518,3 +518,29 @@ cd portal && npm run build
 - **State-based navigation in tenant portal** — Unlike admin dashboard (which uses URL routing for each tenant), tenant portal doesn't need URL routes for pages (no sharing/linking of tenant views). Sidebar navigation with React state is simpler and faster.
 - **Separate JWT storage keys** — Using `loom_portal_token` (vs `loom_admin_token`) makes auth domain separation explicit. If a bug exposes the storage, it's clear which token was leaked.
 - **API key prefix = 15 chars** — Frontend displays `loom_sk_` + 7 chars, allowing users to verify against their own key record without exposing the full key or hash.
+
+### 2026-02-26: M6 — Admin Dashboard Split + Portal Traces/Analytics
+
+**Implemented:**
+
+**Dashboard (admin):**
+- `TracesPage.tsx` — replaced API key gate with admin JWT check; added tenant dropdown (fetches `/v1/admin/tenants`); passes `adminMode + tenantId` to TracesTable
+- `AnalyticsPage.tsx` — same pattern; tenant filter drives both AnalyticsSummary and TimeseriesCharts
+- `TracesTable.tsx` — added `adminMode?: boolean` + `tenantId?: string` props; when adminMode, calls `/v1/admin/traces` via `ADMIN_BASE` + `adminAuthHeaders()`; tenantId appended as `?tenant_id=X`
+- `AnalyticsSummary.tsx` — same `adminMode`/`tenantId` props; switches endpoint to `/v1/admin/analytics/summary`
+- `TimeseriesCharts.tsx` — same pattern; switches to `/v1/admin/analytics/timeseries`
+
+**Portal (tenant):**
+- `portal/src/pages/TracesPage.tsx` — calls `/v1/traces` with JWT Bearer header; table with 6 columns (time, model, provider, status, latency, tokens); click-to-open side panel detail view; "Load more" cursor pagination
+- `portal/src/pages/AnalyticsPage.tsx` — calls `/v1/analytics/summary` + `/v1/analytics/timeseries`; 4 summary cards; time window selector (1h/6h/24h/7d); request volume table per bucket
+- `portal/src/App.tsx` — added routes `/app/traces` and `/app/analytics`
+- `portal/src/components/AppLayout.tsx` — added Traces 📋 and Analytics 📊 nav links between Home and Settings
+
+**Key design decisions:**
+- `adminMode` boolean on components rather than passing full URL/headers — simpler prop API, no referential identity issues with inline functions
+- Both apps build clean (TypeScript strict, no errors)
+- Portal pages follow same dark theme as SettingsPage (bg-gray-900, border-gray-700)
+- Admin dashboard shows "sign in as admin" message instead of API key prompt when no admin token
+
+**Pattern — admin prop escalation:**
+When a component must call different endpoints depending on caller context (admin vs tenant), a single `adminMode` boolean is cleaner than passing full URLs or header factories. The component internally selects the right base URL and auth method. If a third caller context emerges, this can be refactored to an explicit `context: 'admin' | 'tenant'` enum.

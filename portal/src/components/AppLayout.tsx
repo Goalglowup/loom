@@ -50,6 +50,12 @@ export default function AppLayout() {
           <NavLink to="/app" end className={navLinkClass}>
             🏠 <span>Home</span>
           </NavLink>
+          <NavLink to="/app/traces" className={navLinkClass}>
+            📋 <span>Traces</span>
+          </NavLink>
+          <NavLink to="/app/analytics" className={navLinkClass}>
+            📊 <span>Analytics</span>
+          </NavLink>
           <NavLink to="/app/settings" className={navLinkClass}>
             ⚙️ <span>Settings</span>
           </NavLink>

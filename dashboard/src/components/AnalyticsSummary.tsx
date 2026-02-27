@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { API_BASE, authHeaders } from '../utils/api';
+import { ADMIN_BASE, adminAuthHeaders } from '../utils/adminApi';
 import './AnalyticsSummary.css';
 
 interface Summary {
@@ -23,6 +24,8 @@ const WINDOW_OPTIONS: { label: string; value: WindowHours }[] = [
 interface AnalyticsSummaryProps {
   win: WindowHours;
   onWinChange: (w: WindowHours) => void;
+  adminMode?: boolean;
+  tenantId?: string;
 }
 
 function SkeletonCard() {
@@ -34,7 +37,7 @@ function SkeletonCard() {
   );
 }
 
-function AnalyticsSummary({ win, onWinChange }: AnalyticsSummaryProps) {
+function AnalyticsSummary({ win, onWinChange, adminMode, tenantId }: AnalyticsSummaryProps) {
   const [summary, setSummary] = useState<Summary | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -44,9 +47,12 @@ function AnalyticsSummary({ win, onWinChange }: AnalyticsSummaryProps) {
     async function load() {
       setLoading(true);
       try {
-        const res = await fetch(`${API_BASE}/v1/analytics/summary?window=${win}`, {
-          headers: authHeaders(),
-        });
+        const params = new URLSearchParams({ window: String(win) });
+        if (adminMode && tenantId) params.set('tenant_id', tenantId);
+        const base = adminMode ? ADMIN_BASE : API_BASE;
+        const path = adminMode ? '/v1/admin/analytics/summary' : '/v1/analytics/summary';
+        const headers = adminMode ? adminAuthHeaders() : authHeaders();
+        const res = await fetch(`${base}${path}?${params}`, { headers });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = (await res.json()) as Summary;
         if (!cancelled) setSummary(data);
@@ -63,7 +69,7 @@ function AnalyticsSummary({ win, onWinChange }: AnalyticsSummaryProps) {
       cancelled = true;
       clearInterval(timer);
     };
-  }, [win]);
+  }, [win, adminMode, tenantId]);
 
   const cards = summary
     ? [

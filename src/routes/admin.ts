@@ -6,6 +6,8 @@ import { adminAuthMiddleware } from '../middleware/adminAuth.js';
 import { invalidateCachedKey, invalidateAllKeysForTenant } from '../auth.js';
 import { evictProvider } from '../providers/registry.js';
 import { encryptTraceBody, decryptTraceBody } from '../encryption.js';
+import { getAdminAnalyticsSummary, getAdminTimeseriesMetrics } from '../analytics.js';
+import { query } from '../db.js';
 
 const scryptAsync = promisify(scrypt);
 
@@ -505,5 +507,65 @@ export function registerAdminRoutes(fastify: FastifyInstance, pool: pg.Pool): vo
     }
 
     return reply.code(204).send();
+  });
+
+  // GET /v1/admin/traces — Paginated traces across all tenants
+  fastify.get<{
+    Querystring: { tenant_id?: string; limit?: string; cursor?: string };
+  }>('/v1/admin/traces', authOpts, async (request, reply) => {
+    const { tenant_id, cursor } = request.query;
+    const limit = Math.min(parseInt(request.query.limit ?? '50', 10), 200);
+
+    const params: unknown[] = [limit];
+    let whereClause = '';
+
+    if (tenant_id && cursor) {
+      whereClause = `WHERE tenant_id = $${params.push(tenant_id)} AND created_at < $${params.push(cursor)}::timestamptz`;
+    } else if (tenant_id) {
+      whereClause = `WHERE tenant_id = $${params.push(tenant_id)}`;
+    } else if (cursor) {
+      whereClause = `WHERE created_at < $${params.push(cursor)}::timestamptz`;
+    }
+
+    const result = await query(
+      `SELECT id, tenant_id, model, provider, status_code, latency_ms,
+              prompt_tokens, completion_tokens, ttfb_ms, gateway_overhead_ms, created_at
+       FROM   traces
+       ${whereClause}
+       ORDER  BY created_at DESC
+       LIMIT  $1`,
+      params,
+    );
+
+    const traces = result.rows;
+    const nextCursor =
+      traces.length === limit
+        ? (traces[traces.length - 1].created_at as Date).toISOString()
+        : null;
+
+    return reply.send({ traces, nextCursor });
+  });
+
+  // GET /v1/admin/analytics/summary — Aggregated metrics across all tenants
+  fastify.get<{
+    Querystring: { tenant_id?: string; window?: string };
+  }>('/v1/admin/analytics/summary', authOpts, async (request, reply) => {
+    const { tenant_id } = request.query;
+    const windowHours = parseInt(request.query.window ?? '24', 10);
+
+    const summary = await getAdminAnalyticsSummary(tenant_id, windowHours);
+    return reply.send(summary);
+  });
+
+  // GET /v1/admin/analytics/timeseries — Time-bucketed metrics across all tenants
+  fastify.get<{
+    Querystring: { tenant_id?: string; window?: string; bucket?: string };
+  }>('/v1/admin/analytics/timeseries', authOpts, async (request, reply) => {
+    const { tenant_id } = request.query;
+    const windowHours = parseInt(request.query.window ?? '24', 10);
+    const bucketMinutes = parseInt(request.query.bucket ?? '60', 10);
+
+    const timeseries = await getAdminTimeseriesMetrics(tenant_id, windowHours, bucketMinutes);
+    return reply.send(timeseries);
   });
 }

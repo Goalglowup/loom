@@ -477,3 +477,20 @@ Built all backend infrastructure for the tenant self-service portal per Keaton's
 - **Fastify namespace for JWT** — `decoratorName: 'portalJwt'` and `namespace: 'portal'` fully isolates portal JWT from admin JWT. Request decorators are independent: `request.jwtVerify()` vs `request.portalJwtVerify()`.
 - **SPA fallback ordering** — Portal fallback must come AFTER `/v1/`, `/dashboard`, and `/health` checks, otherwise API 404s return HTML. Handler order matters in Fastify `setNotFoundHandler`.
 - **API key prefix strategy** — Displaying first 15 chars (`loom_sk_abc...`) allows UI to show key identity without exposing the full key or hash. User can compare against their generated key for verification.
+
+## Learnings
+
+### Admin Trace & Analytics Endpoints (added)
+
+**What was built:**
+- `GET /v1/admin/traces` — cross-tenant paginated trace list with optional `tenant_id` filter, `limit` (max 200, default 50), `cursor` (ISO timestamp) for keyset pagination. Placed in `src/routes/admin.ts` behind `adminAuthMiddleware`.
+- `GET /v1/admin/analytics/summary` — admin-scoped aggregated metrics using new `getAdminAnalyticsSummary(tenantId?, windowHours?)` in `analytics.ts`.
+- `GET /v1/admin/analytics/timeseries` — admin-scoped time-bucketed metrics using new `getAdminTimeseriesMetrics(tenantId?, windowHours?, bucketMinutes?)` in `analytics.ts`.
+
+**Key Design Decisions:**
+- Existing `getAnalyticsSummary` / `getTimeseriesMetrics` require a `tenantId` — added separate admin variants with optional `tenantId` to avoid mutating the per-tenant API surface.
+- Used `params.push(value)` inside template literals to auto-number SQL parameters (`$1`, `$2`, etc.) cleanly when building dynamic WHERE clauses without an ORM.
+- `$1` is reserved for `limit` in the traces query so all WHERE params are appended after — ensures `LIMIT $1` always refers to the correct binding regardless of filter combinations.
+- Added `import { query } from '../db.js'` to `admin.ts` — admin routes previously used only `pool.query`; cross-tenant trace query benefits from the shared `query` helper consistent with `dashboard.ts`.
+
+**Build Status:** ✅ `npm run build` (zero TypeScript errors)

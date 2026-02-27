@@ -9,6 +9,7 @@ import {
   Tooltip,
 } from 'recharts';
 import { API_BASE, authHeaders } from '../utils/api';
+import { ADMIN_BASE, adminAuthHeaders } from '../utils/adminApi';
 import type { WindowHours } from './AnalyticsSummary';
 import './TimeseriesCharts.css';
 
@@ -22,6 +23,8 @@ interface Bucket {
 
 interface TimeseriesChartsProps {
   win: WindowHours;
+  adminMode?: boolean;
+  tenantId?: string;
 }
 
 const BUCKET_MINUTES: Record<WindowHours, number> = {
@@ -47,7 +50,7 @@ function LoadingChart() {
   );
 }
 
-function TimeseriesCharts({ win }: TimeseriesChartsProps) {
+function TimeseriesCharts({ win, adminMode, tenantId }: TimeseriesChartsProps) {
   const [data, setData] = useState<Bucket[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -58,10 +61,12 @@ function TimeseriesCharts({ win }: TimeseriesChartsProps) {
       setLoading(true);
       try {
         const bucket = BUCKET_MINUTES[win];
-        const res = await fetch(
-          `${API_BASE}/v1/analytics/timeseries?window=${win}&bucket=${bucket}`,
-          { headers: authHeaders() }
-        );
+        const params = new URLSearchParams({ window: String(win), bucket: String(bucket) });
+        if (adminMode && tenantId) params.set('tenant_id', tenantId);
+        const base = adminMode ? ADMIN_BASE : API_BASE;
+        const path = adminMode ? '/v1/admin/analytics/timeseries' : '/v1/analytics/timeseries';
+        const headers = adminMode ? adminAuthHeaders() : authHeaders();
+        const res = await fetch(`${base}${path}?${params}`, { headers });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const raw = (await res.json()) as Bucket[];
         if (!cancelled) setData(raw);
@@ -74,7 +79,7 @@ function TimeseriesCharts({ win }: TimeseriesChartsProps) {
 
     load();
     return () => { cancelled = true; };
-  }, [win]);
+  }, [win, adminMode, tenantId]);
 
   const chartData = data.map(b => ({
     ...b,
