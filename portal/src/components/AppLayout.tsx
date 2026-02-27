@@ -50,6 +50,14 @@ export default function AppLayout() {
               👥 <span>Members</span>
             </NavLink>
           )}
+          {currentRole === 'owner' && (
+            <NavLink to="/app/subtenants" className={navLinkClass}>
+              🏢 <span>Subtenants</span>
+            </NavLink>
+          )}
+          <NavLink to="/app/agents" className={navLinkClass}>
+            🤖 <span>Agents</span>
+          </NavLink>
         </nav>
 
         {/* Footer */}

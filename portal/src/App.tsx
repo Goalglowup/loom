@@ -10,6 +10,8 @@ import ApiKeysPage from './pages/ApiKeysPage';
 import TracesPage from './pages/TracesPage';
 import AnalyticsPage from './pages/AnalyticsPage';
 import MembersPage from './pages/MembersPage';
+import SubtenantsPage from './pages/SubtenantsPage';
+import AgentsPage from './pages/AgentsPage';
 import AuthGuard from './components/AuthGuard';
 
 export default function App() {
@@ -26,6 +28,8 @@ export default function App() {
           <Route path="traces" element={<TracesPage />} />
           <Route path="analytics" element={<AnalyticsPage />} />
           <Route path="members" element={<MembersPage />} />
+          <Route path="subtenants" element={<SubtenantsPage />} />
+          <Route path="agents" element={<AgentsPage />} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

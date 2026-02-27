@@ -26,6 +26,33 @@ async function request<T>(
 }
 
 export const api = {
+  // Subtenants
+  listSubtenants: (token: string) =>
+    request<{ subtenants: Subtenant[] }>('GET', '/v1/portal/subtenants', undefined, token),
+
+  createSubtenant: (token: string, name: string) =>
+    request<{ subtenant: Subtenant }>('POST', '/v1/portal/subtenants', { name }, token),
+
+  // Agents
+  listAgents: (token: string) =>
+    request<{ agents: Agent[] }>('GET', '/v1/portal/agents', undefined, token),
+
+  createAgent: (token: string, data: CreateAgentInput) =>
+    request<{ agent: Agent }>('POST', '/v1/portal/agents', data, token),
+
+  getAgent: (token: string, id: string) =>
+    request<{ agent: Agent }>('GET', `/v1/portal/agents/${id}`, undefined, token),
+
+  updateAgent: (token: string, id: string, data: Partial<AgentInput>) =>
+    request<{ agent: Agent }>('PUT', `/v1/portal/agents/${id}`, data, token),
+
+  deleteAgent: (token: string, id: string) =>
+    request<void>('DELETE', `/v1/portal/agents/${id}`, undefined, token),
+
+  getResolvedAgentConfig: (token: string, id: string) =>
+    request<{ resolved: ResolvedAgentConfig }>('GET', `/v1/portal/agents/${id}/resolved`, undefined, token),
+
+
   signup: (body: { tenantName?: string; email: string; password: string; inviteToken?: string }) =>
     request<{ token: string; user: User; tenant: Tenant; apiKey?: string; tenants?: TenantMembership[] }>('POST', '/v1/portal/auth/signup', body),
 
@@ -44,7 +71,7 @@ export const api = {
   listApiKeys: (token: string) =>
     request<{ apiKeys: ApiKeyEntry[] }>('GET', '/v1/portal/api-keys', undefined, token),
 
-  createApiKey: (token: string, body: { name: string }) =>
+  createApiKey: (token: string, body: { name: string; agentId: string }) =>
     request<ApiKeyCreated>('POST', '/v1/portal/api-keys', body, token),
 
   revokeApiKey: (token: string, id: string) =>
@@ -101,6 +128,8 @@ export interface ApiKeyEntry {
   status: 'active' | 'revoked';
   createdAt: string;
   revokedAt: string | null;
+  agentId?: string;
+  agentName?: string;
 }
 export interface ApiKeyCreated extends ApiKeyEntry { key: string; }
 export interface InviteInfo {
@@ -126,4 +155,60 @@ export interface Member {
   role: string;
   joinedAt: string;
   lastLogin: string | null;
+}
+export interface Subtenant {
+  id: string;
+  name: string;
+  status: string;
+  createdAt: string;
+}
+
+export interface AgentMergePolicies {
+  system_prompt: 'prepend' | 'append' | 'overwrite' | 'ignore';
+  skills: 'merge' | 'overwrite' | 'ignore';
+  mcp_endpoints: 'merge' | 'overwrite' | 'ignore';
+}
+
+export interface Skill {
+  name: string;
+  description: string;
+  parameters?: Record<string, unknown>;
+}
+
+export interface McpEndpoint {
+  name: string;
+  url: string;
+  auth?: string;
+}
+
+export interface Agent {
+  id: string;
+  name: string;
+  providerConfig?: Record<string, unknown> | null;
+  systemPrompt?: string | null;
+  skills?: Skill[] | null;
+  mcpEndpoints?: McpEndpoint[] | null;
+  mergePolicies: AgentMergePolicies;
+  createdAt: string;
+  updatedAt?: string | null;
+}
+
+export interface AgentInput {
+  name: string;
+  providerConfig?: Record<string, unknown> | null;
+  systemPrompt?: string | null;
+  skills?: Skill[] | null;
+  mcpEndpoints?: McpEndpoint[] | null;
+  mergePolicies?: AgentMergePolicies;
+}
+
+export type CreateAgentInput = AgentInput;
+
+export interface ResolvedAgentConfig {
+  providerConfig: Record<string, unknown> | null;
+  systemPrompt: string | null;
+  skills: Skill[];
+  mcpEndpoints: McpEndpoint[];
+  mergePolicies: AgentMergePolicies;
+  inheritanceChain: Array<{ level: 'agent' | 'tenant'; name: string; id: string }>;
 }

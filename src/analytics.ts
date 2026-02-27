@@ -52,15 +52,50 @@ const COST_EXPR = `
 `;
 
 /**
+ * Recursive CTE prefix that resolves a tenant and all its descendants.
+ * Uses $1 as the root tenant ID.  Append to a query and reference
+ * `subtenant_tree` in the WHERE clause.
+ */
+const SUBTENANT_CTE = `
+WITH RECURSIVE subtenant_tree AS (
+  SELECT id FROM tenants WHERE id = $1
+  UNION ALL
+  SELECT t.id FROM tenants t JOIN subtenant_tree st ON t.parent_id = st.id
+)`;
+
+/**
  * Return a single-row summary of all traces for the given tenant within
  * the specified time window.
  */
 export async function getAnalyticsSummary(
   tenantId: string,
   windowHours = 24,
+  rollup = false,
 ): Promise<AnalyticsSummary> {
-  const result = await query(
-    `SELECT
+  const tenantFilter = rollup
+    ? `${SUBTENANT_CTE}
+     SELECT
+       COUNT(*)::int                                                  AS total_requests,
+       COALESCE(SUM(total_tokens), 0)::bigint                        AS total_tokens,
+       COALESCE(SUM(${COST_EXPR}), 0)::float                        AS estimated_cost_usd,
+       COALESCE(AVG(latency_ms), 0)::float                           AS avg_latency_ms,
+       COALESCE(
+         percentile_cont(0.95) WITHIN GROUP (ORDER BY latency_ms), 0
+       )::float                                                       AS p95_latency_ms,
+       COALESCE(
+         percentile_cont(0.99) WITHIN GROUP (ORDER BY latency_ms), 0
+       )::float                                                       AS p99_latency_ms,
+       COALESCE(
+         SUM(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END)::float
+           / NULLIF(COUNT(*), 0),
+         0
+       )::float                                                       AS error_rate,
+       COALESCE(AVG(gateway_overhead_ms), 0)::float                  AS avg_overhead_ms,
+       COALESCE(AVG(ttfb_ms), 0)::float                              AS avg_ttfb_ms
+     FROM traces
+     WHERE tenant_id IN (SELECT id FROM subtenant_tree)
+       AND created_at >= NOW() - ($2 || ' hours')::interval`
+    : `SELECT
        COUNT(*)::int                                                  AS total_requests,
        COALESCE(SUM(total_tokens), 0)::bigint                        AS total_tokens,
        COALESCE(SUM(${COST_EXPR}), 0)::float                        AS estimated_cost_usd,
@@ -80,9 +115,9 @@ export async function getAnalyticsSummary(
        COALESCE(AVG(ttfb_ms), 0)::float                              AS avg_ttfb_ms
      FROM traces
      WHERE tenant_id = $1
-       AND created_at >= NOW() - ($2 || ' hours')::interval`,
-    [tenantId, windowHours],
-  );
+       AND created_at >= NOW() - ($2 || ' hours')::interval`;
+
+  const result = await query(tenantFilter, [tenantId, windowHours]);
 
   const row = result.rows[0];
   return {
@@ -202,9 +237,31 @@ export async function getTimeseriesMetrics(
   tenantId: string,
   windowHours = 24,
   bucketMinutes = 60,
+  rollup = false,
 ): Promise<TimeseriesBucket[]> {
-  const result = await query(
-    `SELECT
+  const sql = rollup
+    ? `${SUBTENANT_CTE}
+     SELECT
+       to_timestamp(
+         floor(extract(epoch from created_at) / ($3 * 60)) * ($3 * 60)
+       )                                                            AS bucket,
+       COUNT(*)::int                                                AS requests,
+       COALESCE(SUM(total_tokens), 0)::bigint                      AS tokens,
+       COALESCE(SUM(${COST_EXPR}), 0)::float                      AS cost_usd,
+       COALESCE(AVG(latency_ms), 0)::float                         AS avg_latency_ms,
+       COALESCE(
+         SUM(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END)::float
+           / NULLIF(COUNT(*), 0),
+         0
+       )::float                                                     AS error_rate,
+       COALESCE(AVG(gateway_overhead_ms), 0)::float                AS avg_overhead_ms,
+       COALESCE(AVG(ttfb_ms), 0)::float                            AS avg_ttfb_ms
+     FROM traces
+     WHERE tenant_id IN (SELECT id FROM subtenant_tree)
+       AND created_at >= NOW() - ($2 || ' hours')::interval
+     GROUP BY 1
+     ORDER BY 1 ASC`
+    : `SELECT
        to_timestamp(
          floor(extract(epoch from created_at) / ($3 * 60)) * ($3 * 60)
        )                                                            AS bucket,
@@ -223,9 +280,9 @@ export async function getTimeseriesMetrics(
      WHERE tenant_id = $1
        AND created_at >= NOW() - ($2 || ' hours')::interval
      GROUP BY 1
-     ORDER BY 1 ASC`,
-    [tenantId, windowHours, bucketMinutes],
-  );
+     ORDER BY 1 ASC`;
+
+  const result = await query(sql, [tenantId, windowHours, bucketMinutes]);
 
   return result.rows.map((row) => ({
     bucket:        new Date(row.bucket),
@@ -246,9 +303,28 @@ export async function getModelBreakdown(
   tenantId: string,
   windowHours = 24,
   limit = 10,
+  rollup = false,
 ): Promise<ModelBreakdown[]> {
-  const result = await query(
-    `SELECT
+  const sql = rollup
+    ? `${SUBTENANT_CTE}
+     SELECT
+       model,
+       COUNT(*)::int                                                AS requests,
+       COALESCE(
+         SUM(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END)::float
+           / NULLIF(COUNT(*), 0),
+         0
+       )::float                                                     AS error_rate,
+       COALESCE(AVG(latency_ms), 0)::float                         AS avg_latency_ms,
+       COALESCE(SUM(total_tokens), 0)::bigint                      AS total_tokens,
+       COALESCE(SUM(${COST_EXPR}), 0)::float                      AS estimated_cost_usd
+     FROM traces
+     WHERE tenant_id IN (SELECT id FROM subtenant_tree)
+       AND created_at >= NOW() - ($2 || ' hours')::interval
+     GROUP BY model
+     ORDER BY requests DESC
+     LIMIT $3`
+    : `SELECT
        model,
        COUNT(*)::int                                                AS requests,
        COALESCE(
@@ -264,9 +340,9 @@ export async function getModelBreakdown(
        AND created_at >= NOW() - ($2 || ' hours')::interval
      GROUP BY model
      ORDER BY requests DESC
-     LIMIT $3`,
-    [tenantId, windowHours, limit],
-  );
+     LIMIT $3`;
+
+  const result = await query(sql, [tenantId, windowHours, limit]);
 
   return result.rows.map((row) => ({
     model:            row.model,

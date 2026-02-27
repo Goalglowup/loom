@@ -30,9 +30,9 @@ export default function SettingsPage() {
   return (
     <div className="p-8 space-y-6 max-w-xl">
       <div>
-        <h1 className="text-2xl font-bold text-white">Provider settings</h1>
+        <h1 className="text-2xl font-bold text-white">Org Defaults</h1>
         <p className="text-gray-400 text-sm mt-1">
-          Configure the LLM provider Loom routes requests to.
+          Default settings inherited by agents. Agents can override these or leave them blank to use these values.
         </p>
       </div>
 
@@ -57,6 +57,10 @@ export default function SettingsPage() {
             initialConfig={config ?? { provider: null, baseUrl: null, deployment: null, apiVersion: null, hasApiKey: false }}
             onSave={handleSave}
           />
+
+          <p className="text-xs text-gray-500 border-t border-gray-700 pt-4">
+            These settings are inherited by all agents in this org unless the agent defines its own.
+          </p>
         </div>
       )}
     </div>

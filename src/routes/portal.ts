@@ -285,10 +285,23 @@ export function registerPortalRoutes(fastify: FastifyInstance, pool: pg.Pool): v
         }
       : null;
 
+    const [agentsResult, subtenantsResult] = await Promise.all([
+      pool.query<{ id: string; name: string }>(
+        `SELECT id, name FROM agents WHERE tenant_id = $1 ORDER BY created_at`,
+        [tenantId]
+      ),
+      pool.query<{ id: string; name: string; status: string }>(
+        `SELECT id, name, status FROM tenants WHERE parent_id = $1 ORDER BY created_at`,
+        [tenantId]
+      ),
+    ]);
+
     return reply.send({
       user: { id: row.id, email: row.email, role: row.role },
       tenant: { id: row.tenant_id, name: row.tenant_name, providerConfig },
       tenants: tenantsResult.rows.map((t) => ({ id: t.tenant_id, name: t.tenant_name, role: t.role })),
+      agents: agentsResult.rows.map((a) => ({ id: a.id, name: a.name })),
+      subtenants: subtenantsResult.rows.map((s) => ({ id: s.id, name: s.name, status: s.status })),
     });
   });
 
@@ -483,7 +496,8 @@ export function registerPortalRoutes(fastify: FastifyInstance, pool: pg.Pool): v
     const { tenantId } = request.portalUser!;
     const qs = request.query as Record<string, string>;
     const windowHours = parseInt(qs.window ?? '24', 10);
-    const summary = await getAnalyticsSummary(tenantId, windowHours);
+    const rollup = qs.rollup === 'true' || qs.rollup === '1';
+    const summary = await getAnalyticsSummary(tenantId, windowHours, rollup);
     return reply.send(summary);
   });
 
@@ -493,7 +507,8 @@ export function registerPortalRoutes(fastify: FastifyInstance, pool: pg.Pool): v
     const qs = request.query as Record<string, string>;
     const windowHours   = parseInt(qs.window ?? '24', 10);
     const bucketMinutes = parseInt(qs.bucket ?? '60', 10);
-    const timeseries = await getTimeseriesMetrics(tenantId, windowHours, bucketMinutes);
+    const rollup = qs.rollup === 'true' || qs.rollup === '1';
+    const timeseries = await getTimeseriesMetrics(tenantId, windowHours, bucketMinutes, rollup);
     return reply.send(timeseries);
   });
 
@@ -502,7 +517,8 @@ export function registerPortalRoutes(fastify: FastifyInstance, pool: pg.Pool): v
     const { tenantId } = request.portalUser!;
     const qs = request.query as Record<string, string>;
     const windowHours = parseInt(qs.window ?? '24', 10);
-    const models = await getModelBreakdown(tenantId, windowHours);
+    const rollup = qs.rollup === 'true' || qs.rollup === '1';
+    const models = await getModelBreakdown(tenantId, windowHours, 10, rollup);
     return reply.send({ models });
   });
 
@@ -870,6 +886,429 @@ export function registerPortalRoutes(fastify: FastifyInstance, pool: pg.Pool): v
         [userId, targetTenantId]
       );
       return reply.code(204).send();
+    }
+  );
+
+  // ── Helpers ──────────────────────────────────────────────────────────────────
+
+  function sanitizeAgentProviderConfig(cfg: Record<string, unknown> | null) {
+    if (!cfg) return null;
+    return {
+      provider: cfg['provider'] ?? null,
+      baseUrl: cfg['baseUrl'] ?? null,
+      deployment: cfg['deployment'] ?? null,
+      apiVersion: cfg['apiVersion'] ?? null,
+      hasApiKey: !!(cfg['apiKey']),
+    };
+  }
+
+  function prepareAgentProviderConfig(
+    tenantId: string,
+    rawConfig: Record<string, unknown> | undefined | null,
+  ): Record<string, unknown> | null {
+    if (!rawConfig) return null;
+    const stored: Record<string, unknown> = { ...rawConfig };
+    if (typeof stored['apiKey'] === 'string' && stored['apiKey'] && !String(stored['apiKey']).startsWith('encrypted:')) {
+      try {
+        const encrypted = encryptTraceBody(tenantId, stored['apiKey'] as string);
+        stored['apiKey'] = `encrypted:${encrypted.ciphertext}:${encrypted.iv}`;
+      } catch {
+        // if encryption fails, omit the key rather than store plaintext
+        delete stored['apiKey'];
+      }
+    }
+    return stored;
+  }
+
+  function formatAgent(row: {
+    id: string; name: string;
+    provider_config: Record<string, unknown> | null;
+    system_prompt: string | null;
+    skills: unknown[] | null;
+    mcp_endpoints: unknown[] | null;
+    merge_policies: Record<string, unknown>;
+    created_at: string; updated_at: string | null;
+  }) {
+    return {
+      id: row.id,
+      name: row.name,
+      providerConfig: sanitizeAgentProviderConfig(row.provider_config),
+      systemPrompt: row.system_prompt,
+      skills: row.skills,
+      mcpEndpoints: row.mcp_endpoints,
+      mergePolicies: row.merge_policies,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    };
+  }
+
+  const DEFAULT_MERGE_POLICIES = { system_prompt: 'prepend', skills: 'merge', mcp_endpoints: 'merge' };
+
+  // ── GET /v1/portal/subtenants ─────────────────────────────────────────────────
+  fastify.get('/v1/portal/subtenants', { preHandler: authRequired }, async (request, reply) => {
+    const { tenantId } = request.portalUser!;
+
+    const result = await pool.query<{
+      id: string; name: string; parent_id: string; status: string; created_at: string;
+    }>(
+      `SELECT id, name, parent_id, status, created_at FROM tenants WHERE parent_id = $1 ORDER BY created_at`,
+      [tenantId]
+    );
+
+    return reply.send({
+      subtenants: result.rows.map((row) => ({
+        id: row.id,
+        name: row.name,
+        status: row.status,
+        createdAt: row.created_at,
+      })),
+    });
+  });
+
+  // ── POST /v1/portal/subtenants ────────────────────────────────────────────────
+  fastify.post<{ Body: { name: string } }>(
+    '/v1/portal/subtenants',
+    { preHandler: ownerRequired },
+    async (request, reply) => {
+      const { tenantId, userId } = request.portalUser!;
+      const { name } = request.body;
+
+      if (!name || typeof name !== 'string' || name.trim().length === 0) {
+        return reply.code(400).send({ error: 'name is required' });
+      }
+
+      await pool.query('BEGIN');
+      try {
+        const tenantResult = await pool.query<{
+          id: string; name: string; parent_id: string; status: string; created_at: string;
+        }>(
+          `INSERT INTO tenants (name, parent_id) VALUES ($1, $2)
+           RETURNING id, name, parent_id, status, created_at`,
+          [name.trim(), tenantId]
+        );
+        const newTenant = tenantResult.rows[0];
+
+        await pool.query(
+          `INSERT INTO tenant_memberships (user_id, tenant_id, role) VALUES ($1, $2, 'owner')`,
+          [userId, newTenant.id]
+        );
+
+        await pool.query('COMMIT');
+
+        return reply.code(201).send({
+          subtenant: {
+            id: newTenant.id,
+            name: newTenant.name,
+            parentId: newTenant.parent_id,
+            status: newTenant.status,
+            createdAt: newTenant.created_at,
+          },
+        });
+      } catch (err) {
+        await pool.query('ROLLBACK');
+        fastify.log.error({ err }, 'Create subtenant transaction failed');
+        return reply.code(500).send({ error: 'Failed to create subtenant' });
+      }
+    }
+  );
+
+  // ── GET /v1/portal/agents ─────────────────────────────────────────────────────
+  fastify.get('/v1/portal/agents', { preHandler: authRequired }, async (request, reply) => {
+    const { tenantId } = request.portalUser!;
+
+    const result = await pool.query<{
+      id: string; name: string;
+      provider_config: Record<string, unknown> | null;
+      system_prompt: string | null;
+      skills: unknown[] | null;
+      mcp_endpoints: unknown[] | null;
+      merge_policies: Record<string, unknown>;
+      created_at: string; updated_at: string | null;
+    }>(
+      `SELECT id, name, provider_config, system_prompt, skills, mcp_endpoints, merge_policies, created_at, updated_at
+       FROM agents WHERE tenant_id = $1 ORDER BY created_at`,
+      [tenantId]
+    );
+
+    return reply.send({ agents: result.rows.map(formatAgent) });
+  });
+
+  // ── POST /v1/portal/agents ────────────────────────────────────────────────────
+  fastify.post<{
+    Body: {
+      name: string;
+      providerConfig?: Record<string, unknown>;
+      systemPrompt?: string;
+      skills?: unknown[];
+      mcpEndpoints?: unknown[];
+      mergePolicies?: Record<string, unknown>;
+    };
+  }>('/v1/portal/agents', { preHandler: authRequired }, async (request, reply) => {
+    const { tenantId } = request.portalUser!;
+    const { name, providerConfig, systemPrompt, skills, mcpEndpoints, mergePolicies } = request.body;
+
+    if (!name || typeof name !== 'string' || name.trim().length === 0) {
+      return reply.code(400).send({ error: 'name is required' });
+    }
+
+    const storedProviderConfig = prepareAgentProviderConfig(tenantId, providerConfig ?? null);
+    const storedMergePolicies = mergePolicies ?? DEFAULT_MERGE_POLICIES;
+
+    const result = await pool.query<{
+      id: string; name: string;
+      provider_config: Record<string, unknown> | null;
+      system_prompt: string | null;
+      skills: unknown[] | null;
+      mcp_endpoints: unknown[] | null;
+      merge_policies: Record<string, unknown>;
+      created_at: string; updated_at: string | null;
+    }>(
+      `INSERT INTO agents (tenant_id, name, provider_config, system_prompt, skills, mcp_endpoints, merge_policies)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       RETURNING id, name, provider_config, system_prompt, skills, mcp_endpoints, merge_policies, created_at, updated_at`,
+      [
+        tenantId,
+        name.trim(),
+        storedProviderConfig ? JSON.stringify(storedProviderConfig) : null,
+        systemPrompt ?? null,
+        skills ? JSON.stringify(skills) : null,
+        mcpEndpoints ? JSON.stringify(mcpEndpoints) : null,
+        JSON.stringify(storedMergePolicies),
+      ]
+    );
+
+    return reply.code(201).send({ agent: formatAgent(result.rows[0]) });
+  });
+
+  // ── GET /v1/portal/agents/:id ─────────────────────────────────────────────────
+  fastify.get<{ Params: { id: string } }>(
+    '/v1/portal/agents/:id',
+    { preHandler: authRequired },
+    async (request, reply) => {
+      const { tenantId } = request.portalUser!;
+      const { id } = request.params;
+
+      const result = await pool.query<{
+        id: string; name: string;
+        provider_config: Record<string, unknown> | null;
+        system_prompt: string | null;
+        skills: unknown[] | null;
+        mcp_endpoints: unknown[] | null;
+        merge_policies: Record<string, unknown>;
+        created_at: string; updated_at: string | null;
+      }>(
+        `SELECT a.id, a.name, a.provider_config, a.system_prompt, a.skills, a.mcp_endpoints, a.merge_policies,
+                a.created_at, a.updated_at
+         FROM agents a
+         JOIN tenant_memberships tm ON tm.tenant_id = a.tenant_id
+         WHERE a.id = $1 AND tm.user_id = $2`,
+        [id, request.portalUser!.userId]
+      );
+
+      if (result.rows.length === 0) {
+        return reply.code(404).send({ error: 'Agent not found' });
+      }
+      return reply.send({ agent: formatAgent(result.rows[0]) });
+    }
+  );
+
+  // ── PUT /v1/portal/agents/:id ─────────────────────────────────────────────────
+  fastify.put<{
+    Params: { id: string };
+    Body: {
+      name?: string;
+      providerConfig?: Record<string, unknown>;
+      systemPrompt?: string;
+      skills?: unknown[];
+      mcpEndpoints?: unknown[];
+      mergePolicies?: Record<string, unknown>;
+    };
+  }>(
+    '/v1/portal/agents/:id',
+    { preHandler: authRequired },
+    async (request, reply) => {
+      const { tenantId, userId } = request.portalUser!;
+      const { id } = request.params;
+      const { name, providerConfig, systemPrompt, skills, mcpEndpoints, mergePolicies } = request.body;
+
+      // Verify membership
+      const memberCheck = await pool.query(
+        `SELECT 1 FROM agents a JOIN tenant_memberships tm ON tm.tenant_id = a.tenant_id
+         WHERE a.id = $1 AND tm.user_id = $2`,
+        [id, userId]
+      );
+      if (memberCheck.rows.length === 0) {
+        return reply.code(404).send({ error: 'Agent not found' });
+      }
+
+      const setClauses: string[] = ['updated_at = now()'];
+      const values: unknown[] = [];
+      let idx = 1;
+
+      if (name !== undefined) { setClauses.push(`name = $${idx++}`); values.push(name.trim()); }
+      if (providerConfig !== undefined) {
+        const stored = prepareAgentProviderConfig(tenantId, providerConfig);
+        setClauses.push(`provider_config = $${idx++}`);
+        values.push(stored ? JSON.stringify(stored) : null);
+      }
+      if (systemPrompt !== undefined) { setClauses.push(`system_prompt = $${idx++}`); values.push(systemPrompt); }
+      if (skills !== undefined) { setClauses.push(`skills = $${idx++}`); values.push(JSON.stringify(skills)); }
+      if (mcpEndpoints !== undefined) { setClauses.push(`mcp_endpoints = $${idx++}`); values.push(JSON.stringify(mcpEndpoints)); }
+      if (mergePolicies !== undefined) { setClauses.push(`merge_policies = $${idx++}`); values.push(JSON.stringify(mergePolicies)); }
+
+      values.push(id, tenantId);
+
+      const result = await pool.query<{
+        id: string; name: string;
+        provider_config: Record<string, unknown> | null;
+        system_prompt: string | null;
+        skills: unknown[] | null;
+        mcp_endpoints: unknown[] | null;
+        merge_policies: Record<string, unknown>;
+        created_at: string; updated_at: string | null;
+      }>(
+        `UPDATE agents SET ${setClauses.join(', ')}
+         WHERE id = $${idx} AND tenant_id = $${idx + 1}
+         RETURNING id, name, provider_config, system_prompt, skills, mcp_endpoints, merge_policies, created_at, updated_at`,
+        values
+      );
+
+      if (result.rows.length === 0) {
+        return reply.code(404).send({ error: 'Agent not found' });
+      }
+      return reply.send({ agent: formatAgent(result.rows[0]) });
+    }
+  );
+
+  // ── DELETE /v1/portal/agents/:id ──────────────────────────────────────────────
+  fastify.delete<{ Params: { id: string } }>(
+    '/v1/portal/agents/:id',
+    { preHandler: ownerRequired },
+    async (request, reply) => {
+      const { tenantId } = request.portalUser!;
+      const { id } = request.params;
+
+      const result = await pool.query(
+        `DELETE FROM agents WHERE id = $1 AND tenant_id = $2 RETURNING id`,
+        [id, tenantId]
+      );
+
+      if (result.rows.length === 0) {
+        return reply.code(404).send({ error: 'Agent not found' });
+      }
+      return reply.code(204).send();
+    }
+  );
+
+  // ── GET /v1/portal/agents/:id/resolved ───────────────────────────────────────
+  fastify.get<{ Params: { id: string } }>(
+    '/v1/portal/agents/:id/resolved',
+    { preHandler: authRequired },
+    async (request, reply) => {
+      const { userId } = request.portalUser!;
+      const { id } = request.params;
+
+      // Fetch agent + verify membership
+      const agentResult = await pool.query<{
+        id: string; name: string; tenant_id: string;
+        provider_config: Record<string, unknown> | null;
+        system_prompt: string | null;
+        skills: unknown[] | null;
+        mcp_endpoints: unknown[] | null;
+        merge_policies: Record<string, unknown>;
+      }>(
+        `SELECT a.id, a.name, a.tenant_id, a.provider_config, a.system_prompt, a.skills, a.mcp_endpoints, a.merge_policies
+         FROM agents a
+         JOIN tenant_memberships tm ON tm.tenant_id = a.tenant_id
+         WHERE a.id = $1 AND tm.user_id = $2`,
+        [id, userId]
+      );
+
+      if (agentResult.rows.length === 0) {
+        return reply.code(404).send({ error: 'Agent not found' });
+      }
+      const agent = agentResult.rows[0];
+
+      // Walk tenant hierarchy upward via recursive CTE
+      const chainResult = await pool.query<{
+        id: string; name: string;
+        provider_config: Record<string, unknown> | null;
+        system_prompt: string | null;
+        skills: unknown[] | null;
+        mcp_endpoints: unknown[] | null;
+        depth: number;
+      }>(
+        `WITH RECURSIVE tenant_chain AS (
+           SELECT id, name, parent_id, provider_config, system_prompt, skills, mcp_endpoints, 0 AS depth
+           FROM tenants WHERE id = $1
+           UNION ALL
+           SELECT t.id, t.name, t.parent_id, t.provider_config, t.system_prompt, t.skills, t.mcp_endpoints, tc.depth + 1
+           FROM tenants t
+           JOIN tenant_chain tc ON t.id = tc.parent_id
+         )
+         SELECT id, name, provider_config, system_prompt, skills, mcp_endpoints, depth
+         FROM tenant_chain ORDER BY depth ASC`,
+        [agent.tenant_id]
+      );
+      const tenantChain = chainResult.rows;
+
+      // Resolve: first non-null providerConfig (agent first, then tenant chain)
+      let resolvedProviderConfig: Record<string, unknown> | null = agent.provider_config ?? null;
+      if (!resolvedProviderConfig) {
+        for (const t of tenantChain) {
+          if (t.provider_config) { resolvedProviderConfig = t.provider_config; break; }
+        }
+      }
+
+      // Resolve: first non-null systemPrompt
+      let resolvedSystemPrompt: string | null = agent.system_prompt ?? null;
+      if (!resolvedSystemPrompt) {
+        for (const t of tenantChain) {
+          if (t.system_prompt) { resolvedSystemPrompt = t.system_prompt; break; }
+        }
+      }
+
+      // Resolve: union of skills (agent + all tenant levels)
+      const skillsUnion: unknown[] = [];
+      const skillsSeen = new Set<string>();
+      const addSkills = (arr: unknown[] | null) => {
+        if (!arr) return;
+        for (const s of arr) {
+          const key = JSON.stringify(s);
+          if (!skillsSeen.has(key)) { skillsSeen.add(key); skillsUnion.push(s); }
+        }
+      };
+      addSkills(agent.skills);
+      for (const t of tenantChain) addSkills(t.skills);
+
+      // Resolve: union of mcpEndpoints
+      const endpointsUnion: unknown[] = [];
+      const endpointsSeen = new Set<string>();
+      const addEndpoints = (arr: unknown[] | null) => {
+        if (!arr) return;
+        for (const e of arr) {
+          const key = JSON.stringify(e);
+          if (!endpointsSeen.has(key)) { endpointsSeen.add(key); endpointsUnion.push(e); }
+        }
+      };
+      addEndpoints(agent.mcp_endpoints);
+      for (const t of tenantChain) addEndpoints(t.mcp_endpoints);
+
+      const inheritanceChain = [
+        { level: 'agent' as const, name: agent.name, id: agent.id },
+        ...tenantChain.map((t) => ({ level: 'tenant' as const, name: t.name, id: t.id })),
+      ];
+
+      return reply.send({
+        resolved: {
+          providerConfig: sanitizeAgentProviderConfig(resolvedProviderConfig),
+          systemPrompt: resolvedSystemPrompt,
+          skills: skillsUnion.length > 0 ? skillsUnion : null,
+          mcpEndpoints: endpointsUnion.length > 0 ? endpointsUnion : null,
+          mergePolicies: agent.merge_policies,
+          inheritanceChain,
+        },
+      });
     }
   );
 }

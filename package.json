@@ -14,6 +14,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
+    "test:smoke": "vitest run --config vitest.smoke.config.ts",
     "seed": "tsx scripts/seed.ts",
     "build:portal": "cd portal && npm run build",
     "build:all": "npm run build:portal && cd dashboard && npm run build"
@@ -31,6 +32,8 @@
     "@types/node": "^22.19.11",
     "@types/pg": "^8.16.0",
     "@vitest/coverage-v8": "^2.1.8",
+    "chromedriver": "^146.0.0",
+    "selenium-webdriver": "^4.41.0",
     "tsx": "^4.21.0",
     "typescript": "^5.9.3",
     "vitest": "^2.1.8"

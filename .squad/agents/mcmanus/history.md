@@ -715,3 +715,42 @@ Used `adminMode?: boolean` prop pattern instead of passing full URLs/header fact
 **Decision Log:** `.squad/decisions.md` (mcmanus-multi-user-frontend.md merged)
 
 **Next:** Awaiting Hockney tests & Michael Brown UAT
+
+### Agent-Scoped Page Updates
+
+**Implemented:**
+- `ApiKeysPage.tsx` — added agent selector dropdown (fetches `GET /v1/portal/agents` on load); agent is required before creating a key; "Agent" column added to keys table; falls back to client-side join via `agentId` if `agentName` not in response
+- `AnalyticsPage.tsx` — added scope selector ("All — roll up subtenants + agents" vs "This org only"); appends `?rollup=true` to all three analytics fetch calls when selected; uses `key` prop on SharedAnalyticsPage to force remount on scope change
+- `SettingsPage.tsx` — renamed title to "Org Defaults", updated subtitle, added inheritance note below form
+- `api.ts` — updated `createApiKey` body to require `{ name, agentId }`; added `agentId?` and `agentName?` to `ApiKeyEntry` interface
+
+**Key Decisions:**
+- Used `key={rollup ? 'rollup' : 'org'}` on SharedAnalyticsPage to force remount on scope change — clean and avoids patching shared component internals (which use stable refs and only re-fetch on `win`/`tenantId` changes)
+- Agent dropdown defaults to first agent in list if agents exist
+- If `agentName` not returned by API, resolves name client-side via the already-loaded agents list
+
+### 2025-xx-xx: M2 - SubtenantsPage, AgentsPage + AgentEditor
+
+**Implemented:**
+- New TypeScript interfaces in `portal/src/lib/api.ts`: `Subtenant`, `Agent`, `AgentInput`, `CreateAgentInput`, `AgentMergePolicies`, `Skill`, `McpEndpoint`, `ResolvedAgentConfig`
+- New API methods in `api.ts`: `listSubtenants`, `createSubtenant`, `listAgents`, `createAgent`, `getAgent`, `updateAgent`, `deleteAgent`, `getResolvedAgentConfig`
+- `portal/src/pages/SubtenantsPage.tsx`: list + inline create form, status badges, owner-gated create button
+- `portal/src/components/AgentEditor.tsx`: full create/edit form with system prompt merge policies, skills (with JSON params), MCP endpoints, and collapsible resolved config panel
+- `portal/src/pages/AgentsPage.tsx`: agents list table with inline editor panel, delete with confirm dialog
+- Routes `/app/subtenants` and `/app/agents` added to `App.tsx`
+- Sidebar nav entries 🏢 Subtenants (owner-only) and 🤖 Agents added to `AppLayout.tsx`
+
+**Key Files:**
+- `portal/src/lib/api.ts` — new interfaces + API methods
+- `portal/src/pages/SubtenantsPage.tsx`
+- `portal/src/pages/AgentsPage.tsx`
+- `portal/src/components/AgentEditor.tsx`
+- `portal/src/App.tsx` — two new routes
+- `portal/src/components/AppLayout.tsx` — two new nav entries
+
+**Patterns Used:**
+- Followed MembersPage exactly for dark theme (bg-gray-900, border-gray-700, text-gray-400)
+- Inline editor panel pattern instead of modal/route — keeps context, simpler state
+- `EditorState` discriminated union (`closed | create | edit`) for type-safe editor mode
+- `useCallback` + `useEffect` for data loading, matching MembersPage pattern
+- Subtenants nav entry is owner-gated (same as Members); Agents is visible to all roles

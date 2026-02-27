@@ -79,6 +79,18 @@
 
 ## Learnings
 
+### 2026-02-25: Wave 5 — Agent-scoped API Keys & New Page Smoke Tests
+
+**Changes made:**
+- Updated `portal-app.smoke.ts` "API key can be created" test to handle the new agent dropdown in `ApiKeysPage`. The `+ New key` button now opens a form with a required `<select>` for agent selection and a name input. Since signup seeds a Default agent, the select is pre-populated; the test waits for `select[required]` to confirm agents loaded, fills the key name input, then submits.
+- Created `tests/smoke/portal-agents.smoke.ts` with 6 tests covering: navigate to Agents page, create an agent (via `+ New Agent` → `AgentEditor` form → `Create agent` submit), agent appears in list, navigate to Subtenants page, create a subtenant (via `+ Create Subtenant` → name input → `Create` submit), subtenant appears in list.
+
+**Key Learnings:**
+- **Agent select pre-selection**: `ApiKeysPage` calls `fetchAgents()` on mount and pre-selects the first agent via `setSelectedAgentId(agents[0].id)`. Tests don't need to interact with the select — just wait for it to confirm agents loaded, then fill the name and submit.
+- **Default agent always present**: The migration seeds a "Default" agent for every new tenant, so API key creation works immediately after signup without additional setup steps.
+- **AgentEditor submit button text**: In create mode the submit button says "Create agent" (vs "Save changes" in edit mode). XPath `//button[@type="submit"][contains(., "Create agent")]` is reliable.
+- **Sequential page-source checks**: After create actions, reusing `driver.getPageSource()` in the following test (without re-navigating) is valid because the tests run serially in `singleFork` mode and the page is still the same `/app/agents` or `/app/subtenants` route.
+
 - **fastify.inject() eliminates port flakiness**: Auth and streaming tests run in-process with deterministic timing, no port bind races
 - **vi.mock with importOriginal for dual-purpose mocking**: Real class available for instantiation; exported singleton can be spied on separately. Single mock serves both batch + timer tests and SSE passthrough tests
 - **INSERT parameter documentation prevents silent breaks**: If Fenster reorders INSERT params, test fails at the IDX constant layer (loudly), not silently in assertion values

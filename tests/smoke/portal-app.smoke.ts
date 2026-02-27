@@ -83,16 +83,34 @@ describe('Portal app smoke tests', () => {
   it('API key can be created', async () => {
     await driver.get(`${BASE_URL}/app/api-keys`);
 
-    // Click the create / generate button
-    const createBtn = await waitForVisible(
+    // Click the "+ New key" button to open the creation form
+    const newKeyBtn = await waitForVisible(
       driver,
-      By.xpath('//*[contains(text(), "Create") or contains(text(), "Generate") or contains(text(), "New")]'),
+      By.xpath('//*[contains(text(), "New key")]'),
       10000,
     );
-    await createBtn.click();
+    await newKeyBtn.click();
 
-    // A new key should appear — either revealed inline or in a list
-    await driver.sleep(1500);
+    // Wait for the agent select to appear — confirms agents have loaded.
+    // A Default agent is seeded at signup so it will be pre-selected.
+    await waitForVisible(driver, By.css('select[required]'), 8000);
+
+    // Fill in a key name (input placeholder: "Key name (e.g. production)")
+    const keyNameInput = await waitForVisible(
+      driver,
+      By.css('input[placeholder*="production" i]'),
+      5000,
+    );
+    await keyNameInput.sendKeys('smoke-test-key');
+
+    // Submit — agent is already pre-selected; just click Create
+    const submitBtn = await driver.findElement(
+      By.xpath('//button[@type="submit"][contains(., "Create")]'),
+    );
+    await submitBtn.click();
+
+    // Wait for reveal modal or key entry to appear
+    await driver.sleep(2000);
     const page = await driver.getPageSource();
     // API keys typically start with "sk-" or "loom_"
     expect(page).toMatch(/sk-|loom_|key|Key/i);

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
-import type { ApiKeyEntry, ApiKeyCreated } from '../lib/api';
+import type { ApiKeyEntry, ApiKeyCreated, Agent } from '../lib/api';
 import { getToken } from '../lib/auth';
 import ApiKeyReveal from '../components/ApiKeyReveal';
 
@@ -10,12 +10,16 @@ export default function ApiKeysPage() {
   const [error, setError] = useState('');
   const [creating, setCreating] = useState(false);
   const [newKeyName, setNewKeyName] = useState('');
+  const [selectedAgentId, setSelectedAgentId] = useState('');
+  const [agents, setAgents] = useState<Agent[]>([]);
+  const [agentsLoading, setAgentsLoading] = useState(true);
   const [createLoading, setCreateLoading] = useState(false);
   const [createError, setCreateError] = useState('');
   const [revealKey, setRevealKey] = useState<ApiKeyCreated | null>(null);
 
   useEffect(() => {
     fetchKeys();
+    fetchAgents();
   }, []);
 
   function fetchKeys() {
@@ -28,14 +32,27 @@ export default function ApiKeysPage() {
       .finally(() => setLoading(false));
   }
 
+  function fetchAgents() {
+    const token = getToken();
+    if (!token) return;
+    setAgentsLoading(true);
+    api.listAgents(token)
+      .then(({ agents }) => {
+        setAgents(agents);
+        if (agents.length > 0) setSelectedAgentId(agents[0].id);
+      })
+      .catch(() => {})
+      .finally(() => setAgentsLoading(false));
+  }
+
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
-    if (!newKeyName.trim()) return;
+    if (!newKeyName.trim() || !selectedAgentId) return;
     setCreateLoading(true);
     setCreateError('');
     try {
       const token = getToken()!;
-      const created = await api.createApiKey(token, { name: newKeyName.trim() });
+      const created = await api.createApiKey(token, { name: newKeyName.trim(), agentId: selectedAgentId });
       setRevealKey(created);
       setNewKeyName('');
       setCreating(false);
@@ -89,31 +106,67 @@ export default function ApiKeysPage() {
           className="bg-gray-900 border border-gray-700 rounded-xl p-5 space-y-3"
         >
           <h2 className="text-sm font-semibold text-gray-200">Create new API key</h2>
-          <div className="flex gap-2">
-            <input
-              type="text"
-              required
-              autoFocus
-              value={newKeyName}
-              onChange={e => setNewKeyName(e.target.value)}
-              placeholder="Key name (e.g. production)"
-              className="flex-1 bg-gray-950 border border-gray-700 rounded-lg px-3 py-2 text-gray-100 placeholder-gray-600 focus:outline-none focus:border-indigo-500 text-sm"
-            />
-            <button
-              type="submit"
-              disabled={createLoading}
-              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition-colors"
-            >
-              {createLoading ? 'Creating…' : 'Create'}
-            </button>
-            <button
-              type="button"
-              onClick={() => { setCreating(false); setCreateError(''); }}
-              className="px-3 py-2 text-sm text-gray-400 hover:text-gray-200 transition-colors"
-            >
-              Cancel
-            </button>
-          </div>
+          {!agentsLoading && agents.length === 0 ? (
+            <p className="text-sm text-yellow-400">
+              Create an agent first before generating API keys.
+            </p>
+          ) : (
+            <div className="space-y-2">
+              <select
+                required
+                value={selectedAgentId}
+                onChange={e => setSelectedAgentId(e.target.value)}
+                className="w-full bg-gray-950 border border-gray-700 rounded-lg px-3 py-2 text-gray-100 focus:outline-none focus:border-indigo-500 text-sm"
+              >
+                <option value="" disabled>Select agent…</option>
+                {agents.map(a => (
+                  <option key={a.id} value={a.id}>{a.name}</option>
+                ))}
+              </select>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  required
+                  autoFocus
+                  value={newKeyName}
+                  onChange={e => setNewKeyName(e.target.value)}
+                  placeholder="Key name (e.g. production)"
+                  className="flex-1 bg-gray-950 border border-gray-700 rounded-lg px-3 py-2 text-gray-100 placeholder-gray-600 focus:outline-none focus:border-indigo-500 text-sm"
+                />
+                <button
+                  type="submit"
+                  disabled={createLoading || agents.length === 0}
+                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition-colors"
+                >
+                  {createLoading ? 'Creating…' : 'Create'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setCreating(false); setCreateError(''); }}
+                  className="px-3 py-2 text-sm text-gray-400 hover:text-gray-200 transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+          {agentsLoading && agents.length === 0 && (
+            <div className="flex gap-2">
+              <input
+                type="text"
+                disabled
+                placeholder="Key name (e.g. production)"
+                className="flex-1 bg-gray-950 border border-gray-700 rounded-lg px-3 py-2 text-gray-100 placeholder-gray-600 focus:outline-none focus:border-indigo-500 text-sm opacity-50"
+              />
+              <button
+                type="button"
+                onClick={() => { setCreating(false); setCreateError(''); }}
+                className="px-3 py-2 text-sm text-gray-400 hover:text-gray-200 transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          )}
           {createError && (
             <p className="text-sm text-red-400">{createError}</p>
           )}
@@ -138,6 +191,7 @@ export default function ApiKeysPage() {
             <thead>
               <tr className="border-b border-gray-700 text-xs uppercase tracking-wide text-gray-500">
                 <th className="px-5 py-3 text-left font-medium">Name</th>
+                <th className="px-5 py-3 text-left font-medium">Agent</th>
                 <th className="px-5 py-3 text-left font-medium">Prefix</th>
                 <th className="px-5 py-3 text-left font-medium">Status</th>
                 <th className="px-5 py-3 text-left font-medium">Created</th>
@@ -151,6 +205,14 @@ export default function ApiKeysPage() {
                     <span className={key.status === 'revoked' ? 'line-through text-gray-500' : ''}>
                       {key.name}
                     </span>
+                  </td>
+                  <td className="px-5 py-3 text-gray-400 text-xs">
+                    {key.agentName
+                      ? key.agentName
+                      : key.agentId
+                        ? agents.find(a => a.id === key.agentId)?.name ?? <span className="text-gray-600">—</span>
+                        : <span className="text-gray-600">—</span>
+                    }
                   </td>
                   <td className="px-5 py-3 font-mono text-gray-400 text-xs">
                     {key.keyPrefix}…
