@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { getAdminToken, ADMIN_BASE, adminAuthHeaders, type AdminTenant } from '../utils/adminApi';
 import { AnalyticsPage as SharedAnalyticsPage } from '@shared/analytics';
-import type { SummaryData, TimeseriesData, Tenant } from '@shared/analytics';
+import type { SummaryData, TimeseriesData, ModelBreakdown, Tenant } from '@shared/analytics';
 import { BUCKET_MINUTES } from '@shared/analytics';
 import type { WindowHours } from '@shared/analytics';
 import './AnalyticsPage.css';
@@ -51,12 +51,23 @@ function AnalyticsPage() {
     return data.tenants.map(t => ({ id: t.id, name: t.name }));
   }
 
+  async function fetchModels(tenantId?: string, window?: string): Promise<ModelBreakdown[]> {
+    const params = new URLSearchParams();
+    if (window) params.set('window', window);
+    if (tenantId) params.set('tenant_id', tenantId);
+    const res = await fetch(`${ADMIN_BASE}/v1/admin/analytics/models?${params}`, { headers: adminAuthHeaders() });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = (await res.json()) as { models: ModelBreakdown[] };
+    return data.models;
+  }
+
   return (
     <div className="page">
       <SharedAnalyticsPage
         isAdmin={true}
         fetchSummary={fetchSummary}
         fetchTimeseries={fetchTimeseries}
+        fetchModels={fetchModels}
         fetchTenants={fetchTenants}
       />
     </div>

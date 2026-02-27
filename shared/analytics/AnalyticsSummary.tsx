@@ -29,10 +29,13 @@ function AnalyticsSummary({ summary, loading, win, onWinChange }: AnalyticsSumma
     ? [
         { label: 'Total Requests', value: summary.totalRequests.toLocaleString() },
         { label: 'Total Tokens', value: summary.totalTokens.toLocaleString() },
-        { label: 'Estimated Cost', value: `$${summary.estimatedCostUSD.toFixed(2)}` },
+        { label: 'Estimated Cost', value: `$${summary.estimatedCostUSD.toFixed(4)}` },
         { label: 'Avg Latency', value: `${summary.avgLatencyMs.toFixed(0)} ms` },
         { label: 'P95 Latency', value: `${summary.p95LatencyMs.toFixed(0)} ms` },
+        { label: 'P99 Latency', value: `${summary.p99LatencyMs.toFixed(0)} ms` },
         { label: 'Error Rate', value: `${(summary.errorRate * 100).toFixed(1)}%` },
+        { label: 'Avg Overhead', value: `${summary.avgOverheadMs.toFixed(0)} ms` },
+        { label: 'Avg TTFB', value: `${summary.avgTtfbMs.toFixed(0)} ms` },
       ]
     : [];
 
@@ -56,7 +59,7 @@ function AnalyticsSummary({ summary, loading, win, onWinChange }: AnalyticsSumma
 
       <div className="summary-cards" role="list" aria-label="Analytics metrics">
         {loading
-          ? Array.from({ length: 6 }, (_, i) => <SkeletonCard key={i} />)
+          ? Array.from({ length: 9 }, (_, i) => <SkeletonCard key={i} />)
           : cards.map(card => (
               <div className="summary-card" key={card.label} role="listitem">
                 <span className="card-label">{card.label}</span>

@@ -2,22 +2,25 @@ import { useState, useEffect, useRef } from 'react';
 import AnalyticsSummary from './AnalyticsSummary';
 import TimeseriesCharts from './TimeseriesCharts';
 import TenantSelector from './TenantSelector';
-import type { SummaryData, TimeseriesData, Tenant, WindowHours } from './types';
+import ModelBreakdownTable from './ModelBreakdown';
+import type { SummaryData, TimeseriesData, ModelBreakdown, Tenant, WindowHours } from './types';
 import './AnalyticsPage.css';
 
 export interface AnalyticsPageProps {
   isAdmin?: boolean;
   fetchSummary: (tenantId?: string, window?: string) => Promise<SummaryData>;
   fetchTimeseries: (tenantId?: string, window?: string) => Promise<TimeseriesData[]>;
+  fetchModels: (tenantId?: string, window?: string) => Promise<ModelBreakdown[]>;
   fetchTenants?: () => Promise<Tenant[]>;
 }
 
-function AnalyticsPage({ isAdmin, fetchSummary, fetchTimeseries, fetchTenants }: AnalyticsPageProps) {
+function AnalyticsPage({ isAdmin, fetchSummary, fetchTimeseries, fetchModels, fetchTenants }: AnalyticsPageProps) {
   const [win, setWin] = useState<WindowHours>(24);
   const [tenantId, setTenantId] = useState('');
   const [tenants, setTenants] = useState<Tenant[]>([]);
   const [summary, setSummary] = useState<SummaryData | null>(null);
   const [timeseries, setTimeseries] = useState<TimeseriesData[]>([]);
+  const [models, setModels] = useState<ModelBreakdown[] | null>(null);
   const [loading, setLoading] = useState(true);
 
   // Keep stable refs so the effect doesn't re-run when wrapper re-renders
@@ -25,6 +28,8 @@ function AnalyticsPage({ isAdmin, fetchSummary, fetchTimeseries, fetchTenants }:
   fetchSummaryRef.current = fetchSummary;
   const fetchTimeseriesRef = useRef(fetchTimeseries);
   fetchTimeseriesRef.current = fetchTimeseries;
+  const fetchModelsRef = useRef(fetchModels);
+  fetchModelsRef.current = fetchModels;
   const fetchTenantsRef = useRef(fetchTenants);
   fetchTenantsRef.current = fetchTenants;
 
@@ -44,13 +49,15 @@ function AnalyticsPage({ isAdmin, fetchSummary, fetchTimeseries, fetchTenants }:
       setLoading(true);
       try {
         const tid = tenantId || undefined;
-        const [s, t] = await Promise.all([
+        const [s, t, m] = await Promise.all([
           fetchSummaryRef.current(tid, String(win)),
           fetchTimeseriesRef.current(tid, String(win)),
+          fetchModelsRef.current(tid, String(win)),
         ]);
         if (!cancelled) {
           setSummary(s);
           setTimeseries(t);
+          setModels(m);
         }
       } catch (err) {
         console.error('Failed to fetch analytics:', err);
@@ -84,6 +91,7 @@ function AnalyticsPage({ isAdmin, fetchSummary, fetchTimeseries, fetchTenants }:
       <div className="shared-analytics-sections">
         <AnalyticsSummary summary={summary} loading={loading} win={win} onWinChange={setWin} />
         <TimeseriesCharts data={timeseries} loading={loading} win={win} />
+        <ModelBreakdownTable models={models} loading={loading} />
       </div>
     </div>
   );

@@ -7,7 +7,7 @@ import { registerPortalAuthMiddleware } from '../middleware/portalAuth.js';
 import { invalidateCachedKey } from '../auth.js';
 import { encryptTraceBody } from '../encryption.js';
 import { evictProvider } from '../providers/registry.js';
-import { getAnalyticsSummary, getTimeseriesMetrics } from '../analytics.js';
+import { getAnalyticsSummary, getTimeseriesMetrics, getModelBreakdown } from '../analytics.js';
 import { query } from '../db.js';
 
 const PORTAL_JWT_SECRET = process.env.PORTAL_JWT_SECRET || 'unsafe-portal-secret-change-in-production';
@@ -418,5 +418,14 @@ export function registerPortalRoutes(fastify: FastifyInstance, pool: pg.Pool): v
     const bucketMinutes = parseInt(qs.bucket ?? '60', 10);
     const timeseries = await getTimeseriesMetrics(tenantId, windowHours, bucketMinutes);
     return reply.send(timeseries);
+  });
+
+  // ── GET /v1/portal/analytics/models ─────────────────────────────────────────
+  fastify.get('/v1/portal/analytics/models', { preHandler: authRequired }, async (request, reply) => {
+    const { tenantId } = request.portalUser!;
+    const qs = request.query as Record<string, string>;
+    const windowHours = parseInt(qs.window ?? '24', 10);
+    const models = await getModelBreakdown(tenantId, windowHours);
+    return reply.send({ models });
   });
 }

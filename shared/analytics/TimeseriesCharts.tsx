@@ -36,7 +36,18 @@ function TimeseriesCharts({ data, loading, win }: TimeseriesChartsProps) {
   const chartData = data.map(b => ({
     ...b,
     label: formatBucketLabel(b.bucket, win),
+    errorPct: b.errorRate * 100,
   }));
+
+  const commonAxis = {
+    tick: { fontSize: 11, fill: '#9ca3af' },
+    tickLine: false as const,
+    axisLine: false as const,
+  };
+  const commonTooltip = {
+    contentStyle: { fontSize: '0.8125rem', borderRadius: 6, border: '1px solid #e5e7eb' },
+    labelStyle: { fontWeight: 600 },
+  };
 
   return (
     <div className="timeseries-charts">
@@ -54,32 +65,10 @@ function TimeseriesCharts({ data, loading, win }: TimeseriesChartsProps) {
                 </linearGradient>
               </defs>
               <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-              <XAxis
-                dataKey="label"
-                tick={{ fontSize: 11, fill: '#9ca3af' }}
-                tickLine={false}
-                axisLine={false}
-                interval="preserveStartEnd"
-              />
-              <YAxis
-                tick={{ fontSize: 11, fill: '#9ca3af' }}
-                tickLine={false}
-                axisLine={false}
-                width={40}
-              />
-              <Tooltip
-                contentStyle={{ fontSize: '0.8125rem', borderRadius: 6, border: '1px solid #e5e7eb' }}
-                labelStyle={{ fontWeight: 600 }}
-              />
-              <Area
-                type="monotone"
-                dataKey="requests"
-                stroke="#6366f1"
-                strokeWidth={2}
-                fill="url(#reqGradient)"
-                dot={false}
-                activeDot={{ r: 4 }}
-              />
+              <XAxis dataKey="label" {...commonAxis} interval="preserveStartEnd" />
+              <YAxis {...commonAxis} width={40} />
+              <Tooltip {...commonTooltip} />
+              <Area type="monotone" dataKey="requests" stroke="#6366f1" strokeWidth={2} fill="url(#reqGradient)" dot={false} activeDot={{ r: 4 }} />
             </AreaChart>
           </ResponsiveContainer>
         )}
@@ -99,33 +88,56 @@ function TimeseriesCharts({ data, loading, win }: TimeseriesChartsProps) {
                 </linearGradient>
               </defs>
               <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-              <XAxis
-                dataKey="label"
-                tick={{ fontSize: 11, fill: '#9ca3af' }}
-                tickLine={false}
-                axisLine={false}
-                interval="preserveStartEnd"
-              />
-              <YAxis
-                tick={{ fontSize: 11, fill: '#9ca3af' }}
-                tickLine={false}
-                axisLine={false}
-                width={40}
-              />
-              <Tooltip
-                contentStyle={{ fontSize: '0.8125rem', borderRadius: 6, border: '1px solid #e5e7eb' }}
-                labelStyle={{ fontWeight: 600 }}
-                formatter={(value: number | undefined) => [`${(value ?? 0).toFixed(0)} ms`, 'Avg Latency']}
-              />
-              <Area
-                type="monotone"
-                dataKey="avgLatencyMs"
-                stroke="#059669"
-                strokeWidth={2}
-                fill="url(#latGradient)"
-                dot={false}
-                activeDot={{ r: 4 }}
-              />
+              <XAxis dataKey="label" {...commonAxis} interval="preserveStartEnd" />
+              <YAxis {...commonAxis} width={40} />
+              <Tooltip {...commonTooltip} formatter={(v: number | undefined) => [`${(v ?? 0).toFixed(0)} ms`, 'Avg Latency']} />
+              <Area type="monotone" dataKey="avgLatencyMs" stroke="#059669" strokeWidth={2} fill="url(#latGradient)" dot={false} activeDot={{ r: 4 }} />
+            </AreaChart>
+          </ResponsiveContainer>
+        )}
+      </div>
+
+      <div className="chart-block">
+        <h3 className="chart-title">Error Rate over Time (%)</h3>
+        {loading ? (
+          <LoadingChart />
+        ) : (
+          <ResponsiveContainer width="100%" height={220}>
+            <AreaChart data={chartData} margin={{ top: 5, right: 16, left: 0, bottom: 5 }}>
+              <defs>
+                <linearGradient id="errGradient" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#ef4444" stopOpacity={0.18} />
+                  <stop offset="95%" stopColor="#ef4444" stopOpacity={0} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+              <XAxis dataKey="label" {...commonAxis} interval="preserveStartEnd" />
+              <YAxis {...commonAxis} width={40} tickFormatter={(v: number) => `${v.toFixed(0)}%`} />
+              <Tooltip {...commonTooltip} formatter={(v: number | undefined) => [`${(v ?? 0).toFixed(1)}%`, 'Error Rate']} />
+              <Area type="monotone" dataKey="errorPct" stroke="#ef4444" strokeWidth={2} fill="url(#errGradient)" dot={false} activeDot={{ r: 4 }} />
+            </AreaChart>
+          </ResponsiveContainer>
+        )}
+      </div>
+
+      <div className="chart-block">
+        <h3 className="chart-title">Estimated Cost over Time ($)</h3>
+        {loading ? (
+          <LoadingChart />
+        ) : (
+          <ResponsiveContainer width="100%" height={220}>
+            <AreaChart data={chartData} margin={{ top: 5, right: 16, left: 0, bottom: 5 }}>
+              <defs>
+                <linearGradient id="costGradient" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#f59e0b" stopOpacity={0.18} />
+                  <stop offset="95%" stopColor="#f59e0b" stopOpacity={0} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+              <XAxis dataKey="label" {...commonAxis} interval="preserveStartEnd" />
+              <YAxis {...commonAxis} width={55} tickFormatter={(v: number) => `$${v.toFixed(4)}`} />
+              <Tooltip {...commonTooltip} formatter={(v: number | undefined) => [`$${(v ?? 0).toFixed(6)}`, 'Cost']} />
+              <Area type="monotone" dataKey="costUSD" stroke="#f59e0b" strokeWidth={2} fill="url(#costGradient)" dot={false} activeDot={{ r: 4 }} />
             </AreaChart>
           </ResponsiveContainer>
         )}

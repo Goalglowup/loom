@@ -6,7 +6,10 @@ export interface AnalyticsSummary {
   estimatedCostUSD: number;
   avgLatencyMs: number;
   p95LatencyMs: number;
+  p99LatencyMs: number;
   errorRate: number;
+  avgOverheadMs: number;
+  avgTtfbMs: number;
 }
 
 export interface TimeseriesBucket {
@@ -15,6 +18,18 @@ export interface TimeseriesBucket {
   tokens: number;
   costUSD: number;
   avgLatencyMs: number;
+  errorRate: number;
+  avgOverheadMs: number;
+  avgTtfbMs: number;
+}
+
+export interface ModelBreakdown {
+  model: string;
+  requests: number;
+  errorRate: number;
+  avgLatencyMs: number;
+  totalTokens: number;
+  estimatedCostUSD: number;
 }
 
 /**
@@ -54,10 +69,15 @@ export async function getAnalyticsSummary(
          percentile_cont(0.95) WITHIN GROUP (ORDER BY latency_ms), 0
        )::float                                                       AS p95_latency_ms,
        COALESCE(
+         percentile_cont(0.99) WITHIN GROUP (ORDER BY latency_ms), 0
+       )::float                                                       AS p99_latency_ms,
+       COALESCE(
          SUM(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END)::float
            / NULLIF(COUNT(*), 0),
          0
-       )::float                                                       AS error_rate
+       )::float                                                       AS error_rate,
+       COALESCE(AVG(gateway_overhead_ms), 0)::float                  AS avg_overhead_ms,
+       COALESCE(AVG(ttfb_ms), 0)::float                              AS avg_ttfb_ms
      FROM traces
      WHERE tenant_id = $1
        AND created_at >= NOW() - ($2 || ' hours')::interval`,
@@ -71,7 +91,10 @@ export async function getAnalyticsSummary(
     estimatedCostUSD: row.estimated_cost_usd ?? 0,
     avgLatencyMs:     row.avg_latency_ms     ?? 0,
     p95LatencyMs:     row.p95_latency_ms     ?? 0,
+    p99LatencyMs:     row.p99_latency_ms     ?? 0,
     errorRate:        row.error_rate         ?? 0,
+    avgOverheadMs:    row.avg_overhead_ms    ?? 0,
+    avgTtfbMs:        row.avg_ttfb_ms        ?? 0,
   };
 }
 
@@ -95,10 +118,15 @@ export async function getAdminAnalyticsSummary(
          percentile_cont(0.95) WITHIN GROUP (ORDER BY latency_ms), 0
        )::float                                                       AS p95_latency_ms,
        COALESCE(
+         percentile_cont(0.99) WITHIN GROUP (ORDER BY latency_ms), 0
+       )::float                                                       AS p99_latency_ms,
+       COALESCE(
          SUM(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END)::float
            / NULLIF(COUNT(*), 0),
          0
-       )::float                                                       AS error_rate
+       )::float                                                       AS error_rate,
+       COALESCE(AVG(gateway_overhead_ms), 0)::float                  AS avg_overhead_ms,
+       COALESCE(AVG(ttfb_ms), 0)::float                              AS avg_ttfb_ms
      FROM traces
      WHERE created_at >= NOW() - ($1 || ' hours')::interval
      ${tenantFilter}`,
@@ -112,7 +140,10 @@ export async function getAdminAnalyticsSummary(
     estimatedCostUSD: row.estimated_cost_usd ?? 0,
     avgLatencyMs:     row.avg_latency_ms     ?? 0,
     p95LatencyMs:     row.p95_latency_ms     ?? 0,
+    p99LatencyMs:     row.p99_latency_ms     ?? 0,
     errorRate:        row.error_rate         ?? 0,
+    avgOverheadMs:    row.avg_overhead_ms    ?? 0,
+    avgTtfbMs:        row.avg_ttfb_ms        ?? 0,
   };
 }
 
@@ -135,7 +166,14 @@ export async function getAdminTimeseriesMetrics(
        COUNT(*)::int                                                AS requests,
        COALESCE(SUM(total_tokens), 0)::bigint                      AS tokens,
        COALESCE(SUM(${COST_EXPR}), 0)::float                      AS cost_usd,
-       COALESCE(AVG(latency_ms), 0)::float                         AS avg_latency_ms
+       COALESCE(AVG(latency_ms), 0)::float                         AS avg_latency_ms,
+       COALESCE(
+         SUM(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END)::float
+           / NULLIF(COUNT(*), 0),
+         0
+       )::float                                                     AS error_rate,
+       COALESCE(AVG(gateway_overhead_ms), 0)::float                AS avg_overhead_ms,
+       COALESCE(AVG(ttfb_ms), 0)::float                            AS avg_ttfb_ms
      FROM traces
      WHERE created_at >= NOW() - ($1 || ' hours')::interval
      ${tenantFilter}
@@ -145,11 +183,14 @@ export async function getAdminTimeseriesMetrics(
   );
 
   return result.rows.map((row) => ({
-    bucket:       new Date(row.bucket),
-    requests:     row.requests,
-    tokens:       Number(row.tokens),
-    costUSD:      row.cost_usd,
-    avgLatencyMs: row.avg_latency_ms,
+    bucket:        new Date(row.bucket),
+    requests:      row.requests,
+    tokens:        Number(row.tokens),
+    costUSD:       row.cost_usd,
+    avgLatencyMs:  row.avg_latency_ms,
+    errorRate:     row.error_rate,
+    avgOverheadMs: row.avg_overhead_ms,
+    avgTtfbMs:     row.avg_ttfb_ms,
   }));
 }
 
@@ -170,7 +211,14 @@ export async function getTimeseriesMetrics(
        COUNT(*)::int                                                AS requests,
        COALESCE(SUM(total_tokens), 0)::bigint                      AS tokens,
        COALESCE(SUM(${COST_EXPR}), 0)::float                      AS cost_usd,
-       COALESCE(AVG(latency_ms), 0)::float                         AS avg_latency_ms
+       COALESCE(AVG(latency_ms), 0)::float                         AS avg_latency_ms,
+       COALESCE(
+         SUM(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END)::float
+           / NULLIF(COUNT(*), 0),
+         0
+       )::float                                                     AS error_rate,
+       COALESCE(AVG(gateway_overhead_ms), 0)::float                AS avg_overhead_ms,
+       COALESCE(AVG(ttfb_ms), 0)::float                            AS avg_ttfb_ms
      FROM traces
      WHERE tenant_id = $1
        AND created_at >= NOW() - ($2 || ' hours')::interval
@@ -180,10 +228,94 @@ export async function getTimeseriesMetrics(
   );
 
   return result.rows.map((row) => ({
-    bucket:       new Date(row.bucket),
-    requests:     row.requests,
-    tokens:       Number(row.tokens),
-    costUSD:      row.cost_usd,
-    avgLatencyMs: row.avg_latency_ms,
+    bucket:        new Date(row.bucket),
+    requests:      row.requests,
+    tokens:        Number(row.tokens),
+    costUSD:       row.cost_usd,
+    avgLatencyMs:  row.avg_latency_ms,
+    errorRate:     row.error_rate,
+    avgOverheadMs: row.avg_overhead_ms,
+    avgTtfbMs:     row.avg_ttfb_ms,
+  }));
+}
+
+/**
+ * Return per-model breakdown for a specific tenant within the time window.
+ */
+export async function getModelBreakdown(
+  tenantId: string,
+  windowHours = 24,
+  limit = 10,
+): Promise<ModelBreakdown[]> {
+  const result = await query(
+    `SELECT
+       model,
+       COUNT(*)::int                                                AS requests,
+       COALESCE(
+         SUM(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END)::float
+           / NULLIF(COUNT(*), 0),
+         0
+       )::float                                                     AS error_rate,
+       COALESCE(AVG(latency_ms), 0)::float                         AS avg_latency_ms,
+       COALESCE(SUM(total_tokens), 0)::bigint                      AS total_tokens,
+       COALESCE(SUM(${COST_EXPR}), 0)::float                      AS estimated_cost_usd
+     FROM traces
+     WHERE tenant_id = $1
+       AND created_at >= NOW() - ($2 || ' hours')::interval
+     GROUP BY model
+     ORDER BY requests DESC
+     LIMIT $3`,
+    [tenantId, windowHours, limit],
+  );
+
+  return result.rows.map((row) => ({
+    model:            row.model,
+    requests:         row.requests,
+    errorRate:        row.error_rate,
+    avgLatencyMs:     row.avg_latency_ms,
+    totalTokens:      Number(row.total_tokens),
+    estimatedCostUSD: row.estimated_cost_usd,
+  }));
+}
+
+/**
+ * Admin variant: per-model breakdown across all tenants (or one if tenantId provided).
+ */
+export async function getAdminModelBreakdown(
+  tenantId?: string,
+  windowHours = 24,
+  limit = 10,
+): Promise<ModelBreakdown[]> {
+  const params: unknown[] = [windowHours, limit];
+  const tenantFilter = tenantId ? `AND tenant_id = $${params.push(tenantId)}` : '';
+
+  const result = await query(
+    `SELECT
+       model,
+       COUNT(*)::int                                                AS requests,
+       COALESCE(
+         SUM(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END)::float
+           / NULLIF(COUNT(*), 0),
+         0
+       )::float                                                     AS error_rate,
+       COALESCE(AVG(latency_ms), 0)::float                         AS avg_latency_ms,
+       COALESCE(SUM(total_tokens), 0)::bigint                      AS total_tokens,
+       COALESCE(SUM(${COST_EXPR}), 0)::float                      AS estimated_cost_usd
+     FROM traces
+     WHERE created_at >= NOW() - ($1 || ' hours')::interval
+     ${tenantFilter}
+     GROUP BY model
+     ORDER BY requests DESC
+     LIMIT $2`,
+    params,
+  );
+
+  return result.rows.map((row) => ({
+    model:            row.model,
+    requests:         row.requests,
+    errorRate:        row.error_rate,
+    avgLatencyMs:     row.avg_latency_ms,
+    totalTokens:      Number(row.total_tokens),
+    estimatedCostUSD: row.estimated_cost_usd,
   }));
 }

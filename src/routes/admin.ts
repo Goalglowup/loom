@@ -6,7 +6,7 @@ import { adminAuthMiddleware } from '../middleware/adminAuth.js';
 import { invalidateCachedKey, invalidateAllKeysForTenant } from '../auth.js';
 import { evictProvider } from '../providers/registry.js';
 import { encryptTraceBody, decryptTraceBody } from '../encryption.js';
-import { getAdminAnalyticsSummary, getAdminTimeseriesMetrics } from '../analytics.js';
+import { getAdminAnalyticsSummary, getAdminTimeseriesMetrics, getAdminModelBreakdown } from '../analytics.js';
 import { query } from '../db.js';
 
 const scryptAsync = promisify(scrypt);
@@ -567,5 +567,15 @@ export function registerAdminRoutes(fastify: FastifyInstance, pool: pg.Pool): vo
 
     const timeseries = await getAdminTimeseriesMetrics(tenant_id, windowHours, bucketMinutes);
     return reply.send(timeseries);
+  });
+
+  // GET /v1/admin/analytics/models — Per-model breakdown across all tenants
+  fastify.get<{
+    Querystring: { tenant_id?: string; window?: string };
+  }>('/v1/admin/analytics/models', authOpts, async (request, reply) => {
+    const { tenant_id } = request.query;
+    const windowHours = parseInt(request.query.window ?? '24', 10);
+    const models = await getAdminModelBreakdown(tenant_id, windowHours);
+    return reply.send({ models });
   });
 }
