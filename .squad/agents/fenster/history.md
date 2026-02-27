@@ -567,3 +567,55 @@ if (tenantId) {
 - McManus now has three `/v1/admin/*` endpoints ready to call
 - Dashboard can implement tenant filter and cross-tenant traces view
 - Portal can launch without admin features; admin dashboard is separate domain
+
+---
+
+## Session: Multi-User Multi-Tenant Implementation (Wave A + B)
+
+**Date:** 2026-02-26  
+**Requested by:** Michael Brown  
+**Spec:** `.squad/decisions/inbox/keaton-multi-user-tenant-arch.md`
+
+### What Was Built
+
+**Wave A — Migration** (`migrations/1000000000011_multi-tenant-users.cjs`):
+- Created `users` table (id, email UNIQUE, password_hash, created_at, last_login)
+- Created `tenant_memberships` junction table (user_id FK→users, tenant_id FK→tenants, role, joined_at, UNIQUE(user_id, tenant_id))
+- Created `invites` table (token VARCHAR(64) UNIQUE, created_by FK→users, max_uses nullable, use_count, expires_at, revoked_at)
+- Indexed all FK columns + token
+- Migrated existing `tenant_users` → `users` + `tenant_memberships` preserving IDs and roles
+- Dropped `tenant_users`
+- `down` migration: recreates `tenant_users` from first membership per user (known loss for multi-tenant users)
+
+**Wave B — Backend Routes** (`src/routes/portal.ts`):
+- **signup**: Now handles two branches — regular (creates user + tenant + membership(owner) + API key) and invite-based (validates invite, creates/finds user, adds membership(member), increments use_count)
+- **login**: Queries `users` table for auth, then all active `tenant_memberships`, returns `tenants[]`. JWT issued for first active membership.
+- **/me**: Queries `users` JOIN `tenant_memberships`, returns `tenants[]` alongside current tenant
+- **POST /v1/portal/auth/switch-tenant**: Validates membership, issues new JWT for requested tenantId
+- **POST /v1/portal/invites**: Owner-only; generates 32-byte base64url token, inserts row, returns full invite URL
+- **GET /v1/portal/invites**: Owner-only; lists all invites with creator email and computed `isActive`
+- **DELETE /v1/portal/invites/:id**: Owner-only; soft-revokes (sets revoked_at)
+- **GET /v1/portal/invites/:token/info**: Public (no auth); returns tenantName, expiresAt, isValid
+- **GET /v1/portal/members**: Auth-required; lists members with email, role, joinedAt, lastLogin
+- **PATCH /v1/portal/members/:userId**: Owner-only; changes role with last-owner guard
+- **DELETE /v1/portal/members/:userId**: Owner-only; removes membership with last-owner guard and no-self-remove guard
+- **GET /v1/portal/tenants**: Auth-required; lists all active tenant memberships for requesting user
+- **POST /v1/portal/tenants/:tenantId/leave**: Auth-required; removes own membership with last-owner guard and no-active-tenant guard
+
+### Key Learnings
+
+**Import cleanup** — Moved `timingSafeEqual` to top-level named import from `node:crypto` rather than dynamic import inside the handler. Removes an async dynamic import from the hot path.
+
+**inviteToken branch in signup** — When inviteToken is present, `tenantName` in the request body is silently ignored (not an error). This matches the spec intent: invited users join an existing tenant.
+
+**provider_config typing** — Changed `any` to `Record<string, unknown>` for the provider_config column type in the `/me` handler. Required switching from `cfg.provider` to `cfg['provider']` bracket access. Zero runtime change, better type safety.
+
+**PORTAL_BASE_URL scoping** — Declared inside `registerPortalRoutes` so it's captured at request-time from `process.env` (not module load time). Allows the env var to be injected after module import during testing.
+
+**No middleware changes** — JWT payload structure (`{ sub, tenantId, role }`) is unchanged; `portalAuth.ts` required zero modifications. `ownerRequired` was already defined in the existing route file.
+
+### Deferred
+
+- Rate limiting on `/v1/portal/invites/:token/info` (noted in spec as Phase 2)
+- `SELECT ... FOR UPDATE` on last-owner count check (race condition mitigation, noted in spec risks)
+- Email notifications for invite creation (Phase 2)
