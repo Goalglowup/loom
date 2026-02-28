@@ -8,7 +8,7 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'html'],
-      exclude: ['tests/**', '**/*.config.*', '**/node_modules/**', 'portal/**']
+      exclude: ['tests/**', '**/*.config.*', '**/node_modules/**', 'dist/**', 'migrations/**', 'scripts/**', 'dashboard/**']
     },
     testTimeout: 10000,
     hookTimeout: 10000
