@@ -809,3 +809,52 @@ if (tenantId) {
 - `provider.name` is available on all provider implementations via abstract base class in `src/providers/base.ts`
 - Supersedes Phase 2 deferral noted in 2026-02-27 entry — sandbox traces now appear in the traces list
 - Purely additive: no behavior changes to request/response path
+
+## 2026-02-28: Conversations & Memory Backend (Wave 5)
+
+**Event:** Implemented full conversations & memory subsystem for the gateway  
+**Artifacts:** `migrations/1000000000014_conversations.cjs`, `src/conversations.ts`, `src/auth.ts` (extended), `src/index.ts` (wired), `src/routes/portal.ts` (6 new routes)
+
+### What was built
+
+**Schema (migration 1000000000014):**
+- `agents` gains `conversations_enabled`, `conversation_token_limit`, `conversation_summary_model`
+- New tables: `partitions`, `conversations`, `conversation_messages`, `conversation_snapshots`
+- Two partial unique indexes per null-nullable foreign key (`parent_id IS NULL` on partitions, `partition_id IS NULL` on conversations) — required because PostgreSQL UNIQUE treats two NULLs as non-equal
+
+**`src/conversations.ts` — ConversationManager:**
+- `getOrCreatePartition` — upsert via partial unique index + fallback SELECT
+- `getOrCreateConversation` — `IS NOT DISTINCT FROM` for null-safe partition matching
+- `loadContext` — fetches latest snapshot + un-snapshotted messages (`snapshot_id IS NULL`), decrypts all in-memory
+- `storeMessages` — encrypts user+assistant content, inserts two rows
+- `createSnapshot` — encrypts summary, inserts snapshot, marks all `snapshot_id IS NULL` messages with new snapshot id
+- `buildInjectionMessages` — prepends snapshot summary as `system` message, then appends post-snapshot messages
+
+**`src/auth.ts`:**
+- Added `AgentConfig` interface with `conversations_enabled`, `conversation_token_limit`, `conversation_summary_model`
+- Extended `TenantContext` with `agentConfig?: AgentConfig`
+- Extended DB query in `lookupTenant` to select the three new agent columns
+
+**`src/index.ts` — gateway wiring:**
+- Strips `conversation_id` / `partition_id` from raw body before forwarding upstream
+- If `agentConfig.conversations_enabled`: resolves/creates partition + conversation, loads context, optionally summarizes (if over token limit) then builds injection messages
+- Prepends history to request messages before `applyAgentToRequest`
+- After non-streaming response: fire-and-forget `storeMessages`
+- Adds `conversation_id` (and optionally `partition_id`) to response body + `X-Loom-Conversation-ID` header
+- Auto-generates `conversation_id` (UUID) if client omits it
+
+**`src/routes/portal.ts` — 6 new portal routes:**
+- `GET /v1/portal/partitions` — tree of all tenant partitions (decrypted titles)
+- `POST /v1/portal/partitions` — create partition with optional encrypted title
+- `PUT /v1/portal/partitions/:id` — update title / parent
+- `DELETE /v1/portal/partitions/:id` — delete (cascades to conversations)
+- `GET /v1/portal/conversations` — metadata list, filterable by partition_id
+- `GET /v1/portal/conversations/:id` — full detail: decrypted messages + snapshot summaries
+
+### Key Learnings
+
+- **Partial unique indexes for nullable FK uniqueness**: PostgreSQL UNIQUE treats two NULLs as distinct, so `UNIQUE (tenant_id, parent_id, external_id)` does NOT prevent duplicate root partitions. Always add a `CREATE UNIQUE INDEX … WHERE parent_id IS NULL` partial index alongside the general constraint for nullable columns that need null-safe uniqueness.
+- **`IS NOT DISTINCT FROM` for null-safe equality in queries**: When filtering on a nullable FK with `WHERE col = $1`, NULL will never match. Use `WHERE col IS NOT DISTINCT FROM $1` to treat (col=NULL, $1=NULL) as a match.
+- **Snapshot-based context loading via `snapshot_id IS NULL`**: Messages without a `snapshot_id` are "post-latest-snapshot" — the only messages that need to be injected alongside the snapshot summary. This avoids needing a join or secondary timestamp query; the archive step simply fills in the `snapshot_id` on all un-tagged messages.
+- **Fire-and-forget for post-response persistence**: `storeMessages` is called with `.catch()` after `reply.send()` — same pattern as `traceRecorder.record()`. This keeps response latency low and avoids surfacing storage failures as HTTP errors.
+- **Summarization as a provider proxy call**: Reuses the existing `provider.proxy()` plumbing for the summarization LLM call. No new HTTP client needed. The summary model falls back to the request model if `conversation_summary_model` is not set on the agent.

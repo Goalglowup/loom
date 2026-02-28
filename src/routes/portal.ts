@@ -6,7 +6,7 @@ import { createSigner } from 'fast-jwt';
 import { registerPortalAuthMiddleware } from '../middleware/portalAuth.js';
 import { invalidateCachedKey } from '../auth.js';
 import type { TenantContext } from '../auth.js';
-import { encryptTraceBody } from '../encryption.js';
+import { encryptTraceBody, decryptTraceBody } from '../encryption.js';
 import { traceRecorder } from '../tracing.js';
 import { evictProvider, getProviderForTenant } from '../providers/registry.js';
 import { applyAgentToRequest } from '../agent.js';
@@ -1516,5 +1516,260 @@ export function registerPortalRoutes(fastify: FastifyInstance, pool: pg.Pool): v
         return reply.code(502).send({ error: 'Provider call failed', details: err?.message ?? String(err) });
       }
     }
+  );
+
+  // ── Partitions ────────────────────────────────────────────────────────────
+
+  // GET /v1/portal/partitions — list all partitions for the tenant as a tree
+  fastify.get('/v1/portal/partitions', { preHandler: authRequired }, async (request, reply) => {
+    const { tenantId } = request.portalUser!;
+
+    const result = await pool.query<{
+      id: string;
+      parent_id: string | null;
+      external_id: string;
+      title_encrypted: string | null;
+      title_iv: string | null;
+      created_at: string;
+    }>(
+      `SELECT id, parent_id, external_id, title_encrypted, title_iv, created_at
+       FROM partitions
+       WHERE tenant_id = $1
+       ORDER BY created_at ASC`,
+      [tenantId],
+    );
+
+    const flat = result.rows.map((row) => {
+      let title: string | null = null;
+      if (row.title_encrypted && row.title_iv) {
+        try { title = decryptTraceBody(tenantId, row.title_encrypted, row.title_iv); } catch { /* skip */ }
+      }
+      return { uuid: row.id, id: row.external_id, parentId: row.parent_id, title, createdAt: row.created_at };
+    });
+
+    // Build tree
+    const map = new Map<string, any>(flat.map((p) => [p.uuid, { ...p, children: [] }]));
+    const roots: any[] = [];
+    for (const p of map.values()) {
+      if (p.parentId) {
+        map.get(p.parentId)?.children.push(p);
+      } else {
+        roots.push(p);
+      }
+    }
+    return reply.send({ partitions: roots });
+  });
+
+  // POST /v1/portal/partitions — create a partition
+  fastify.post<{ Body: { external_id: string; parent_id?: string; title?: string } }>(
+    '/v1/portal/partitions',
+    { preHandler: authRequired },
+    async (request, reply) => {
+      const { tenantId } = request.portalUser!;
+      const { external_id, parent_id, title } = request.body;
+
+      if (!external_id || typeof external_id !== 'string') {
+        return reply.code(400).send({ error: 'external_id is required' });
+      }
+
+      let titleEncrypted: string | null = null;
+      let titleIv: string | null = null;
+      if (title) {
+        const enc = encryptTraceBody(tenantId, title);
+        titleEncrypted = enc.ciphertext;
+        titleIv = enc.iv;
+      }
+
+      try {
+        const result = await pool.query<{ id: string; external_id: string; parent_id: string | null; created_at: string }>(
+          `INSERT INTO partitions (tenant_id, parent_id, external_id, title_encrypted, title_iv)
+           VALUES ($1, $2, $3, $4, $5)
+           RETURNING id, external_id, parent_id, created_at`,
+          [tenantId, parent_id ?? null, external_id, titleEncrypted, titleIv],
+        );
+        const row = result.rows[0];
+        return reply.code(201).send({
+          uuid: row.id,
+          id: row.external_id,
+          parentId: row.parent_id,
+          title: title ?? null,
+          createdAt: row.created_at,
+        });
+      } catch (err: any) {
+        if (err.code === '23505') return reply.code(409).send({ error: 'Partition already exists' });
+        throw err;
+      }
+    },
+  );
+
+  // PUT /v1/portal/partitions/:id — update partition title or parent
+  fastify.put<{ Params: { id: string }; Body: { title?: string; parent_id?: string | null } }>(
+    '/v1/portal/partitions/:id',
+    { preHandler: authRequired },
+    async (request, reply) => {
+      const { tenantId } = request.portalUser!;
+      const { id } = request.params;
+      const { title, parent_id } = request.body;
+
+      const sets: string[] = [];
+      const params: any[] = [id, tenantId];
+
+      if (title !== undefined) {
+        const enc = encryptTraceBody(tenantId, title);
+        sets.push(`title_encrypted = $${params.length + 1}, title_iv = $${params.length + 2}`);
+        params.push(enc.ciphertext, enc.iv);
+      }
+      if (parent_id !== undefined) {
+        sets.push(`parent_id = $${params.length + 1}`);
+        params.push(parent_id);
+      }
+      if (sets.length === 0) return reply.code(400).send({ error: 'No fields to update' });
+
+      const result = await pool.query(
+        `UPDATE partitions SET ${sets.join(', ')} WHERE id = $1 AND tenant_id = $2 RETURNING id`,
+        params,
+      );
+      if (result.rowCount === 0) return reply.code(404).send({ error: 'Partition not found' });
+      return reply.send({ success: true });
+    },
+  );
+
+  // DELETE /v1/portal/partitions/:id
+  fastify.delete<{ Params: { id: string } }>(
+    '/v1/portal/partitions/:id',
+    { preHandler: authRequired },
+    async (request, reply) => {
+      const { tenantId } = request.portalUser!;
+      const { id } = request.params;
+
+      const result = await pool.query(
+        `DELETE FROM partitions WHERE id = $1 AND tenant_id = $2`,
+        [id, tenantId],
+      );
+      if (result.rowCount === 0) return reply.code(404).send({ error: 'Partition not found' });
+      return reply.send({ success: true });
+    },
+  );
+
+  // ── Conversations ─────────────────────────────────────────────────────────
+
+  // GET /v1/portal/conversations — list conversations (metadata only)
+  fastify.get<{ Querystring: { partition_id?: string } }>(
+    '/v1/portal/conversations',
+    { preHandler: authRequired },
+    async (request, reply) => {
+      const { tenantId } = request.portalUser!;
+      const { partition_id } = request.query;
+
+      const result = await pool.query<{
+        id: string;
+        agent_id: string | null;
+        partition_id: string | null;
+        external_id: string;
+        created_at: string;
+        last_active_at: string;
+      }>(
+        `SELECT c.id, c.agent_id, c.partition_id, c.external_id, c.created_at, c.last_active_at
+         FROM conversations c
+         WHERE c.tenant_id = $1
+           AND ($2::uuid IS NULL OR c.partition_id = $2)
+         ORDER BY c.last_active_at DESC`,
+        [tenantId, partition_id ?? null],
+      );
+
+      return reply.send({
+        conversations: result.rows.map((row) => ({
+          uuid: row.id,
+          id: row.external_id,
+          agentId: row.agent_id,
+          partitionId: row.partition_id,
+          createdAt: row.created_at,
+          lastActiveAt: row.last_active_at,
+        })),
+      });
+    },
+  );
+
+  // GET /v1/portal/conversations/:id — conversation detail with decrypted messages
+  fastify.get<{ Params: { id: string } }>(
+    '/v1/portal/conversations/:id',
+    { preHandler: authRequired },
+    async (request, reply) => {
+      const { tenantId } = request.portalUser!;
+      const { id } = request.params;
+
+      const convResult = await pool.query<{
+        id: string;
+        agent_id: string | null;
+        partition_id: string | null;
+        external_id: string;
+        created_at: string;
+        last_active_at: string;
+      }>(
+        `SELECT id, agent_id, partition_id, external_id, created_at, last_active_at
+         FROM conversations WHERE id = $1 AND tenant_id = $2`,
+        [id, tenantId],
+      );
+      if (convResult.rows.length === 0) return reply.code(404).send({ error: 'Conversation not found' });
+      const conv = convResult.rows[0];
+
+      // Snapshots
+      const snapResult = await pool.query<{
+        id: string;
+        summary_encrypted: string;
+        summary_iv: string;
+        messages_archived: number;
+        created_at: string;
+      }>(
+        `SELECT id, summary_encrypted, summary_iv, messages_archived, created_at
+         FROM conversation_snapshots WHERE conversation_id = $1 ORDER BY created_at ASC`,
+        [id],
+      );
+      const snapshots = snapResult.rows.map((row) => {
+        let summary: string | null = null;
+        try { summary = decryptTraceBody(tenantId, row.summary_encrypted, row.summary_iv); } catch { /* skip */ }
+        return { id: row.id, summary, messagesArchived: row.messages_archived, createdAt: row.created_at };
+      });
+
+      // Messages (all, ordered chronologically)
+      const msgResult = await pool.query<{
+        id: string;
+        role: string;
+        content_encrypted: string;
+        content_iv: string;
+        token_estimate: number | null;
+        snapshot_id: string | null;
+        created_at: string;
+      }>(
+        `SELECT id, role, content_encrypted, content_iv, token_estimate, snapshot_id, created_at
+         FROM conversation_messages WHERE conversation_id = $1 ORDER BY created_at ASC`,
+        [id],
+      );
+      const messages = msgResult.rows.map((row) => {
+        let content: string | null = null;
+        try { content = decryptTraceBody(tenantId, row.content_encrypted, row.content_iv); } catch { /* skip */ }
+        return {
+          id: row.id,
+          role: row.role,
+          content,
+          tokenEstimate: row.token_estimate,
+          snapshotId: row.snapshot_id,
+          createdAt: row.created_at,
+        };
+      });
+
+      return reply.send({
+        conversation: {
+          uuid: conv.id,
+          id: conv.external_id,
+          agentId: conv.agent_id,
+          partitionId: conv.partition_id,
+          createdAt: conv.created_at,
+          lastActiveAt: conv.last_active_at,
+        },
+        snapshots,
+        messages,
+      });
+    },
   );
 }

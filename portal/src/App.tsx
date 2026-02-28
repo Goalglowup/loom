@@ -13,6 +13,7 @@ import MembersPage from './pages/MembersPage';
 import SubtenantsPage from './pages/SubtenantsPage';
 import AgentsPage from './pages/AgentsPage';
 import SandboxPage from './pages/SandboxPage';
+import ConversationsPage from './pages/ConversationsPage';
 import AuthGuard from './components/AuthGuard';
 
 export default function App() {
@@ -32,6 +33,7 @@ export default function App() {
           <Route path="subtenants" element={<SubtenantsPage />} />
           <Route path="agents" element={<AgentsPage />} />
           <Route path="sandbox" element={<SandboxPage />} />
+          <Route path="conversations" element={<ConversationsPage />} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

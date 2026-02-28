@@ -13,6 +13,8 @@ import { createSSEProxy } from './streaming.js';
 import { traceRecorder } from './tracing.js';
 import { getProviderForTenant } from './providers/registry.js';
 import { applyAgentToRequest, handleMcpRoundTrip } from './agent.js';
+import { conversationManager } from './conversations.js';
+import { randomUUID } from 'node:crypto';
 import { registerDashboardRoutes } from './routes/dashboard.js';
 import { registerAdminRoutes } from './routes/admin.js';
 import { registerPortalRoutes } from './routes/portal.js';
@@ -122,8 +124,101 @@ fastify.post('/v1/chat/completions', async (request, reply) => {
     : (() => { throw new Error('No tenant context'); })();
 
   const rawBody = request.body as any;
+
+  // ── Conversation handling ────────────────────────────────────────────────
+  const conversationExternalId: string | undefined = rawBody.conversation_id;
+  const partitionExternalId: string | undefined = rawBody.partition_id;
+  const cleanBody = { ...rawBody };
+  delete cleanBody.conversation_id;
+  delete cleanBody.partition_id;
+
+  let conversationUUID: string | undefined;
+  let partitionUUID: string | undefined;
+  let resolvedConversationId: string | undefined;
+  let historyMessages: any[] = [];
+  let activeSnapshotId: string | null = null;
+
+  if (tenant && tenant.agentConfig?.conversations_enabled) {
+    if (partitionExternalId) {
+      const partition = await conversationManager.getOrCreatePartition(
+        pool,
+        tenant.tenantId,
+        partitionExternalId,
+      );
+      partitionUUID = partition.id;
+    }
+
+    resolvedConversationId = conversationExternalId ?? randomUUID();
+
+    const conv = await conversationManager.getOrCreateConversation(
+      pool,
+      tenant.tenantId,
+      partitionUUID ?? null,
+      resolvedConversationId,
+      tenant.agentId ?? null,
+    );
+    conversationUUID = conv.id;
+
+    const ctx = await conversationManager.loadContext(pool, tenant.tenantId, conversationUUID);
+    activeSnapshotId = ctx.latestSnapshotId;
+
+    // Summarize if token budget exceeded
+    if (ctx.tokenEstimate > (tenant.agentConfig.conversation_token_limit ?? 4000)) {
+      const messagesText = ctx.messages
+        .map((m) => `${m.role}: ${m.content}`)
+        .join('\n');
+      const summaryModel =
+        tenant.agentConfig.conversation_summary_model ?? cleanBody.model ?? 'gpt-4o-mini';
+      try {
+        const sumResponse = await provider.proxy({
+          url: '/v1/chat/completions',
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: {
+            model: summaryModel,
+            messages: [
+              {
+                role: 'user',
+                content: `Summarize the following conversation concisely for context in future messages:\n\n${messagesText}`,
+              },
+            ],
+            stream: false,
+          },
+        });
+        const summary = (sumResponse.body as any)?.choices?.[0]?.message?.content ?? '';
+        if (summary) {
+          const newSnapshotId = await conversationManager.createSnapshot(
+            pool,
+            tenant.tenantId,
+            conversationUUID,
+            summary,
+            ctx.messages.length,
+          );
+          activeSnapshotId = newSnapshotId;
+          // Reload context — messages are now archived; inject only the summary
+          const freshCtx = await conversationManager.loadContext(
+            pool,
+            tenant.tenantId,
+            conversationUUID,
+          );
+          historyMessages = conversationManager.buildInjectionMessages(freshCtx);
+        }
+      } catch (sumErr) {
+        fastify.log.error({ err: sumErr }, '[conversations] summarization failed; proceeding without summary');
+        historyMessages = conversationManager.buildInjectionMessages(ctx);
+      }
+    } else {
+      historyMessages = conversationManager.buildInjectionMessages(ctx);
+    }
+  }
+
+  const bodyWithHistory =
+    historyMessages.length > 0
+      ? { ...cleanBody, messages: [...historyMessages, ...(cleanBody.messages ?? [])] }
+      : cleanBody;
+
   // Apply agent merge policies (system prompt injection, skills merge) before forwarding.
-  const effectiveBody = tenant ? applyAgentToRequest(rawBody, tenant) : rawBody;
+  const effectiveBody = tenant ? applyAgentToRequest(bodyWithHistory, tenant) : bodyWithHistory;
 
   const proxyReq: ProxyRequest = {
     url: '/v1/chat/completions',
@@ -193,7 +288,45 @@ fastify.post('/v1/chat/completions', async (request, reply) => {
         ttfbMs: latencyMs,
         gatewayOverheadMs: upstreamStartMs - startTimeMs,
       });
-      return reply.code(response.status).send(finalBody);
+
+      // Store conversation messages (fire-and-forget; do not block the response)
+      if (conversationUUID) {
+        const userMessages = (rawBody.messages ?? []).filter((m: any) => m.role === 'user');
+        const userContent = userMessages
+          .map((m: any) =>
+            typeof m.content === 'string' ? m.content : JSON.stringify(m.content),
+          )
+          .join('\n');
+        const assistantContent =
+          (finalBody as any)?.choices?.[0]?.message?.content ?? '';
+        conversationManager
+          .storeMessages(
+            pool,
+            tenant.tenantId,
+            conversationUUID,
+            userContent,
+            assistantContent,
+            null,
+            activeSnapshotId,
+          )
+          .catch((err) =>
+            fastify.log.error({ err }, '[conversations] storeMessages failed'),
+          );
+      }
+
+      const responseToSend =
+        conversationUUID && resolvedConversationId
+          ? {
+              ...(finalBody as any),
+              conversation_id: resolvedConversationId,
+              ...(partitionExternalId ? { partition_id: partitionExternalId } : {}),
+            }
+          : finalBody;
+
+      if (conversationUUID) {
+        reply.header('X-Loom-Conversation-ID', resolvedConversationId ?? '');
+      }
+      return reply.code(response.status).send(responseToSend);
     }
     return reply.code(response.status).send(response.body);
   } catch (err: any) {

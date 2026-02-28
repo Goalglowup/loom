@@ -28,6 +28,9 @@ export default function AgentEditor({ agent, onSave, onCancel }: AgentEditorProp
   const [skills, setSkills] = useState<Skill[]>(agent?.skills ?? []);
   const [mcpEndpoints, setMcpEndpoints] = useState<McpEndpoint[]>(agent?.mcpEndpoints ?? []);
   const [availableModels, setAvailableModels] = useState<string[] | null>(agent?.availableModels ?? null);
+  const [conversationsEnabled, setConversationsEnabled] = useState(agent?.conversations_enabled ?? false);
+  const [conversationTokenLimit, setConversationTokenLimit] = useState<number>(agent?.conversation_token_limit ?? 4000);
+  const [conversationSummaryModel, setConversationSummaryModel] = useState(agent?.conversation_summary_model ?? '');
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -57,6 +60,9 @@ export default function AgentEditor({ agent, onSave, onCancel }: AgentEditorProp
       setSkills(agent.skills ?? []);
       setMcpEndpoints(agent.mcpEndpoints ?? []);
       setAvailableModels(agent.availableModels ?? null);
+      setConversationsEnabled(agent.conversations_enabled ?? false);
+      setConversationTokenLimit(agent.conversation_token_limit ?? 4000);
+      setConversationSummaryModel(agent.conversation_summary_model ?? '');
     }
   }, [agent]);
 
@@ -73,6 +79,9 @@ export default function AgentEditor({ agent, onSave, onCancel }: AgentEditorProp
         mcpEndpoints: mcpEndpoints.length ? mcpEndpoints : null,
         availableModels,
         mergePolicies,
+        conversations_enabled: conversationsEnabled,
+        conversation_token_limit: conversationsEnabled ? conversationTokenLimit : null,
+        conversation_summary_model: conversationsEnabled && conversationSummaryModel.trim() ? conversationSummaryModel.trim() : null,
       };
       let saved: Agent;
       if (agent) {
@@ -320,6 +329,55 @@ export default function AgentEditor({ agent, onSave, onCancel }: AgentEditorProp
           defaultModels={COMMON_MODELS}
           label="Available Models"
         />
+      </section>
+
+      {/* Conversations & Memory */}
+      <section className="space-y-4">
+        <h3 className="text-sm font-semibold text-gray-300 uppercase tracking-wide">Conversations &amp; Memory</h3>
+        <div className="flex items-center justify-between">
+          <div>
+            <span className="text-sm text-gray-200">Enable conversations</span>
+            <p className="text-xs text-gray-500 mt-0.5">Store and resume conversation history for this agent</p>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={conversationsEnabled}
+            onClick={() => setConversationsEnabled(v => !v)}
+            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 focus:ring-offset-gray-950 ${conversationsEnabled ? 'bg-indigo-600' : 'bg-gray-700'}`}
+          >
+            <span
+              className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${conversationsEnabled ? 'translate-x-6' : 'translate-x-1'}`}
+            />
+          </button>
+        </div>
+        {conversationsEnabled && (
+          <>
+            <div>
+              <label className={labelCls}>Memory threshold (tokens)</label>
+              <input
+                type="number"
+                value={conversationTokenLimit}
+                onChange={e => setConversationTokenLimit(Number(e.target.value))}
+                min={100}
+                step={100}
+                className={inputCls}
+              />
+              <p className="text-xs text-gray-500 mt-1">When conversation history exceeds this token estimate, it will be automatically summarized.</p>
+            </div>
+            <div>
+              <label className={labelCls}>Summary model (optional)</label>
+              <input
+                type="text"
+                value={conversationSummaryModel}
+                onChange={e => setConversationSummaryModel(e.target.value)}
+                placeholder="Uses request model if not set"
+                className={inputCls}
+              />
+              <p className="text-xs text-gray-500 mt-1">Model used to generate conversation summaries. Defaults to the request model.</p>
+            </div>
+          </>
+        )}
       </section>
 
       {/* Inherited Values — only show when editing */}

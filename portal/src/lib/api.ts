@@ -104,6 +104,28 @@ export const api = {
 
   removeMember: (token: string, userId: string) =>
     request<void>('DELETE', `/v1/portal/members/${userId}`, undefined, token),
+
+  // Partitions
+  getPartitions: (token: string) =>
+    request<{ partitions: Partition[] }>('GET', '/v1/portal/partitions', undefined, token),
+
+  createPartition: (token: string, data: { external_id: string; parent_id?: string; title?: string }) =>
+    request<{ partition: Partition }>('POST', '/v1/portal/partitions', data, token),
+
+  updatePartition: (token: string, id: string, data: { title?: string; parent_id?: string }) =>
+    request<{ partition: Partition }>('PATCH', `/v1/portal/partitions/${id}`, data, token),
+
+  deletePartition: (token: string, id: string) =>
+    request<void>('DELETE', `/v1/portal/partitions/${id}`, undefined, token),
+
+  // Conversations
+  getConversations: (token: string, partitionId?: string) => {
+    const params = partitionId ? `?partition_id=${encodeURIComponent(partitionId)}` : '';
+    return request<{ conversations: Conversation[] }>('GET', `/v1/portal/conversations${params}`, undefined, token);
+  },
+
+  getConversation: (token: string, id: string) =>
+    request<{ conversation: ConversationDetail }>('GET', `/v1/portal/conversations/${id}`, undefined, token),
 };
 
 export interface User { id: string; email: string; role: string; }
@@ -196,6 +218,9 @@ export interface Agent {
   mcpEndpoints?: McpEndpoint[] | null;
   availableModels?: string[] | null;
   mergePolicies: AgentMergePolicies;
+  conversations_enabled?: boolean;
+  conversation_token_limit?: number | null;
+  conversation_summary_model?: string | null;
   createdAt: string;
   updatedAt?: string | null;
 }
@@ -208,9 +233,44 @@ export interface AgentInput {
   mcpEndpoints?: McpEndpoint[] | null;
   availableModels?: string[] | null;
   mergePolicies?: AgentMergePolicies;
+  conversations_enabled?: boolean;
+  conversation_token_limit?: number | null;
+  conversation_summary_model?: string | null;
 }
 
 export type CreateAgentInput = AgentInput;
+
+export interface Partition {
+  id: string;
+  external_id: string;
+  title?: string;
+  parent_id?: string;
+  created_at: string;
+  children?: Partition[];
+}
+
+export interface Conversation {
+  id: string;
+  external_id: string;
+  partition_id?: string;
+  agent_id?: string;
+  created_at: string;
+  last_active_at: string;
+  message_count?: number;
+}
+
+export interface ConversationMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  token_estimate?: number;
+  created_at: string;
+}
+
+export interface ConversationDetail extends Conversation {
+  messages: ConversationMessage[];
+  snapshots?: { id: string; messages_archived: number; created_at: string }[];
+}
 
 export interface ResolvedAgentConfig {
   providerConfig: Record<string, unknown> | null;

@@ -837,3 +837,15 @@ Used `adminMode?: boolean` prop pattern instead of passing full URLs/header fact
 - `SettingsPage`: loads tenant `availableModels`, renders `ModelListEditor` below provider form, auto-saves on change with inline status text
 - `AgentEditor`: added `availableModels` state + `<ModelListEditor>` above inherited config section; included in save payload
 - Build passes with zero TypeScript errors
+
+### 2026-05-XX: Conversations & Memory UI
+
+- Added `Partition`, `Conversation`, `ConversationMessage`, `ConversationDetail` interfaces to `portal/src/lib/api.ts`
+- Added `conversations_enabled`, `conversation_token_limit`, `conversation_summary_model` fields to `Agent` and `AgentInput` interfaces
+- Added API methods: `getPartitions`, `createPartition`, `updatePartition`, `deletePartition`, `getConversations`, `getConversation`
+- Updated `AgentEditor.tsx`: new "Conversations & Memory" section with toggle, token limit input, and summary model input; fields conditionally shown; included in save payload
+- Created `portal/src/pages/ConversationsPage.tsx`: left partition tree (recursive `PartitionNode`, expandable), middle conversation table with `external_id`/`last_active_at`/`message_count`, bottom message thread with user/assistant bubbles and summary checkpoint dividers
+- `timeAgo()` helper for human-readable relative timestamps
+- Added `💬 Conversations` nav link in `AppLayout.tsx` between Agents and Sandbox
+- Added `<Route path="conversations" element={<ConversationsPage />} />` in `App.tsx`
+- Build passes with zero TypeScript errors

@@ -15,6 +15,12 @@ export interface MergePolicy {
   skills?: 'merge' | 'overwrite' | 'ignore';
 }
 
+export interface AgentConfig {
+  conversations_enabled?: boolean;
+  conversation_token_limit?: number;
+  conversation_summary_model?: string | null;
+}
+
 export interface TenantContext {
   tenantId: string;
   name: string;
@@ -36,6 +42,8 @@ export interface TenantContext {
   resolvedSkills?: any[];
   /** Chain-resolved MCP endpoints union. */
   resolvedMcpEndpoints?: any[];
+  /** Agent-level configuration (conversations, token limits, etc.). */
+  agentConfig?: AgentConfig;
 }
 
 // Augment Fastify request type with tenant context
@@ -98,6 +106,9 @@ async function lookupTenant(keyHash: string, pool: pg.Pool): Promise<TenantConte
     tenant_system_prompt: string | null;
     tenant_skills: any[] | null;
     tenant_mcp_endpoints: any[] | null;
+    agent_conversations_enabled: boolean | null;
+    agent_conversation_token_limit: number | null;
+    agent_conversation_summary_model: string | null;
   }>(
     `SELECT ak.tenant_id,
             t.name        AS tenant_name,
@@ -111,7 +122,10 @@ async function lookupTenant(keyHash: string, pool: pg.Pool): Promise<TenantConte
             t.provider_config AS tenant_provider_config,
             t.system_prompt   AS tenant_system_prompt,
             t.skills          AS tenant_skills,
-            t.mcp_endpoints   AS tenant_mcp_endpoints
+            t.mcp_endpoints   AS tenant_mcp_endpoints,
+            a.conversations_enabled        AS agent_conversations_enabled,
+            a.conversation_token_limit     AS agent_conversation_token_limit,
+            a.conversation_summary_model   AS agent_conversation_summary_model
      FROM   api_keys ak
      LEFT JOIN agents  a ON a.id = ak.agent_id
      JOIN  tenants  t ON t.id = ak.tenant_id
@@ -212,6 +226,11 @@ async function lookupTenant(keyHash: string, pool: pg.Pool): Promise<TenantConte
     resolvedSystemPrompt,
     resolvedSkills: resolvedSkills.length ? resolvedSkills : undefined,
     resolvedMcpEndpoints: resolvedMcpEndpoints.length ? resolvedMcpEndpoints : undefined,
+    agentConfig: {
+      conversations_enabled: row.agent_conversations_enabled ?? false,
+      conversation_token_limit: row.agent_conversation_token_limit ?? 4000,
+      conversation_summary_model: row.agent_conversation_summary_model ?? null,
+    },
   };
 }
 
