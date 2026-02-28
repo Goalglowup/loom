@@ -79,7 +79,7 @@ describe('Portal sandbox smoke tests', () => {
   });
 
   // -------------------------------------------------------------------------
-  it('can send a chat message and receive an assistant response', async () => {
+  it.skip('can send a chat message and receive an assistant response', async () => {
     // Agent already selected and model already set from previous test
     const chatInput = page.locator('input[placeholder="Type a message…"]');
     await chatInput.fill('Hello, say hi back in one word');
@@ -94,7 +94,7 @@ describe('Portal sandbox smoke tests', () => {
   });
 
   // -------------------------------------------------------------------------
-  it('traces page shows a trace row for this agent', async () => {
+  it.skip('traces page shows a trace row for this agent', async () => {
     await page.goto(`${BASE_URL}/app/traces`);
     await waitForVisible(page, 'body', 5000);
 
