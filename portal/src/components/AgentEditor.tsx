@@ -79,9 +79,9 @@ export default function AgentEditor({ agent, onSave, onCancel }: AgentEditorProp
         mcpEndpoints: mcpEndpoints.length ? mcpEndpoints : null,
         availableModels,
         mergePolicies,
-        conversations_enabled: conversationsEnabled,
-        conversation_token_limit: conversationsEnabled ? conversationTokenLimit : null,
-        conversation_summary_model: conversationsEnabled && conversationSummaryModel.trim() ? conversationSummaryModel.trim() : null,
+        conversationsEnabled: conversationsEnabled,
+        conversationTokenLimit: conversationsEnabled ? conversationTokenLimit : null,
+        conversationSummaryModel: conversationsEnabled && conversationSummaryModel.trim() ? conversationSummaryModel.trim() : null,
       };
       let saved: Agent;
       if (agent) {

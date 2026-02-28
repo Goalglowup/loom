@@ -252,9 +252,9 @@ export interface AgentInput {
   mcpEndpoints?: McpEndpoint[] | null;
   availableModels?: string[] | null;
   mergePolicies?: AgentMergePolicies;
-  conversations_enabled?: boolean;
-  conversation_token_limit?: number | null;
-  conversation_summary_model?: string | null;
+  conversationsEnabled?: boolean;
+  conversationTokenLimit?: number | null;
+  conversationSummaryModel?: string | null;
 }
 
 export type CreateAgentInput = AgentInput;

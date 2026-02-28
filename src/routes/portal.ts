@@ -953,6 +953,9 @@ export function registerPortalRoutes(fastify: FastifyInstance, pool: pg.Pool): v
     mcp_endpoints: unknown[] | null;
     merge_policies: Record<string, unknown>;
     available_models?: string[] | null;
+    conversations_enabled?: boolean;
+    conversation_token_limit?: number | null;
+    conversation_summary_model?: string | null;
     created_at: string; updated_at: string | null;
   }) {
     return {
@@ -964,6 +967,9 @@ export function registerPortalRoutes(fastify: FastifyInstance, pool: pg.Pool): v
       mcpEndpoints: row.mcp_endpoints,
       mergePolicies: row.merge_policies,
       availableModels: row.available_models ?? null,
+      conversations_enabled: row.conversations_enabled ?? false,
+      conversation_token_limit: row.conversation_token_limit ?? null,
+      conversation_summary_model: row.conversation_summary_model ?? null,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     };
@@ -1051,9 +1057,12 @@ export function registerPortalRoutes(fastify: FastifyInstance, pool: pg.Pool): v
       mcp_endpoints: unknown[] | null;
       merge_policies: Record<string, unknown>;
       available_models: string[] | null;
+      conversations_enabled: boolean;
+      conversation_token_limit: number | null;
+      conversation_summary_model: string | null;
       created_at: string; updated_at: string | null;
     }>(
-      `SELECT id, name, provider_config, system_prompt, skills, mcp_endpoints, merge_policies, available_models, created_at, updated_at
+      `SELECT id, name, provider_config, system_prompt, skills, mcp_endpoints, merge_policies, available_models, conversations_enabled, conversation_token_limit, conversation_summary_model, created_at, updated_at
        FROM agents WHERE tenant_id = $1 ORDER BY created_at`,
       [tenantId]
     );
@@ -1124,10 +1133,14 @@ export function registerPortalRoutes(fastify: FastifyInstance, pool: pg.Pool): v
         mcp_endpoints: unknown[] | null;
         merge_policies: Record<string, unknown>;
         available_models: string[] | null;
+        conversations_enabled: boolean;
+        conversation_token_limit: number | null;
+        conversation_summary_model: string | null;
         created_at: string; updated_at: string | null;
       }>(
         `SELECT a.id, a.name, a.provider_config, a.system_prompt, a.skills, a.mcp_endpoints, a.merge_policies,
-                a.available_models, a.created_at, a.updated_at
+                a.available_models, a.conversations_enabled, a.conversation_token_limit, a.conversation_summary_model,
+                a.created_at, a.updated_at
          FROM agents a
          JOIN tenant_memberships tm ON tm.tenant_id = a.tenant_id
          WHERE a.id = $1 AND tm.user_id = $2`,
@@ -1152,6 +1165,9 @@ export function registerPortalRoutes(fastify: FastifyInstance, pool: pg.Pool): v
       mcpEndpoints?: unknown[];
       mergePolicies?: Record<string, unknown>;
       availableModels?: string[] | null;
+      conversationsEnabled?: boolean;
+      conversationTokenLimit?: number | null;
+      conversationSummaryModel?: string | null;
     };
   }>(
     '/v1/portal/agents/:id',
@@ -1159,7 +1175,7 @@ export function registerPortalRoutes(fastify: FastifyInstance, pool: pg.Pool): v
     async (request, reply) => {
       const { tenantId, userId } = request.portalUser!;
       const { id } = request.params;
-      const { name, providerConfig, systemPrompt, skills, mcpEndpoints, mergePolicies, availableModels } = request.body;
+      const { name, providerConfig, systemPrompt, skills, mcpEndpoints, mergePolicies, availableModels, conversationsEnabled, conversationTokenLimit, conversationSummaryModel } = request.body;
 
       // Verify membership
       const memberCheck = await pool.query(
@@ -1186,6 +1202,9 @@ export function registerPortalRoutes(fastify: FastifyInstance, pool: pg.Pool): v
       if (mcpEndpoints !== undefined) { setClauses.push(`mcp_endpoints = $${idx++}`); values.push(JSON.stringify(mcpEndpoints)); }
       if (mergePolicies !== undefined) { setClauses.push(`merge_policies = $${idx++}`); values.push(JSON.stringify(mergePolicies)); }
       if (availableModels !== undefined) { setClauses.push(`available_models = $${idx++}`); values.push(availableModels !== null ? JSON.stringify(availableModels) : null); }
+      if (conversationsEnabled !== undefined) { setClauses.push(`conversations_enabled = $${idx++}`); values.push(conversationsEnabled); }
+      if (conversationTokenLimit !== undefined) { setClauses.push(`conversation_token_limit = $${idx++}`); values.push(conversationTokenLimit); }
+      if (conversationSummaryModel !== undefined) { setClauses.push(`conversation_summary_model = $${idx++}`); values.push(conversationSummaryModel || null); }
 
       values.push(id, tenantId);
 
@@ -1197,11 +1216,14 @@ export function registerPortalRoutes(fastify: FastifyInstance, pool: pg.Pool): v
         mcp_endpoints: unknown[] | null;
         merge_policies: Record<string, unknown>;
         available_models: string[] | null;
+        conversations_enabled: boolean;
+        conversation_token_limit: number | null;
+        conversation_summary_model: string | null;
         created_at: string; updated_at: string | null;
       }>(
         `UPDATE agents SET ${setClauses.join(', ')}
          WHERE id = $${idx} AND tenant_id = $${idx + 1}
-         RETURNING id, name, provider_config, system_prompt, skills, mcp_endpoints, merge_policies, available_models, created_at, updated_at`,
+         RETURNING id, name, provider_config, system_prompt, skills, mcp_endpoints, merge_policies, available_models, conversations_enabled, conversation_token_limit, conversation_summary_model, created_at, updated_at`,
         values
       );
 
@@ -1471,7 +1493,8 @@ export function registerPortalRoutes(fastify: FastifyInstance, pool: pg.Pool): v
       let resolvedConversationId: string | undefined;
       let effectiveMessages = body.messages as any[];
 
-      if (agent.conversations_enabled && body.conversation_id) {
+      if (agent.conversations_enabled) {
+        const incomingConversationId = body.conversation_id ?? crypto.randomUUID();
         try {
           const partitionId = body.partition_id
             ? (await conversationManager.getOrCreatePartition(
@@ -1485,10 +1508,10 @@ export function registerPortalRoutes(fastify: FastifyInstance, pool: pg.Pool): v
             pool,
             tenantCtx.tenantId,
             partitionId,
-            body.conversation_id,
+            incomingConversationId,
             agent.id,
           )).id;
-          resolvedConversationId = body.conversation_id;
+          resolvedConversationId = incomingConversationId;
 
           const ctx = await conversationManager.loadContext(pool, tenantCtx.tenantId, conversationUUID);
           const historyMessages = conversationManager.buildInjectionMessages(ctx);

@@ -65,7 +65,6 @@ fastify.register(fastifyStatic, {
 fastify.register(fastifyStatic, {
   root: join(__dirname, '../portal/dist'),
   prefix: '/',
-  wildcard: false,
   decorateReply: false,
 });
 
