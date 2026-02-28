@@ -271,3 +271,43 @@
 - ModelCombobox input placeholder: `"e.g. gpt-4o"`.
 - Chat input placeholder: `"Type a message…"` (with ellipsis character `…` not `...`).
 - Loading indicator: `.animate-pulse` with class `text-gray-400`; assistant messages: `.bg-gray-800.text-gray-100`.
+
+---
+
+### $(date -u +%Y-%m-%dT%H:%M:%SZ): Unit Tests — Conversations, Analytics, Portal Routes
+
+**Three new test files added (60 tests total, 100% passing):**
+
+**conversations.test.ts (14 tests):**
+- `getOrCreateConversation`: returning-existing path (SELECT → UPDATE) and create-new path (SELECT empty → INSERT)
+- `storeMessages`: verifies single INSERT call and that plaintext is encrypted before storage (ciphertext ≠ plaintext)
+- `loadContext`: empty state, message decryption with token estimates, snapshot summary decryption
+- `buildInjectionMessages`: synchronous — no DB needed; covers empty, snapshot-only, messages-only, and combined cases
+- **Pattern:** `buildSeqPool(responses[])` sequential mock pool; `ENCRYPTION_MASTER_KEY` set in beforeEach
+
+**analytics.test.ts (24 tests):**
+- All 6 exported functions: `getAnalyticsSummary`, `getTimeseriesMetrics`, `getModelBreakdown`, and Admin variants
+- Covers: full data shape, empty/zero result sets, rollup CTE activation, multi-row returns, error propagation
+- **Pattern:** `vi.mock('../src/db.js', () => ({ query: vi.fn() }))` at top of file before analytics import; `mockQuery.mockReset()` in beforeEach
+
+**portal-routes.test.ts (22 tests):**
+- Signup: success (201), duplicate email (409), missing email (400), short password (400), missing tenantName (400)
+- Login: success (200 with token+tenant), unknown user (401), wrong password (401), missing fields (400)
+- GET /me: authenticated (200 with user/tenant/agents/subtenants), no token (401), bad token (401), DB not found (404)
+- GET /agents: returns list, empty list, 401 guard
+- POST /agents: creates (201), missing name (400), 401 guard
+- GET /agents/:id: found (200), not found (404), 401 guard
+- **Pattern:** smart mock pool with SQL keyword overrides map; `createSigner` from `fast-jwt` with default `PORTAL_JWT_SECRET`; scrypt password hashed in `beforeAll`
+
+**Coverage achieved:**
+- `analytics.ts`: 100% statements, 100% functions, 100% lines
+- `conversations.ts`: 74% statements, 82% branches, 67% functions
+- `portal.ts`: 27% statements, 77% branches, 86% functions
+- `portalAuth.ts`: 93% statements, 82% branches, 100% functions
+
+**Key Learnings:**
+- **vi.mock must precede all imports**: For analytics.ts which uses a module-level `query` singleton, the `vi.mock('../src/db.js')` call must appear before any import of analytics.ts — Vitest hoists it correctly
+- **Override map pattern for mock pools**: Instead of a giant switch statement, a `Record<string, handler>` passed to `buildMockPool()` allows per-test SQL overrides cleanly without rebuilding the entire mock
+- **Portal routes need no JWT plugin**: Unlike admin routes, portal routes use `fast-jwt` directly (not `@fastify/jwt`). Just `Fastify({ logger: false })` + `registerPortalRoutes()` is sufficient
+- **Sequential mock pool for conversations**: Conversation methods make predictable ordered calls (SELECT then INSERT/UPDATE). A `responses[]` array with index counter is cleaner than SQL pattern matching for these tests
+- **Real encryption in conversation tests**: Loading `encryptTraceBody` directly in test to produce valid ciphertexts for `loadContext` tests — avoids brittle string fixtures, exercises real encrypt/decrypt roundtrip
