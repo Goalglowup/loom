@@ -896,3 +896,39 @@ if (tenantId) {
 - **Single-message requests with server-side history**: Unlike the basic chat example which sends full `conversationHistory` array, the conversation demo sends only the current message. The gateway/sandbox loads and injects history server-side. This reduces request payload and keeps conversation state canonical on the server.
 - **Partition scope pattern**: `partition_id` is typically a user ID or team ID — provides logical isolation so different users/contexts can have separate conversation threads. The sandbox uses `__sandbox__` as default partition if none provided.
 - **Fire-and-forget storage in sandbox**: Same `.catch()` pattern as gateway — `storeMessages` is called after response, logged on error but doesn't block or fail the HTTP response.
+
+### 2026-02-28: Conversations & Memory Backend Implementation
+
+**Delivered:** Complete backend for conversation memory and multi-turn chat support.
+
+**What Was Built:**
+- Migration with four new tables: `partitions`, `conversations`, `conversation_messages`, `conversation_snapshots`
+- Three agent config columns: `conversations_enabled`, `conversation_token_limit`, `conversation_summary_model`
+- `ConversationManager` module with full lifecycle support: partition/conversation creation, encrypted context loading, message storage, LLM-based summarization
+- Extended `TenantContext` with `agentConfig` for conversation settings
+- Wired conversation flow into `/v1/chat/completions` handler
+- Six CRUD portal routes for partition and conversation management
+
+**Key Design Patterns:**
+- **Partition Root Uniqueness:** PostgreSQL partial index `WHERE parent_id IS NULL` alongside unique constraint (handles NULL != NULL semantics)
+- **Messages as Append-Only Log:** No deletion; `snapshot_id` marks archival, `loadContext` loads only post-snapshot messages
+- **Token Estimation:** Character-count method (`content.length / 4`) sufficient for threshold, no tiktoken dependency
+- **Fire-and-Forget Summarization:** Matches gateway pattern; failures caught/logged, request proceeds with full history
+- **Encryption:** AES-256-GCM per-tenant key derivation for all message content and snapshots; decryption failures silently skip (return `null`)
+- **Portal Routes Security:** JWT-scoped to tenant_id, UUID-based detail routes (no external_id enumeration)
+
+**Sandbox Extension:**
+- Extended sandbox chat endpoint to support conversation_id and partition_id
+- Defaults to `__sandbox__` partition for namespace isolation
+- Non-fatal error handling: conversation load failures don't break endpoint
+- Fire-and-forget message storage post-response (same pattern as tracing)
+- Server-side history loading (vs. client-supplied array) to prevent desync
+
+**Examples & Documentation:**
+- `examples/conversations/index.html`: Interactive reference showing auto-generate and explicit flows
+- `examples/conversations/README.md`: Usage guide for developers
+
+**Notes for Future Waves:**
+- Streaming conversation support deferred (requires SSE buffering for message archival)
+- Summarization model configurable per agent; defaults to request model if unset
+- Portal encryption/decryption handles key rotation gracefully (silent skip on old messages)

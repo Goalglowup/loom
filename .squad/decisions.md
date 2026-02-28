@@ -1416,3 +1416,189 @@ Falls back to `user.role` for backward compatibility.
 **Decision:** Revoked/expired invites shown in collapsed `<details>` element below active invites table.
 
 **Rationale:** Keeps page clean. Owners rarely need historical revoked invites. No new dependencies.
+
+
+## 2026-02-28T01:02:05Z: User Directive — Server Restart After Changes
+
+**By:** Michael Brown (via Copilot)  
+**What:** After every major change (new feature, significant refactor, route changes, portal rebuild), kill the running API server and restart it in the background, logging to `/tmp/loom-server.txt`. Supersedes any prior directive about server restarts. Log file is `/tmp/loom-server.txt` (not `.log`).  
+**Why:** User request — captured for team memory
+
+## 2026-02-28: Conversations & Memory Backend
+
+**Date:** 2026-02-28  
+**Author:** Fenster (Backend Dev)  
+**Status:** Implemented
+
+### What Was Built
+
+Full backend implementation of conversations & memory for the Loom gateway:
+
+- **Migration `1000000000014`**: Four new tables (`partitions`, `conversations`, `conversation_messages`, `conversation_snapshots`) + three agent columns (`conversations_enabled`, `conversation_token_limit`, `conversation_summary_model`).
+- **`src/conversations.ts`**: `ConversationManager` module with partition/conversation lifecycle, encrypted context loading, message storage, and LLM snapshot creation.
+- **`src/auth.ts`**: `TenantContext` extended with `agentConfig` (conversation settings); `lookupTenant` query extended.
+- **`src/index.ts`**: Conversation wiring in the `/v1/chat/completions` handler.
+- **`src/routes/portal.ts`**: Six CRUD routes for partitions and conversations.
+
+### Key Decisions
+
+#### Conversation ID is client-supplied or auto-generated
+Clients may pass `conversation_id` as a top-level field. If omitted, the gateway auto-generates a UUID. The resolved ID is always returned in the response body (`conversation_id`) and `X-Loom-Conversation-ID` header. This lets stateless clients start threads without pre-registering anything.
+
+#### Partition root uniqueness via partial index
+`UNIQUE (tenant_id, parent_id, external_id)` does not protect against duplicate root partitions (PostgreSQL treats two NULLs as distinct). A `CREATE UNIQUE INDEX ... WHERE parent_id IS NULL` partial index is added alongside the constraint. Same pattern applied to `conversations` for null `partition_id`.
+
+#### Messages never deleted; snapshot_id marks archival
+`conversation_messages` is an append-only permanent log. The `snapshot_id` column is set (via `UPDATE`) when a snapshot is created, marking those messages as "archived under that snapshot". `loadContext` only loads messages where `snapshot_id IS NULL` — i.e., post-latest-snapshot messages. This avoids timestamp-based range queries and makes the archival semantics explicit.
+
+#### Token estimation: `content.length / 4`
+No tiktoken dependency. Character-count estimation (`/ 4`) is sufficient for triggering the summarisation threshold. The exact limit is configurable per agent via `conversation_token_limit`.
+
+#### Summarisation reuses the existing provider.proxy()
+The summarisation LLM call uses the same `BaseProvider.proxy()` path as normal requests. The summary model defaults to the request model if `conversation_summary_model` is unset on the agent. Summarisation failures are caught and logged; the request proceeds with the full untruncated history as a fallback.
+
+#### Streaming: messages not stored yet
+Conversation message storage only happens in the non-streaming JSON path. Streaming responses do not persist messages in this iteration. The SSE transform buffering required to support streaming conversations is deferred to a future wave.
+
+#### Portal routes use portal JWT (tenant-scoped)
+All partition and conversation portal routes use the `authRequired` preHandler and are scoped to `request.portalUser.tenantId`. No cross-tenant data access is possible. Partition/conversation detail routes are accessible by UUID (internal), not by external_id, to prevent enumeration.
+
+#### Encryption
+All message content and snapshot summaries are encrypted with `encryptTraceBody` / `decryptTraceBody` from `src/encryption.ts` (AES-256-GCM, per-tenant key derivation). Decryption failures in portal and loadContext are silently skipped (content returned as `null`) to avoid breaking the API when messages from a previous key version are present.
+
+## 2026-02-28: Sandbox Conversation Support
+
+**Date:** 2026-02-28  
+**Context:** Adding conversation memory support to the portal's sandbox chat endpoint
+
+### Decision
+
+Implement conversation memory in the sandbox chat route (`POST /v1/portal/agents/:id/chat`) following the same pattern as the main gateway, with these specific choices:
+
+#### Non-Fatal Error Handling
+
+Conversation load failures are caught and logged but do not fail the HTTP request. The endpoint proceeds without memory if conversation loading fails.
+
+**Rationale:**
+- Sandbox is for testing/exploration — better to succeed without memory than fail entirely
+- Matches gateway behavior for resilience
+- Provider errors are more critical than memory errors in this context
+
+#### Fire-and-Forget Message Storage
+
+`storeMessages()` is called after sending the HTTP response with `.catch()` to log errors asynchronously.
+
+**Rationale:**
+- Keeps response latency low (same as tracing)
+- Storage failures shouldn't block user-facing response
+- Matches gateway pattern for consistency
+
+#### Server-Side History Loading
+
+Unlike the basic chat example (which sends full `conversationHistory` array), the sandbox chat accepts a single message and loads history server-side.
+
+**Rationale:**
+- Reduces request payload size
+- Server is source of truth for conversation state
+- Prevents client/server desync
+- Matches gateway conversation API contract
+
+#### Default Partition: `__sandbox__`
+
+When `partition_id` is not provided, the sandbox uses `__sandbox__` as the default partition scope.
+
+**Rationale:**
+- Provides namespace isolation from production conversations
+- Clear semantic distinction (sandbox vs. real use)
+- Prevents accidental mixing of test and production data
+
+#### Conversation ID Generation
+
+Unlike the gateway (which auto-generates conversation_id if omitted), the sandbox **requires** the client to provide `conversation_id` to enable memory.
+
+**Rationale:**
+- Sandbox is a testing tool — explicit is better than implicit
+- Forces developers to understand the conversation_id contract
+- Gateway handles auto-generation for production simplicity; sandbox teaches the API
+
+### Alternatives Considered
+
+#### Gateway-style auto-generation in sandbox
+- **Rejected:** Sandbox should be more explicit to aid learning
+- The example HTML demonstrates both patterns (blank = new, provided = continue)
+
+#### Separate conversation API
+- **Rejected:** Would duplicate code and complicate the agent abstraction
+- Reusing `conversationManager` keeps consistency with gateway
+
+#### Synchronous message storage
+- **Rejected:** Would increase response latency significantly (2+ DB writes)
+- Fire-and-forget is proven pattern in gateway and tracing
+
+### Impact
+
+- Portal sandbox chat can now test conversation memory features
+- Developers can validate conversation_id/partition_id behavior before production
+- `examples/conversations/index.html` provides working reference implementation
+- No breaking changes to existing sandbox chat API (all new fields are optional)
+
+## 2026-02-28: AgentSandbox Memory Mode UI Design
+
+**Context:** Added conversation memory toggle to AgentSandbox for agents with `conversations_enabled: true`.
+
+### Design Choices
+
+#### Toggle Placement
+- Memory toggle positioned between agent name and model selector in header
+- Keeps controls logically grouped: memory (left) → model (center) → close (right)
+- Only shown when `agent.conversations_enabled` is true to avoid clutter
+
+#### State Indicators
+- **Inactive**: Gray button "💾 Memory" — subtle, low-emphasis
+- **Active**: Indigo button "💾 Memory ON" — clear visual feedback
+- **Conversation ID**: Small monospace text `💬 abc12345...` in sub-header when active
+  - First 8 chars of UUID provide enough uniqueness for user recognition
+  - Border-top separator keeps it visually distinct from main header
+
+#### "New Conversation" Action
+- Small "↺ New" button appears next to toggle when conversation is active
+- Ghost style (text-only) to minimize visual weight
+- Resets both conversation ID and message history for clean slate
+
+#### Memory Toggle Behavior
+- When toggling off: clears conversation ID immediately (no orphaned state)
+- When toggling on: starts fresh, backend creates new conversation on first message
+- Conversation ID captured from first response and reused for subsequent messages
+
+#### Error Handling
+- No special error handling for conversation failures — general error banner covers it
+- If conversation_id missing from response, next message starts new conversation
+
+### Trade-offs
+- **Compact over descriptive**: Used icons and short labels to fit in existing header
+- **No confirmation on "New"**: Instant reset keeps flow simple, users can always start over
+- **UUID display**: Could link to full conversation view, but deferred to avoid scope creep
+
+## 2026-02-27T04:59:51Z: Sandbox Smoke Test Approach
+
+**Author:** Hockney  
+**Date:** 2025  
+**Context:** Adding portal-sandbox.smoke.ts for the new SandboxPage and AgentSandbox component.
+
+### Decisions Made
+
+#### 1. Assistant response detection uses `.bg-gray-800.text-gray-100` not `.animate-pulse` hidden wait
+
+The "thinking…" loading indicator and assistant message bubbles both use `.bg-gray-800`, but the loading indicator uses `text-gray-400` while assistant messages use `text-gray-100`. Waiting for `.bg-gray-800.text-gray-100` to become visible is more robust than waiting for `.animate-pulse` to disappear (which can race if the element hasn't appeared yet).
+
+#### 2. Analytics after-traffic assertion uses dual check (count === 0 OR first card is not `—`)
+
+The analytics aggregation pipeline may introduce a short delay before data reflects in the dashboard. The test uses a 2-second wait then checks `.card-value--empty` count. If some cards remain empty (edge case), it falls back to asserting the first card value is not `—`. This avoids flakiness without skipping the assertion entirely.
+
+#### 3. Model set to `mistral:7b` for sandbox chat test
+
+Using `mistral:7b` as it's the model specified in the task. Tests requiring a live LLM response depend on the Ollama provider being configured in the test environment.
+
+#### 4. Agent selected by `button:has-text(agentName)` not `p:has-text(agentName)`
+
+SandboxPage renders the agent list as `<button>` elements containing a `<p>` for the name. Playwright's `:has-text()` on the `button` element works correctly since it matches text within descendants.

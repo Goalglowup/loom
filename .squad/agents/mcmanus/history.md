@@ -862,3 +862,39 @@ Used `adminMode?: boolean` prop pattern instead of passing full URLs/header fact
 - Toggling memory off clears conversation ID
 - Updated `api.sandboxChat` signature: added `conversationId` and `partitionId` params, returns `conversation_id` in response type
 - Build passes with zero TypeScript errors
+
+### 2026-02-28: AgentSandbox Memory Mode UI
+
+**Delivered:** Conversation memory toggle with state tracking and "New Conversation" action for sandbox chat.
+
+**What Was Built:**
+- Memory toggle (💾) positioned between agent name and model selector in header
+- Toggle only shown when `agent.conversations_enabled === true`
+- State indicators:
+  - Inactive: Gray "💾 Memory" button
+  - Active: Indigo "💾 Memory ON" button with conversation ID display
+  - Monospace ID text: first 8 chars of UUID (`💬 abc12345...`) in sub-header
+- "↺ New" button appears when memory is active (ghost style, minimal visual weight)
+- Conversation ID capture from first response and reuse in subsequent messages
+- Error handling: conversation failures covered by general error banner
+
+**State Behavior:**
+- Toggling off: clears conversation ID immediately (no orphaned state)
+- Toggling on: starts fresh, backend creates new conversation on first message
+- Each conversation tracked independently per session
+
+**Design Trade-offs:**
+- Compact icon-based UI over verbose descriptions (space constraints in header)
+- No confirmation on "New" action (instant reset, users can always restart)
+- UUID display deferred linking to full conversation view (phase 2 feature)
+
+**Integration with Backend:**
+- Reads `agent.conversations_enabled` to conditionally show toggle
+- Captures and stores `conversation_id` from response
+- Passes conversation_id and partition_id to subsequent requests
+- Resets message history when starting new conversation or toggling off
+
+**Notes for Future:**
+- Memory state is session-scoped (resets on page reload)
+- Could extend with conversation listing/browser UI in future
+- Deep linking to conversation details would be valuable for debugging
