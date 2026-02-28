@@ -339,3 +339,35 @@ Each issue includes:
 
 **Deferred to Phase 2:**
 - Email notifications, invite role customization, tenant transfer, user profile mgmt, rate limiting, audit logging, last-owner race condition fix
+
+## 2026-02-27: README & Documentation Rewrite (Comprehensive)
+
+**Task:** Rewrite README.md as product-facing documentation, move dev setup to RUNNING_LOCALLY.md
+
+**Learnings from Code Audit:**
+
+1. **Gateway Core:** `/v1/chat/completions` is the main proxy endpoint. Extensions added: `conversation_id` (optional), `partition_id` (optional) for conversation memory. Response echoes these IDs.
+
+2. **Multi-Tenant Model:** API key authentication → tenant lookup via cached key_hash → strict data isolation. Each tenant has optional `provider_config` (OpenAI/Azure), optional agents (system prompt, skills, MCP endpoints).
+
+3. **Agent System:** Agents have `merge_policies` controlling how system_prompt/skills/mcp_endpoints blend with user requests. `applyAgentToRequest()` does injection with three strategies per field (prepend/append/overwrite/ignore). One-shot MCP round-trip supported.
+
+4. **Conversation Memory:** Optional per-agent feature (flag: `conversations_enabled`). Supports partitioning (e.g., by document/session). Persistent messages (encrypted). Auto-summarization when token budget exceeded. Context injection prepends latest snapshot + unsummarized messages to request.
+
+5. **Trace Recording:** Batched async flushing (100 traces or 5 seconds). Encryption at rest (AES-256-GCM). Request/response/latency/tokens/overhead recorded. Partitioned by month. All bodies encrypted with per-tenant derived keys.
+
+6. **Analytics:** Token counts, latency percentiles (p95/p99), error rates, cost estimation (per-model rates), gateway overhead, TTFB. Subtenant rollup via recursive CTE. Timeseries bucketing configurable.
+
+7. **Portal Routes:** `/v1/portal/*` handles tenant signup, login, tenant switching (multi-user, multi-tenant). Invite links with max_uses and expiry. JWT auth (separate from admin JWT, `PORTAL_JWT_SECRET`).
+
+8. **Admin Routes:** `/v1/admin/*` requires admin JWT auth. CRUD for tenants, API keys, provider config. System-wide analytics. Audit trail queries.
+
+9. **Database Schema:** 12 core tables (tenants, agents, api_keys, traces, conversations, partitions, conversation_messages, conversation_snapshots, users, tenant_memberships, invites, admin_users). Traces partitioned monthly. All conversation content encrypted at rest.
+
+10. **Provider Pattern:** Registry (factory pattern) resolves provider per-tenant. OpenAI & Azure adapters with different URL/auth patterns. Provider eviction on config change to force re-init.
+
+**Deliverables:**
+- NEW: `RUNNING_LOCALLY.md` — All setup/dev content from old README
+- UPDATED: `README.md` — Product-focused with full capability descriptions, architecture overview, API extensions, and comprehensive database schema
+
+**Documentation Strategy:** Lean, bullet-point heavy, developer audience. No marketing fluff. Accurate reflection of what the codebase actually does.

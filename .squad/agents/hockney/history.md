@@ -311,3 +311,39 @@
 - **Portal routes need no JWT plugin**: Unlike admin routes, portal routes use `fast-jwt` directly (not `@fastify/jwt`). Just `Fastify({ logger: false })` + `registerPortalRoutes()` is sufficient
 - **Sequential mock pool for conversations**: Conversation methods make predictable ordered calls (SELECT then INSERT/UPDATE). A `responses[]` array with index counter is cleaner than SQL pattern matching for these tests
 - **Real encryption in conversation tests**: Loading `encryptTraceBody` directly in test to produce valid ciphertexts for `loadContext` tests — avoids brittle string fixtures, exercises real encrypt/decrypt roundtrip
+
+## Learnings — Portal UI Unit Tests (2025)
+
+### Task: Write Vitest + RTL unit tests for untested portal UI components and pages
+
+**Test files created:**
+- `portal/src/lib/__tests__/auth.test.ts` — 9 tests for getToken/setToken/clearToken/isAuthenticated/getStoredTenants/setStoredTenants
+- `portal/src/lib/__tests__/models.test.ts` — 3 tests for COMMON_MODELS constant
+- `portal/src/context/__tests__/AuthContext.test.tsx` — 7 tests for AuthProvider (loading, user resolution, logout, setLoginData, currentRole)
+- `portal/src/components/__tests__/AppLayout.test.tsx` — 7 tests (nav links, owner-only links, logout, branding)
+- `portal/src/components/__tests__/TenantSwitcher.test.tsx` — 7 tests (single tenant static, multi-tenant select, switchTenant, switching indicator)
+- `portal/src/components/__tests__/ModelListEditor.test.tsx` — 13 tests (toggle custom, add/remove models, Enter key, duplicates, reset)
+- `portal/src/components/__tests__/AgentEditor.test.tsx` — 10 tests (create/edit modes, validation, API calls, resolved config, conversation toggle)
+- `portal/src/components/__tests__/AgentSandbox.test.tsx` — 9 tests (render, send message, loading, error, Enter key, custom models)
+- `portal/src/pages/__tests__/LandingPage.test.tsx` — 6 tests (links, features, hero, footer)
+- `portal/src/pages/__tests__/DashboardHome.test.tsx` — 6 tests (loading, welcome, provider status, error, quick links)
+- `portal/src/pages/__tests__/SignupPage.test.tsx` — 9 tests (normal signup, invite mode, API key reveal, navigation)
+- `portal/src/pages/__tests__/SandboxPage.test.tsx` — 6 tests (loading, empty, agent list, selection, title)
+
+**Total new tests: 92** (added to existing 30, total 122 passing)
+
+**Key Learnings:**
+
+- **jsdom localStorage.clear() not available**: The jsdom environment used here doesn't expose `localStorage.clear()` or `localStorage.removeItem()`. Fix: `vi.stubGlobal('localStorage', localStorageMock)` with a custom in-memory store in `beforeAll`. This is required for any test file that directly exercises localStorage.
+
+- **vi.resetAllMocks() clears mock implementations**: When using `vi.resetAllMocks()` in `beforeEach`, any mock implementations set via `vi.fn().mockReturnValue(...)` in the factory are cleared. Always re-apply mock implementations inside `beforeEach` after the reset (e.g., `vi.mocked(getToken).mockReturnValue('tok')`).
+
+- **getByText/getByRole fails on multiple matches**: LandingPage and SignupPage repeat text in multiple elements. Use `getAllByText(...).length > 0` or `getAllByRole(...).[0]` instead of `getByText`/`getByRole` when duplicates are expected.
+
+- **AgentEditor's conversation toggle is role="switch"**: Not a `<input type="checkbox">`. Use `screen.getByRole('switch')` to find it.
+
+- **Mock child components to isolate test scope**: Mocking `ModelListEditor` and `AgentSandbox` in parent component tests keeps tests focused and avoids cascading mock requirements. Use minimal stubs (`data-testid` attribute) so the parent tests can still assert the child is rendered.
+
+- **SandboxPage renders agent name in both list button and AgentSandbox mock**: Both the agent button in the sidebar and the mocked AgentSandbox render the agent name. Use `getAllByText()` when the same text appears in multiple places.
+
+- **AuthContext tests need api.me and auth lib both mocked**: The AuthProvider calls `getToken()` on mount and `api.me()` if token is present. Mock both `../../lib/api` and `../../lib/auth` to control loading behavior.
