@@ -1,5 +1,11 @@
 # Team Decisions
 
+## 2026-02-28T05:07:50Z: User directive — Server restart must use disown
+**By:** Michael Brown (via Copilot)
+**What:** After every code change, restart the server using `nohup node dist/index.js >> /tmp/loom-server.log 2>&1 & disown $!`. The `disown` step is mandatory — without it, the process gets SIGHUP when the terminal/session closes and dies. Plain `nohup ... &` alone is NOT sufficient on macOS.
+**Why:** User request — captured for team memory
+**Impact:** Every agent that restarts the server must use `disown $!` after the `nohup ... &` command. This applies on macOS (setsid is Linux-only and unavailable here).
+
 ## 2026-02-27T22:00:36Z: Migrate Smoke Tests from Selenium to Playwright
 
 **Date:** 2026-02-27  
@@ -1422,7 +1428,8 @@ Falls back to `user.role` for backward compatibility.
 
 **By:** Michael Brown (via Copilot)  
 **What:** After every major change (new feature, significant refactor, route changes, portal rebuild), kill the running API server and restart it in the background, logging to `/tmp/loom-server.txt`. Supersedes any prior directive about server restarts. Log file is `/tmp/loom-server.txt` (not `.log`).  
-**Why:** User request — captured for team memory
+**Why:** User request — captured for team memory  
+**See also:** disown directive (2026-02-28T05:07:50Z) — disown $! is required after nohup ... &
 
 ## 2026-02-28: Conversations & Memory Backend
 
