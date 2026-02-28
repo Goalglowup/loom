@@ -849,3 +849,16 @@ Used `adminMode?: boolean` prop pattern instead of passing full URLs/header fact
 - Added `💬 Conversations` nav link in `AppLayout.tsx` between Agents and Sandbox
 - Added `<Route path="conversations" element={<ConversationsPage />} />` in `App.tsx`
 - Build passes with zero TypeScript errors
+
+### 2026-XX-XX: AgentSandbox Memory Mode
+
+- Added `memoryEnabled` and `conversationId` state to `AgentSandbox.tsx`
+- Memory toggle appears in header when `agent.conversations_enabled` is true
+- Toggle states: inactive gray "💾 Memory" vs active indigo "💾 Memory ON"
+- "↺ New" button appears when conversation is active, resets conversation ID and clears messages
+- Conversation ID displayed as `💬 abc12345...` in compact border below header when active
+- Updated `handleSend` to pass `conversationId` to `api.sandboxChat` when memory is enabled
+- Captures `conversation_id` from response on first message in new conversation
+- Toggling memory off clears conversation ID
+- Updated `api.sandboxChat` signature: added `conversationId` and `partitionId` params, returns `conversation_id` in response type
+- Build passes with zero TypeScript errors

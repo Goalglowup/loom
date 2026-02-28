@@ -858,3 +858,41 @@ if (tenantId) {
 - **Snapshot-based context loading via `snapshot_id IS NULL`**: Messages without a `snapshot_id` are "post-latest-snapshot" — the only messages that need to be injected alongside the snapshot summary. This avoids needing a join or secondary timestamp query; the archive step simply fills in the `snapshot_id` on all un-tagged messages.
 - **Fire-and-forget for post-response persistence**: `storeMessages` is called with `.catch()` after `reply.send()` — same pattern as `traceRecorder.record()`. This keeps response latency low and avoids surfacing storage failures as HTTP errors.
 - **Summarization as a provider proxy call**: Reuses the existing `provider.proxy()` plumbing for the summarization LLM call. No new HTTP client needed. The summary model falls back to the request model if `conversation_summary_model` is not set on the agent.
+
+## 2026-02-28: Conversation Demo + Sandbox Portal Support
+
+**Event:** Created standalone conversation demo and added conversation support to sandbox chat endpoint  
+**Artifacts:** `examples/conversations/index.html`, `src/routes/portal.ts` (sandbox chat update), `portal/src/lib/api.ts` (already updated)
+
+### What was built
+
+**`examples/conversations/index.html` — Standalone demo:**
+- Single-file HTML demo (no build tools) showing conversation memory feature
+- Adds `conversation_id` and `partition_id` config inputs (both optional)
+- Tracks active conversation ID in localStorage + displays it in status bar (truncated UUID)
+- "New Conversation" button to clear stored ID and start fresh thread
+- Extracts `conversation_id` from `X-Loom-Conversation-ID` response header (available immediately before stream reads)
+- Auto-saves returned conversation ID for subsequent messages
+- Comments explain conversation_id (thread identifier) and partition_id (user/group scope) semantics
+- Single-message requests — gateway loads history server-side (unlike chat example which sends full history)
+
+**`src/routes/portal.ts` — Sandbox chat conversation support:**
+- Imported `conversationManager` from `conversations.ts`
+- Extended agent DB query to include `conversations_enabled`, `conversation_token_limit`, `conversation_summary_model`
+- Extended request body type to accept `conversation_id?: string` and `partition_id?: string`
+- Added conversation loading logic before `applyAgentToRequest`:
+  - If `conversations_enabled && conversation_id`: resolve/create partition, resolve/create conversation, load context, prepend history
+  - Non-fatal error handling — catch all conversation load errors and proceed without memory (same as gateway)
+- After response: fire-and-forget `storeMessages` call (same pattern as gateway)
+- Response now includes `conversation_id` if present (spread into return object)
+
+**Portal API client** (`portal/src/lib/api.ts`):
+- Already updated with `conversationId` and `partitionId` optional parameters
+- Response type already includes `conversation_id?: string`
+
+### Key Learnings
+
+- **Conversation header vs body**: The `X-Loom-Conversation-ID` header is available immediately after `fetch()` returns (before reading stream), while body `conversation_id` only appears after consuming the entire stream. For UI responsiveness, check header first.
+- **Single-message requests with server-side history**: Unlike the basic chat example which sends full `conversationHistory` array, the conversation demo sends only the current message. The gateway/sandbox loads and injects history server-side. This reduces request payload and keeps conversation state canonical on the server.
+- **Partition scope pattern**: `partition_id` is typically a user ID or team ID — provides logical isolation so different users/contexts can have separate conversation threads. The sandbox uses `__sandbox__` as default partition if none provided.
+- **Fire-and-forget storage in sandbox**: Same `.catch()` pattern as gateway — `storeMessages` is called after response, logged on error but doesn't block or fail the HTTP response.

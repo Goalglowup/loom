@@ -1,0 +1,813 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Loom Conversations — Memory Demo</title>
+  <style>
+    /* ─── Design Tokens ─────────────────────────────────────────────────────── */
+    :root {
+      --bg:           #0f0f10;
+      --bg-surface:   #1a1a1d;
+      --bg-input:     #242428;
+      --bg-user:      #2563eb;
+      --bg-assistant: #1e1e22;
+      --border:       #2e2e34;
+      --text:         #e8e8ed;
+      --text-muted:   #888893;
+      --text-user:    #fff;
+      --accent:       #3b82f6;
+      --accent-hover: #2563eb;
+      --error:        #ef4444;
+      --success:      #22c55e;
+      --radius:       12px;
+      --radius-msg:   18px;
+      --font:         system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      --font-mono:    "SF Mono", "Fira Code", "Cascadia Code", monospace;
+    }
+
+    /* ─── Reset ─────────────────────────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; }
+    body {
+      font-family: var(--font);
+      background: var(--bg);
+      color: var(--text);
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+    }
+
+    /* ─── Header ─────────────────────────────────────────────────────────────── */
+    header {
+      padding: 16px 24px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-shrink: 0;
+    }
+    .logo {
+      font-size: 18px;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+      color: var(--text);
+    }
+    .logo span { color: var(--accent); }
+    .header-meta {
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
+    /* ─── Config Panel ──────────────────────────────────────────────────────── */
+    .config-panel {
+      background: var(--bg-surface);
+      border-bottom: 1px solid var(--border);
+      padding: 16px 24px;
+      flex-shrink: 0;
+    }
+    .config-toggle {
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      font-size: 13px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 0;
+    }
+    .config-toggle:hover { color: var(--text); }
+    .config-toggle .chevron {
+      transition: transform 0.2s;
+      display: inline-block;
+    }
+    .config-toggle.open .chevron { transform: rotate(180deg); }
+
+    .config-fields {
+      display: none;
+      margin-top: 14px;
+      gap: 12px;
+      flex-wrap: wrap;
+      align-items: flex-end;
+    }
+    .config-fields.visible { display: flex; }
+
+    .field-group {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      flex: 1;
+      min-width: 180px;
+    }
+    .field-group label {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+      color: var(--text-muted);
+    }
+    .field-group input {
+      background: var(--bg-input);
+      border: 1px solid var(--border);
+      color: var(--text);
+      font-size: 13px;
+      padding: 8px 10px;
+      border-radius: 8px;
+      outline: none;
+      font-family: var(--font-mono);
+      transition: border-color 0.15s;
+    }
+    .field-group input:focus { border-color: var(--accent); }
+
+    .btn {
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 600;
+      padding: 8px 18px;
+      cursor: pointer;
+      transition: background 0.15s;
+      align-self: flex-end;
+      white-space: nowrap;
+    }
+    .btn:hover { background: var(--accent-hover); }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .config-status {
+      font-size: 12px;
+      color: var(--success);
+      margin-top: 8px;
+      min-height: 16px;
+    }
+
+    /* ─── Conversation Status Bar ────────────────────────────────────────────── */
+    .conversation-status {
+      background: var(--bg-surface);
+      border-bottom: 1px solid var(--border);
+      padding: 10px 24px;
+      font-size: 12px;
+      color: var(--text-muted);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-shrink: 0;
+    }
+    .conversation-id {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-family: var(--font-mono);
+      font-size: 12px;
+    }
+    .btn-new-conversation {
+      background: var(--bg-input);
+      border: 1px solid var(--border);
+      color: var(--text);
+      border-radius: 6px;
+      font-size: 11px;
+      font-weight: 600;
+      padding: 5px 12px;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .btn-new-conversation:hover {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+
+    /* ─── Messages ──────────────────────────────────────────────────────────── */
+    .messages {
+      flex: 1;
+      overflow-y: auto;
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      scroll-behavior: smooth;
+    }
+
+    /* Empty state shown before any messages */
+    .empty-state {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      flex: 1;
+      color: var(--text-muted);
+      text-align: center;
+      gap: 10px;
+    }
+    .empty-state .icon { font-size: 40px; }
+    .empty-state h2 { font-size: 18px; font-weight: 600; color: var(--text); }
+    .empty-state p { font-size: 14px; line-height: 1.5; max-width: 420px; }
+
+    /* Individual message row */
+    .message-row {
+      display: flex;
+      flex-direction: column;
+      max-width: 72%;
+    }
+    .message-row.user   { align-self: flex-end; align-items: flex-end; }
+    .message-row.assistant { align-self: flex-start; align-items: flex-start; }
+
+    .message-bubble {
+      padding: 12px 16px;
+      border-radius: var(--radius-msg);
+      font-size: 15px;
+      line-height: 1.6;
+      word-wrap: break-word;
+      white-space: pre-wrap;
+    }
+    .user .message-bubble {
+      background: var(--bg-user);
+      color: var(--text-user);
+      border-bottom-right-radius: 4px;
+    }
+    .assistant .message-bubble {
+      background: var(--bg-assistant);
+      color: var(--text);
+      border-bottom-left-radius: 4px;
+      border: 1px solid var(--border);
+    }
+
+    .message-meta {
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-top: 4px;
+      padding: 0 4px;
+    }
+
+    /* Typing indicator — three animated dots */
+    .typing-indicator {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      padding: 14px 16px;
+    }
+    .typing-dot {
+      width: 7px;
+      height: 7px;
+      background: var(--text-muted);
+      border-radius: 50%;
+      animation: bounce 1.2s infinite;
+    }
+    .typing-dot:nth-child(2) { animation-delay: 0.2s; }
+    .typing-dot:nth-child(3) { animation-delay: 0.4s; }
+    @keyframes bounce {
+      0%, 80%, 100% { transform: translateY(0); }
+      40%            { transform: translateY(-6px); }
+    }
+
+    /* Error message */
+    .error-message {
+      background: rgba(239, 68, 68, 0.1);
+      border: 1px solid rgba(239, 68, 68, 0.35);
+      color: var(--error);
+      border-radius: var(--radius);
+      padding: 12px 16px;
+      font-size: 14px;
+      align-self: stretch;
+      line-height: 1.5;
+    }
+
+    /* ─── Input Bar ─────────────────────────────────────────────────────────── */
+    .input-bar {
+      padding: 16px 24px;
+      border-top: 1px solid var(--border);
+      display: flex;
+      gap: 10px;
+      align-items: flex-end;
+      background: var(--bg);
+      flex-shrink: 0;
+    }
+    .input-bar textarea {
+      flex: 1;
+      background: var(--bg-input);
+      border: 1px solid var(--border);
+      color: var(--text);
+      font-size: 15px;
+      font-family: var(--font);
+      padding: 10px 14px;
+      border-radius: var(--radius);
+      outline: none;
+      resize: none;
+      max-height: 160px;
+      overflow-y: auto;
+      line-height: 1.5;
+      transition: border-color 0.15s;
+    }
+    .input-bar textarea:focus { border-color: var(--accent); }
+    .input-bar textarea::placeholder { color: var(--text-muted); }
+
+    .send-btn {
+      background: var(--accent);
+      border: none;
+      color: #fff;
+      border-radius: var(--radius);
+      width: 42px;
+      height: 42px;
+      font-size: 18px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      transition: background 0.15s;
+    }
+    .send-btn:hover:not(:disabled) { background: var(--accent-hover); }
+    .send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    /* ─── Scrollbar ─────────────────────────────────────────────────────────── */
+    ::-webkit-scrollbar { width: 5px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+  </style>
+</head>
+<body>
+
+  <!-- ─── Header ─────────────────────────────────────────────────────────── -->
+  <header>
+    <div class="logo"><span>Loom</span> Conversations</div>
+    <div class="header-meta">Conversation memory demo — messages persist across sessions</div>
+  </header>
+
+  <!-- ─── Config Panel ───────────────────────────────────────────────────── -->
+  <div class="config-panel">
+    <button class="config-toggle" id="configToggle" aria-expanded="false">
+      ⚙ Configuration <span class="chevron">▾</span>
+    </button>
+    <div class="config-fields" id="configFields" role="region">
+      <div class="field-group">
+        <label for="gatewayUrl">Gateway URL</label>
+        <input type="text" id="gatewayUrl" placeholder="http://localhost:3000" />
+      </div>
+      <div class="field-group">
+        <label for="apiKey">API Key</label>
+        <input type="password" id="apiKey" placeholder="sk-••••••••••••••••" />
+      </div>
+      <div class="field-group" style="max-width:180px">
+        <label for="model">Model</label>
+        <input type="text" id="model" placeholder="gpt-4o" />
+      </div>
+      <div class="field-group">
+        <label for="conversationId">Conversation ID (optional)</label>
+        <input type="text" id="conversationId" placeholder="Leave blank for new conversation" />
+      </div>
+      <div class="field-group">
+        <label for="partitionId">Partition ID (optional)</label>
+        <input type="text" id="partitionId" placeholder="e.g. user-123" />
+      </div>
+      <button class="btn" id="saveConfig">Save & Apply</button>
+    </div>
+    <div class="config-status" id="configStatus"></div>
+  </div>
+
+  <!-- ─── Conversation Status ────────────────────────────────────────────── -->
+  <div class="conversation-status">
+    <div class="conversation-id" id="conversationStatus">
+      💬 No active conversation
+    </div>
+    <button class="btn-new-conversation" id="newConversationBtn">New Conversation</button>
+  </div>
+
+  <!-- ─── Message History ────────────────────────────────────────────────── -->
+  <div class="messages" id="messages">
+    <div class="empty-state" id="emptyState">
+      <div class="icon">🧠</div>
+      <h2>Conversation Memory</h2>
+      <p>
+        Loom remembers your conversations! Each message exchange is stored server-side.
+        Start a conversation below and reload the page — the gateway will restore the context automatically.
+      </p>
+    </div>
+  </div>
+
+  <!-- ─── Input Bar ─────────────────────────────────────────────────────── -->
+  <div class="input-bar">
+    <textarea
+      id="userInput"
+      rows="1"
+      placeholder="Send a message…"
+      aria-label="Message input"
+    ></textarea>
+    <button class="send-btn" id="sendBtn" title="Send (Enter)" aria-label="Send message">
+      &#9658;
+    </button>
+  </div>
+
+  <script>
+    // ─────────────────────────────────────────────────────────────────────────
+    // Loom Conversations — Memory demonstration
+    //
+    // This example shows how to use Loom's conversation memory feature:
+    //
+    // 1. **conversation_id**: A unique identifier for a conversation thread.
+    //    - Leave blank on first message — the gateway generates one and returns it.
+    //    - On subsequent messages, include the same ID to continue the conversation.
+    //    - The gateway automatically loads previous messages from storage.
+    //
+    // 2. **partition_id**: Optional scope for organizing conversations.
+    //    - Typically a user ID, team ID, or other grouping identifier.
+    //    - Allows you to keep conversations separate by context (e.g., per-user memory).
+    //
+    // Unlike the basic chat example which keeps history in-memory, this approach
+    // persists conversations server-side. When you return with the same conversation_id,
+    // the model remembers your prior exchanges — even across browser sessions or devices.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    // ── Config ──────────────────────────────────────────────────────────────
+
+    const STORAGE_KEY_API_KEY = 'loom_api_key';
+    const STORAGE_KEY_GATEWAY = 'loom_gateway_url';
+    const STORAGE_KEY_MODEL   = 'loom_model';
+    const STORAGE_KEY_CONVERSATION_ID = 'loom_conversation_id';
+    const STORAGE_KEY_PARTITION_ID = 'loom_partition_id';
+
+    const DEFAULT_GATEWAY = 'http://localhost:3000';
+    const DEFAULT_MODEL   = 'deepseek-r1:14b';
+
+    // Active conversation ID tracked in memory (and persisted to localStorage)
+    let activeConversationId = null;
+
+    // Load saved config from localStorage into the form fields.
+    function loadConfig() {
+      document.getElementById('gatewayUrl').value =
+        localStorage.getItem(STORAGE_KEY_GATEWAY) || DEFAULT_GATEWAY;
+      document.getElementById('apiKey').value =
+        localStorage.getItem(STORAGE_KEY_API_KEY) || '';
+      document.getElementById('model').value =
+        localStorage.getItem(STORAGE_KEY_MODEL) || DEFAULT_MODEL;
+      document.getElementById('conversationId').value =
+        localStorage.getItem(STORAGE_KEY_CONVERSATION_ID) || '';
+      document.getElementById('partitionId').value =
+        localStorage.getItem(STORAGE_KEY_PARTITION_ID) || '';
+
+      // Restore active conversation ID from storage
+      activeConversationId = localStorage.getItem(STORAGE_KEY_CONVERSATION_ID) || null;
+      updateConversationStatus();
+    }
+
+    // Read current values from form and persist them to localStorage.
+    function saveConfig() {
+      const url   = document.getElementById('gatewayUrl').value.trim() || DEFAULT_GATEWAY;
+      const key   = document.getElementById('apiKey').value.trim();
+      const model = document.getElementById('model').value.trim() || DEFAULT_MODEL;
+      const convId = document.getElementById('conversationId').value.trim();
+      const partId = document.getElementById('partitionId').value.trim();
+
+      localStorage.setItem(STORAGE_KEY_GATEWAY, url);
+      localStorage.setItem(STORAGE_KEY_API_KEY, key);
+      localStorage.setItem(STORAGE_KEY_MODEL, model);
+      localStorage.setItem(STORAGE_KEY_CONVERSATION_ID, convId);
+      localStorage.setItem(STORAGE_KEY_PARTITION_ID, partId);
+
+      // Normalise displayed values.
+      document.getElementById('gatewayUrl').value = url;
+      document.getElementById('model').value = model;
+
+      // Update active conversation ID from config
+      activeConversationId = convId || null;
+      updateConversationStatus();
+
+      showConfigStatus('✓ Saved');
+    }
+
+    function getConfig() {
+      return {
+        gatewayUrl: localStorage.getItem(STORAGE_KEY_GATEWAY) || DEFAULT_GATEWAY,
+        apiKey:     localStorage.getItem(STORAGE_KEY_API_KEY)  || '',
+        model:      localStorage.getItem(STORAGE_KEY_MODEL)    || DEFAULT_MODEL,
+        partitionId: localStorage.getItem(STORAGE_KEY_PARTITION_ID) || '',
+      };
+    }
+
+    function showConfigStatus(msg) {
+      const el = document.getElementById('configStatus');
+      el.textContent = msg;
+      setTimeout(() => { el.textContent = ''; }, 2500);
+    }
+
+    // ── Conversation status display ───────────────────────────────────────────
+
+    function updateConversationStatus() {
+      const statusEl = document.getElementById('conversationStatus');
+      if (activeConversationId) {
+        // Truncate UUID for display: show first 5 and last 4 chars
+        const truncated = activeConversationId.length > 12
+          ? `${activeConversationId.slice(0, 8)}...${activeConversationId.slice(-4)}`
+          : activeConversationId;
+        statusEl.textContent = `💬 Conversation: ${truncated}`;
+      } else {
+        statusEl.textContent = '💬 No active conversation';
+      }
+    }
+
+    // ── Config panel toggle ──────────────────────────────────────────────────
+
+    document.getElementById('configToggle').addEventListener('click', () => {
+      const btn    = document.getElementById('configToggle');
+      const fields = document.getElementById('configFields');
+      const isOpen = fields.classList.toggle('visible');
+      btn.classList.toggle('open', isOpen);
+      btn.setAttribute('aria-expanded', String(isOpen));
+    });
+
+    document.getElementById('saveConfig').addEventListener('click', () => {
+      saveConfig();
+      // Optionally collapse the panel after saving.
+      document.getElementById('configFields').classList.remove('visible');
+      document.getElementById('configToggle').classList.remove('open');
+      document.getElementById('configToggle').setAttribute('aria-expanded', 'false');
+    });
+
+    // ── New conversation button ─────────────────────────────────────────────
+
+    document.getElementById('newConversationBtn').addEventListener('click', () => {
+      activeConversationId = null;
+      localStorage.removeItem(STORAGE_KEY_CONVERSATION_ID);
+      document.getElementById('conversationId').value = '';
+      updateConversationStatus();
+      showConfigStatus('✓ Cleared conversation — next message will start a new thread');
+    });
+
+    // ── Message history ──────────────────────────────────────────────────────
+
+    // In-memory array of { role: 'user'|'assistant', content: string } objects.
+    // In this demo, we keep a local copy for UI purposes, but the server is the
+    // source of truth. When continuing a conversation, the gateway injects history.
+    const conversationHistory = [];
+
+    // Append a message bubble to the UI and return the bubble element
+    // so the caller can stream content into it.
+    function appendMessage(role, content = '') {
+      const emptyState = document.getElementById('emptyState');
+      if (emptyState) emptyState.remove();
+
+      const row = document.createElement('div');
+      row.className = `message-row ${role}`;
+
+      const bubble = document.createElement('div');
+      bubble.className = 'message-bubble';
+      bubble.textContent = content;
+
+      const meta = document.createElement('div');
+      meta.className = 'message-meta';
+      meta.textContent = role === 'user' ? 'You' : 'Assistant';
+
+      row.appendChild(bubble);
+      row.appendChild(meta);
+      document.getElementById('messages').appendChild(row);
+      scrollToBottom();
+      return bubble;
+    }
+
+    // Show a transient error banner inside the messages area.
+    function appendError(msg) {
+      const el = document.createElement('div');
+      el.className = 'error-message';
+      el.textContent = `⚠ ${msg}`;
+      document.getElementById('messages').appendChild(el);
+      scrollToBottom();
+    }
+
+    // Show the animated typing indicator while streaming is in progress.
+    // Returns a function that removes it when called.
+    function showTypingIndicator() {
+      const row = document.createElement('div');
+      row.className = 'message-row assistant';
+      row.id = 'typingIndicator';
+
+      const bubble = document.createElement('div');
+      bubble.className = 'message-bubble typing-indicator';
+      bubble.innerHTML = `
+        <div class="typing-dot"></div>
+        <div class="typing-dot"></div>
+        <div class="typing-dot"></div>
+      `;
+
+      row.appendChild(bubble);
+      document.getElementById('messages').appendChild(row);
+      scrollToBottom();
+
+      return () => row.remove();
+    }
+
+    function scrollToBottom() {
+      const el = document.getElementById('messages');
+      el.scrollTop = el.scrollHeight;
+    }
+
+    // ── SSE stream parsing ───────────────────────────────────────────────────
+
+    // Read a ReadableStream from a `fetch` response and yield content tokens
+    // one at a time. The stream follows the OpenAI SSE format:
+    //
+    //   data: {"choices":[{"delta":{"content":"Hello"}}]}
+    //   data: {"choices":[{"delta":{"content":" world"}}]}
+    //   data: [DONE]
+    //
+    // We use an async generator so the caller can `for await` over tokens.
+    async function* parseSSEStream(response) {
+      const reader  = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer    = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        // Decode the incoming bytes and append to our line buffer.
+        buffer += decoder.decode(value, { stream: true });
+
+        // Process all complete lines (terminated by \n).
+        const lines = buffer.split('\n');
+        // Keep the last (potentially incomplete) line in the buffer.
+        buffer = lines.pop();
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+
+          // SSE data lines start with "data: ".
+          if (!trimmed.startsWith('data: ')) continue;
+
+          const payload = trimmed.slice(6); // strip "data: "
+
+          // The stream signals completion with the [DONE] sentinel.
+          if (payload === '[DONE]') return;
+
+          // Parse the JSON delta and extract the text content.
+          try {
+            const json    = JSON.parse(payload);
+            const content = json?.choices?.[0]?.delta?.content;
+            if (content) yield content;
+          } catch {
+            // Malformed JSON — skip and continue. This can happen with
+            // provider-specific comment lines or empty keep-alive pings.
+          }
+        }
+      }
+    }
+
+    // ── Send a message ───────────────────────────────────────────────────────
+
+    let isSending = false; // Guard against double-sends.
+
+    async function sendMessage() {
+      if (isSending) return;
+
+      const input = document.getElementById('userInput');
+      const text  = input.value.trim();
+      if (!text) return;
+
+      const { gatewayUrl, apiKey, model, partitionId } = getConfig();
+
+      // Validate that an API key has been set.
+      if (!apiKey) {
+        appendError('No API key set. Open the Configuration panel above and enter your Loom API key.');
+        return;
+      }
+
+      // Clear the textarea and reset its height.
+      input.value = '';
+      input.style.height = 'auto';
+
+      // Add the user's message to both the UI and the in-memory history.
+      appendMessage('user', text);
+      conversationHistory.push({ role: 'user', content: text });
+
+      // Lock the UI while we wait for the response.
+      isSending = true;
+      document.getElementById('sendBtn').disabled = true;
+      input.disabled = true;
+
+      const removeTyping = showTypingIndicator();
+
+      try {
+        // Build request body with conversation_id and partition_id
+        const requestBody = {
+          model,
+          messages: [{ role: 'user', content: text }], // Single message — gateway loads history
+          stream: true,
+        };
+
+        // Include conversation_id if we have an active conversation
+        if (activeConversationId) {
+          requestBody.conversation_id = activeConversationId;
+        }
+
+        // Include partition_id if configured
+        if (partitionId) {
+          requestBody.partition_id = partitionId;
+        }
+
+        // POST to the Loom gateway's OpenAI-compatible completions endpoint.
+        const response = await fetch(`${gatewayUrl}/v1/chat/completions`, {
+          method: 'POST',
+          headers: {
+            'Content-Type':  'application/json',
+            'Authorization': `Bearer ${apiKey}`,
+          },
+          body: JSON.stringify(requestBody),
+        });
+
+        // Handle non-2xx HTTP errors from the gateway.
+        if (!response.ok) {
+          let errDetail = `HTTP ${response.status}`;
+          try {
+            const body = await response.json();
+            errDetail  = body?.error?.message || body?.message || errDetail;
+          } catch { /* ignore parse errors on error body */ }
+          throw new Error(errDetail);
+        }
+
+        // Extract conversation_id from response header (available immediately)
+        const headerConvId = response.headers.get('X-Loom-Conversation-ID');
+
+        // Replace the typing indicator with a real assistant bubble.
+        removeTyping();
+        const bubble = appendMessage('assistant', '');
+
+        // Stream the response tokens and accumulate them.
+        let fullContent = '';
+        for await (const token of parseSSEStream(response)) {
+          fullContent         += token;
+          bubble.textContent   = fullContent;
+          scrollToBottom();
+        }
+
+        // Save the complete assistant reply to the conversation history.
+        if (fullContent) {
+          conversationHistory.push({ role: 'assistant', content: fullContent });
+        }
+
+        // Update active conversation ID from header (if we didn't have one)
+        if (!activeConversationId && headerConvId) {
+          activeConversationId = headerConvId;
+          localStorage.setItem(STORAGE_KEY_CONVERSATION_ID, activeConversationId);
+          document.getElementById('conversationId').value = activeConversationId;
+          updateConversationStatus();
+        }
+
+      } catch (err) {
+        removeTyping();
+
+        // Friendly error for network failures (gateway unreachable, CORS, etc.).
+        if (err instanceof TypeError && err.message.includes('fetch')) {
+          appendError(`Could not reach the gateway at "${gatewayUrl}". Is Loom running? Check the URL in Configuration.`);
+        } else {
+          appendError(`Error: ${err.message}`);
+        }
+
+        // Roll back the optimistic user message from history since we won't
+        // have an assistant reply to pair it with.
+        conversationHistory.pop();
+      } finally {
+        // Always unlock the UI.
+        isSending = false;
+        document.getElementById('sendBtn').disabled = false;
+        input.disabled = false;
+        input.focus();
+      }
+    }
+
+    // ── Input event listeners ────────────────────────────────────────────────
+
+    const textarea = document.getElementById('userInput');
+
+    // Auto-resize the textarea as the user types.
+    textarea.addEventListener('input', () => {
+      textarea.style.height = 'auto';
+      textarea.style.height = `${textarea.scrollHeight}px`;
+    });
+
+    // Send on Enter; allow Shift+Enter for newlines.
+    textarea.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        sendMessage();
+      }
+    });
+
+    document.getElementById('sendBtn').addEventListener('click', sendMessage);
+
+    // ── Bootstrap ────────────────────────────────────────────────────────────
+
+    // Populate form from localStorage on page load.
+    loadConfig();
+
+    // Auto-open the config panel if no API key is saved yet.
+    if (!localStorage.getItem(STORAGE_KEY_API_KEY)) {
+      document.getElementById('configFields').classList.add('visible');
+      document.getElementById('configToggle').classList.add('open');
+      document.getElementById('configToggle').setAttribute('aria-expanded', 'true');
+    }
+
+    // Focus the input for immediate use.
+    textarea.focus();
+  </script>
+</body>
+</html>

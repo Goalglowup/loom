@@ -24,6 +24,8 @@ export default function AgentSandbox({ agent, onClose }: AgentSandboxProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [model, setModel] = useState('gpt-4o-mini');
+  const [memoryEnabled, setMemoryEnabled] = useState(false);
+  const [conversationId, setConversationId] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const token = getToken()!;
 
@@ -52,13 +54,23 @@ export default function AgentSandbox({ agent, onClose }: AgentSandboxProps) {
 
     try {
       const startMs = Date.now();
-      const res = await api.sandboxChat(token, agent.id, next.map(m => ({ role: m.role, content: m.content })), activeModel);
+      const res = await api.sandboxChat(
+        token,
+        agent.id,
+        next.map(m => ({ role: m.role, content: m.content })),
+        activeModel,
+        memoryEnabled ? conversationId : null,
+      );
       const latencyMs = Date.now() - startMs;
       const reasoning = (res.message as any).reasoning_content ?? (res.message as any).reasoning ?? undefined;
       setMessages(prev => [
         ...prev,
         { role: 'assistant', content: res.message.content, usage: res.usage, latencyMs, reasoning },
       ]);
+      // Capture conversation_id from response
+      if (memoryEnabled && res.conversation_id && !conversationId) {
+        setConversationId(res.conversation_id);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Request failed');
     } finally {
@@ -73,30 +85,74 @@ export default function AgentSandbox({ agent, onClose }: AgentSandboxProps) {
     }
   }
 
+  function handleMemoryToggle() {
+    if (memoryEnabled) {
+      setConversationId(null);
+    }
+    setMemoryEnabled(!memoryEnabled);
+  }
+
+  function handleNewConversation() {
+    setConversationId(null);
+    setMessages([]);
+  }
+
   return (
     <div className="bg-gray-900 border border-gray-700 rounded-xl overflow-hidden">
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-gray-700 gap-3 flex-wrap">
-        <span className="text-sm font-semibold text-gray-100 shrink-0">
-          Sandbox — <span className="text-indigo-400">{agent.name}</span>
-        </span>
-        <div className="flex items-center gap-2 flex-1 min-w-0 justify-end">
-          <ModelCombobox
-            value={model}
-            onChange={setModel}
-            options={modelOptions}
-            placeholder="e.g. gpt-4o"
-            disabled={loading}
-          />
+      <div className="border-b border-gray-700">
+        <div className="flex items-center justify-between px-4 py-3 gap-3 flex-wrap">
+          <span className="text-sm font-semibold text-gray-100 shrink-0">
+            Sandbox — <span className="text-indigo-400">{agent.name}</span>
+          </span>
+          <div className="flex items-center gap-2 flex-1 min-w-0 justify-end">
+            {agent.conversations_enabled && (
+              <div className="flex items-center gap-1 shrink-0">
+                <button
+                  onClick={handleMemoryToggle}
+                  disabled={loading}
+                  className={`text-xs px-2 py-1 rounded transition-colors ${
+                    memoryEnabled
+                      ? 'bg-indigo-600 text-white'
+                      : 'bg-gray-800 text-gray-400 hover:text-gray-200'
+                  } disabled:opacity-50`}
+                >
+                  {memoryEnabled ? '💾 Memory ON' : '💾 Memory'}
+                </button>
+                {memoryEnabled && conversationId && (
+                  <button
+                    onClick={handleNewConversation}
+                    disabled={loading}
+                    className="text-xs text-gray-400 hover:text-gray-200 px-1 disabled:opacity-50"
+                    title="Start new conversation"
+                  >
+                    ↺ New
+                  </button>
+                )}
+              </div>
+            )}
+            <ModelCombobox
+              value={model}
+              onChange={setModel}
+              options={modelOptions}
+              placeholder="e.g. gpt-4o"
+              disabled={loading}
+            />
+          </div>
+          {onClose && (
+            <button
+              onClick={onClose}
+              className="text-gray-500 hover:text-gray-300 text-sm transition-colors shrink-0"
+              aria-label="Close sandbox"
+            >
+              ✕
+            </button>
+          )}
         </div>
-        {onClose && (
-          <button
-            onClick={onClose}
-            className="text-gray-500 hover:text-gray-300 text-sm transition-colors shrink-0"
-            aria-label="Close sandbox"
-          >
-            ✕
-          </button>
+        {memoryEnabled && conversationId && (
+          <div className="text-xs text-gray-500 font-mono px-4 py-1 border-t border-gray-700/50">
+            💬 {conversationId.substring(0, 8)}...
+          </div>
         )}
       </div>
 

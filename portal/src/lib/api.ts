@@ -52,9 +52,28 @@ export const api = {
   getResolvedAgentConfig: (token: string, id: string) =>
     request<{ resolved: ResolvedAgentConfig }>('GET', `/v1/portal/agents/${id}/resolved`, undefined, token),
 
-  sandboxChat: (token: string, agentId: string, messages: Array<{role: string; content: string}>, model?: string) =>
-    request<{ message: { role: string; content: string; reasoning_content?: string; reasoning?: string }; model: string; usage: { prompt_tokens: number; completion_tokens: number; total_tokens: number } }>(
-      'POST', `/v1/portal/agents/${agentId}/chat`, { messages, model }, token
+  sandboxChat: (
+    token: string,
+    agentId: string,
+    messages: Array<{role: string; content: string}>,
+    model?: string,
+    conversationId?: string | null,
+    partitionId?: string | null,
+  ) =>
+    request<{
+      message: { role: string; content: string; reasoning_content?: string; reasoning?: string };
+      model: string;
+      usage: { prompt_tokens: number; completion_tokens: number; total_tokens: number };
+      conversation_id?: string;
+    }>(
+      'POST', `/v1/portal/agents/${agentId}/chat`,
+      {
+        messages,
+        model,
+        ...(conversationId ? { conversation_id: conversationId } : {}),
+        ...(partitionId ? { partition_id: partitionId } : {}),
+      },
+      token
     ),
 
 

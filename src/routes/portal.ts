@@ -12,6 +12,7 @@ import { evictProvider, getProviderForTenant } from '../providers/registry.js';
 import { applyAgentToRequest } from '../agent.js';
 import { getAnalyticsSummary, getTimeseriesMetrics, getModelBreakdown } from '../analytics.js';
 import { query } from '../db.js';
+import { conversationManager } from '../conversations.js';
 
 const PORTAL_JWT_SECRET = process.env.PORTAL_JWT_SECRET || 'unsafe-portal-secret-change-in-production';
 const signPortalToken = createSigner({ key: PORTAL_JWT_SECRET, expiresIn: 86400000 }); // 24h in ms
@@ -1344,13 +1345,13 @@ export function registerPortalRoutes(fastify: FastifyInstance, pool: pg.Pool): v
   );
 
   // ── POST /v1/portal/agents/:id/chat ──────────────────────────────────────────
-  fastify.post<{ Params: { id: string }; Body: { messages?: unknown[]; model?: string } }>(
+  fastify.post<{ Params: { id: string }; Body: { messages?: unknown[]; model?: string; conversation_id?: string; partition_id?: string } }>(
     '/v1/portal/agents/:id/chat',
     { preHandler: authRequired },
     async (request, reply) => {
       const { userId } = request.portalUser!;
       const { id } = request.params;
-      const body = request.body as { messages?: unknown[]; model?: string };
+      const body = request.body as { messages?: unknown[]; model?: string; conversation_id?: string; partition_id?: string };
 
       if (!body.messages || !Array.isArray(body.messages) || body.messages.length === 0) {
         return reply.code(400).send({ error: 'messages array is required and must not be empty' });
@@ -1364,8 +1365,12 @@ export function registerPortalRoutes(fastify: FastifyInstance, pool: pg.Pool): v
         skills: unknown[] | null;
         mcp_endpoints: unknown[] | null;
         merge_policies: Record<string, unknown>;
+        conversations_enabled: boolean;
+        conversation_token_limit: number | null;
+        conversation_summary_model: string | null;
       }>(
-        `SELECT a.id, a.name, a.tenant_id, a.provider_config, a.system_prompt, a.skills, a.mcp_endpoints, a.merge_policies
+        `SELECT a.id, a.name, a.tenant_id, a.provider_config, a.system_prompt, a.skills, a.mcp_endpoints, a.merge_policies,
+                a.conversations_enabled, a.conversation_token_limit, a.conversation_summary_model
          FROM agents a
          JOIN tenant_memberships tm ON tm.tenant_id = a.tenant_id
          WHERE a.id = $1 AND tm.user_id = $2`,
@@ -1462,8 +1467,41 @@ export function registerPortalRoutes(fastify: FastifyInstance, pool: pg.Pool): v
       const provider = getProviderForTenant(tenantCtx);
       const model = body.model ?? 'gpt-4o-mini';
 
+      // ── Conversation memory support ────────────────────────────────────────────
+      let resolvedConversationId: string | undefined;
+      let effectiveMessages = body.messages as any[];
+
+      if (agent.conversations_enabled && body.conversation_id) {
+        try {
+          const partitionId = body.partition_id
+            ? (await conversationManager.getOrCreatePartition(
+                pool,
+                tenantCtx.tenantId,
+                body.partition_id,
+              )).id
+            : null;
+
+          const conversationUUID = (await conversationManager.getOrCreateConversation(
+            pool,
+            tenantCtx.tenantId,
+            partitionId,
+            body.conversation_id,
+            agent.id,
+          )).id;
+          resolvedConversationId = body.conversation_id;
+
+          const ctx = await conversationManager.loadContext(pool, tenantCtx.tenantId, conversationUUID);
+          const historyMessages = conversationManager.buildInjectionMessages(ctx);
+          if (historyMessages.length > 0) {
+            effectiveMessages = [...historyMessages, ...effectiveMessages];
+          }
+        } catch (err) {
+          fastify.log.warn({ err }, 'Sandbox conversation load failed — continuing without memory');
+        }
+      }
+
       const effectiveBody = applyAgentToRequest(
-        { model, messages: body.messages, stream: false },
+        { model, messages: effectiveMessages, stream: false },
         tenantCtx,
       );
 
@@ -1507,10 +1545,34 @@ export function registerPortalRoutes(fastify: FastifyInstance, pool: pg.Pool): v
         // reaches the client — sandbox callers expect instant trace visibility.
         await traceRecorder.flush();
 
+        // Store conversation messages (fire-and-forget)
+        if (resolvedConversationId) {
+          const partitionId = body.partition_id
+            ? (await conversationManager.getOrCreatePartition(
+                pool,
+                tenantCtx.tenantId,
+                body.partition_id,
+              )).id
+            : null;
+          const conversationUUID = (await conversationManager.getOrCreateConversation(
+            pool,
+            tenantCtx.tenantId,
+            partitionId,
+            resolvedConversationId,
+            agent.id,
+          )).id;
+          const userContent = (body.messages[body.messages.length - 1] as any)?.content as string ?? '';
+          const assistantContent = choice.message.content ?? '';
+          conversationManager.storeMessages(
+            pool, tenantCtx.tenantId, conversationUUID, userContent, assistantContent, null, null
+          ).catch(err => fastify.log.warn({ err }, 'Failed to store sandbox conversation messages'));
+        }
+
         return reply.send({
           message: choice.message,
           model: response.body.model ?? model,
           usage: response.body.usage ?? null,
+          ...(resolvedConversationId ? { conversation_id: resolvedConversationId } : {}),
         });
       } catch (err: any) {
         return reply.code(502).send({ error: 'Provider call failed', details: err?.message ?? String(err) });
