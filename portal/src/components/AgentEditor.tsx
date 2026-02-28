@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react';
 import { api } from '../lib/api';
 import type { Agent, AgentInput, AgentMergePolicies, Skill, McpEndpoint, ResolvedAgentConfig } from '../lib/api';
 import { getToken } from '../lib/auth';
+import ModelListEditor from './ModelListEditor';
+import { COMMON_MODELS } from '../lib/models';
 
 interface AgentEditorProps {
   agent: Agent | null; // null = create mode
@@ -25,6 +27,7 @@ export default function AgentEditor({ agent, onSave, onCancel }: AgentEditorProp
   );
   const [skills, setSkills] = useState<Skill[]>(agent?.skills ?? []);
   const [mcpEndpoints, setMcpEndpoints] = useState<McpEndpoint[]>(agent?.mcpEndpoints ?? []);
+  const [availableModels, setAvailableModels] = useState<string[] | null>(agent?.availableModels ?? null);
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -53,6 +56,7 @@ export default function AgentEditor({ agent, onSave, onCancel }: AgentEditorProp
       setMergePolicies(agent.mergePolicies ?? DEFAULT_MERGE);
       setSkills(agent.skills ?? []);
       setMcpEndpoints(agent.mcpEndpoints ?? []);
+      setAvailableModels(agent.availableModels ?? null);
     }
   }, [agent]);
 
@@ -67,6 +71,7 @@ export default function AgentEditor({ agent, onSave, onCancel }: AgentEditorProp
         systemPrompt: systemPrompt.trim() || null,
         skills: skills.length ? skills : null,
         mcpEndpoints: mcpEndpoints.length ? mcpEndpoints : null,
+        availableModels,
         mergePolicies,
       };
       let saved: Agent;
@@ -305,6 +310,16 @@ export default function AgentEditor({ agent, onSave, onCancel }: AgentEditorProp
             <option value="ignore">Ignore</option>
           </select>
         </div>
+      </section>
+
+      {/* Available Models */}
+      <section className="space-y-3">
+        <ModelListEditor
+          models={availableModels}
+          onChange={setAvailableModels}
+          defaultModels={COMMON_MODELS}
+          label="Available Models"
+        />
       </section>
 
       {/* Inherited Values — only show when editing */}

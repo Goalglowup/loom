@@ -250,3 +250,24 @@
 **DOCS_MODE pipeline:** `screenshotIfDocsMode` is gated by `DOCS_MODE=true` env var — zero overhead in normal test runs. Screenshots saved as PNG + JSON metadata sidecar. `generate-ui-docs.ts` groups by section and emits Markdown with relative image paths.
 
 **Build:** `npm run build` (tsc) passes cleanly. Smoke test files type-check without errors.
+
+### 2025-present: Sandbox + Analytics Empty-State Smoke Tests
+
+**portal-app.smoke.ts — analytics empty-state assertions:**
+- "analytics page renders summary cards": Added assertions for 9 `.card-value--empty` elements each containing text `—` (confirms AnalyticsSummary renders empty state for fresh accounts).
+- "analytics page renders charts": Added assertions for 4 `.chart-no-data` elements containing "No data available" (confirms TimeseriesCharts renders chart empty state when no data exists).
+- Existing content regex assertions preserved; new assertions added after them.
+
+**portal-sandbox.smoke.ts — new smoke test file:**
+- Fresh signup + agent creation in `beforeAll` (pattern from portal-agents.smoke.ts).
+- Sandbox page load, agent selection via `button:has-text(agentName)`, model change via `input[placeholder="e.g. gpt-4o"]` with triple-click + fill.
+- Chat send via `input[placeholder="Type a message…"]` + `press('Enter')`.
+- Assistant response detection: `page.locator('.bg-gray-800.text-gray-100').waitFor({ state: 'visible', timeout: 15000 })` — works because the "thinking…" indicator uses `.text-gray-400` not `.text-gray-100`, so only real assistant messages match.
+- Traces check: navigate to `/app/traces`, verify agent name appears in page content.
+- Analytics after-data check: assert `.card-value--empty` count is 0, with fallback to check first `.card-value` is not `—`.
+
+**Key DOM facts learned:**
+- SandboxPage sidebar uses `<button>` elements (not `<p>`) for agent selection.
+- ModelCombobox input placeholder: `"e.g. gpt-4o"`.
+- Chat input placeholder: `"Type a message…"` (with ellipsis character `…` not `...`).
+- Loading indicator: `.animate-pulse` with class `text-gray-400`; assistant messages: `.bg-gray-800.text-gray-100`.

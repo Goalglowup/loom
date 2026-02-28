@@ -2,22 +2,16 @@ import { useState, useRef, useEffect } from 'react';
 import { api } from '../lib/api';
 import type { Agent } from '../lib/api';
 import { getToken } from '../lib/auth';
+import { COMMON_MODELS } from '../lib/models';
+import ModelCombobox from './ModelCombobox';
 
 interface Message {
   role: 'user' | 'assistant';
   content: string;
-  usage?: { total_tokens: number };
+  reasoning?: string;
+  usage?: { prompt_tokens: number; completion_tokens: number; total_tokens: number };
+  latencyMs?: number;
 }
-
-const COMMON_MODELS = [
-  'gpt-4o-mini',
-  'gpt-4o',
-  'gpt-4-turbo',
-  'gpt-3.5-turbo',
-  'claude-3-5-sonnet-latest',
-  'claude-3-haiku-20240307',
-  'ollama/llama3',
-];
 
 interface AgentSandboxProps {
   agent: Agent;
@@ -30,12 +24,14 @@ export default function AgentSandbox({ agent, onClose }: AgentSandboxProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [model, setModel] = useState('gpt-4o-mini');
-  const [customModel, setCustomModel] = useState('');
-  const [useCustom, setUseCustom] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const token = getToken()!;
 
-  const activeModel = useCustom ? customModel.trim() || 'gpt-4o-mini' : model;
+  const modelOptions = (agent.availableModels && agent.availableModels.length > 0)
+    ? agent.availableModels
+    : COMMON_MODELS;
+
+  const activeModel = model || 'gpt-4o-mini';
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -55,10 +51,13 @@ export default function AgentSandbox({ agent, onClose }: AgentSandboxProps) {
     setError('');
 
     try {
+      const startMs = Date.now();
       const res = await api.sandboxChat(token, agent.id, next.map(m => ({ role: m.role, content: m.content })), activeModel);
+      const latencyMs = Date.now() - startMs;
+      const reasoning = (res.message as any).reasoning_content ?? (res.message as any).reasoning ?? undefined;
       setMessages(prev => [
         ...prev,
-        { role: 'assistant', content: res.message.content, usage: res.usage },
+        { role: 'assistant', content: res.message.content, usage: res.usage, latencyMs, reasoning },
       ]);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Request failed');
@@ -82,32 +81,13 @@ export default function AgentSandbox({ agent, onClose }: AgentSandboxProps) {
           Sandbox — <span className="text-indigo-400">{agent.name}</span>
         </span>
         <div className="flex items-center gap-2 flex-1 min-w-0 justify-end">
-          {useCustom ? (
-            <input
-              type="text"
-              value={customModel}
-              onChange={e => setCustomModel(e.target.value)}
-              placeholder="e.g. gpt-4o"
-              className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-200 focus:outline-none focus:border-indigo-500 w-40"
-            />
-          ) : (
-            <select
-              value={model}
-              onChange={e => setModel(e.target.value)}
-              className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-200 focus:outline-none focus:border-indigo-500"
-            >
-              {COMMON_MODELS.map(m => (
-                <option key={m} value={m}>{m}</option>
-              ))}
-            </select>
-          )}
-          <button
-            onClick={() => setUseCustom(v => !v)}
-            className="text-xs text-gray-500 hover:text-gray-300 transition-colors shrink-0"
-            title={useCustom ? 'Pick from list' : 'Enter custom model'}
-          >
-            {useCustom ? '← list' : 'custom'}
-          </button>
+          <ModelCombobox
+            value={model}
+            onChange={setModel}
+            options={modelOptions}
+            placeholder="e.g. gpt-4o"
+            disabled={loading}
+          />
         </div>
         {onClose && (
           <button
@@ -140,11 +120,24 @@ export default function AgentSandbox({ agent, onClose }: AgentSandboxProps) {
                       : 'bg-gray-800 text-gray-100'
                   }`}
                 >
+                  {msg.reasoning && (
+                    <details className="mb-2 text-xs text-gray-400">
+                      <summary className="cursor-pointer select-none text-indigo-400 hover:text-indigo-300">
+                        Reasoning
+                      </summary>
+                      <p className="mt-1 whitespace-pre-wrap leading-relaxed">{msg.reasoning}</p>
+                    </details>
+                  )}
                   {msg.content}
                 </div>
                 {msg.usage && (
-                  <span className="text-xs text-gray-500 px-1">
-                    {msg.usage.total_tokens} tokens
+                  <span className="text-xs text-gray-500 px-1 flex gap-2 flex-wrap">
+                    <span title="Prompt tokens">↑{msg.usage.prompt_tokens}</span>
+                    <span title="Completion tokens">↓{msg.usage.completion_tokens}</span>
+                    <span title="Total tokens">∑{msg.usage.total_tokens}</span>
+                    {msg.latencyMs !== undefined && (
+                      <span title="Response latency">{msg.latencyMs}ms</span>
+                    )}
                   </span>
                 )}
               </div>

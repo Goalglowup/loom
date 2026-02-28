@@ -17,6 +17,21 @@ function SkeletonCard() {
   );
 }
 
+function NoDataCard({ label }: { label: string }) {
+  return (
+    <div className="summary-card summary-card--empty" role="listitem">
+      <span className="card-label">{label}</span>
+      <span className="card-value card-value--empty">—</span>
+    </div>
+  );
+}
+
+const CARD_LABELS = [
+  'Total Requests', 'Total Tokens', 'Estimated Cost',
+  'Avg Latency', 'P95 Latency', 'P99 Latency',
+  'Error Rate', 'Avg Overhead', 'Avg TTFB',
+];
+
 interface AnalyticsSummaryProps {
   summary: SummaryData | null;
   loading: boolean;
@@ -25,17 +40,19 @@ interface AnalyticsSummaryProps {
 }
 
 function AnalyticsSummary({ summary, loading, win, onWinChange }: AnalyticsSummaryProps) {
-  const cards = summary
+  const hasData = summary !== null && summary.totalRequests > 0;
+
+  const cards = hasData
     ? [
-        { label: 'Total Requests', value: summary.totalRequests.toLocaleString() },
-        { label: 'Total Tokens', value: summary.totalTokens.toLocaleString() },
-        { label: 'Estimated Cost', value: `$${summary.estimatedCostUSD.toFixed(4)}` },
-        { label: 'Avg Latency', value: `${summary.avgLatencyMs.toFixed(0)} ms` },
-        { label: 'P95 Latency', value: `${summary.p95LatencyMs.toFixed(0)} ms` },
-        { label: 'P99 Latency', value: `${summary.p99LatencyMs.toFixed(0)} ms` },
-        { label: 'Error Rate', value: `${(summary.errorRate * 100).toFixed(1)}%` },
-        { label: 'Avg Overhead', value: `${summary.avgOverheadMs.toFixed(0)} ms` },
-        { label: 'Avg TTFB', value: `${summary.avgTtfbMs.toFixed(0)} ms` },
+        { label: 'Total Requests', value: summary!.totalRequests.toLocaleString() },
+        { label: 'Total Tokens', value: summary!.totalTokens.toLocaleString() },
+        { label: 'Estimated Cost', value: `$${summary!.estimatedCostUSD.toFixed(4)}` },
+        { label: 'Avg Latency', value: `${summary!.avgLatencyMs.toFixed(0)} ms` },
+        { label: 'P95 Latency', value: `${summary!.p95LatencyMs.toFixed(0)} ms` },
+        { label: 'P99 Latency', value: `${summary!.p99LatencyMs.toFixed(0)} ms` },
+        { label: 'Error Rate', value: `${(summary!.errorRate * 100).toFixed(1)}%` },
+        { label: 'Avg Overhead', value: `${summary!.avgOverheadMs.toFixed(0)} ms` },
+        { label: 'Avg TTFB', value: `${summary!.avgTtfbMs.toFixed(0)} ms` },
       ]
     : [];
 
@@ -60,12 +77,14 @@ function AnalyticsSummary({ summary, loading, win, onWinChange }: AnalyticsSumma
       <div className="summary-cards" role="list" aria-label="Analytics metrics">
         {loading
           ? Array.from({ length: 9 }, (_, i) => <SkeletonCard key={i} />)
-          : cards.map(card => (
-              <div className="summary-card" key={card.label} role="listitem">
-                <span className="card-label">{card.label}</span>
-                <span className="card-value">{card.value}</span>
-              </div>
-            ))}
+          : hasData
+            ? cards.map(card => (
+                <div className="summary-card" key={card.label} role="listitem">
+                  <span className="card-label">{card.label}</span>
+                  <span className="card-value">{card.value}</span>
+                </div>
+              ))
+            : CARD_LABELS.map(label => <NoDataCard key={label} label={label} />)}
       </div>
     </div>
   );

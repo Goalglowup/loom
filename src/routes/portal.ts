@@ -1503,6 +1503,9 @@ export function registerPortalRoutes(fastify: FastifyInstance, pool: pg.Pool): v
           ttfbMs: latencyMs,
           gatewayOverheadMs: upstreamStartMs - startTimeMs,
         });
+        // Flush immediately so the trace is in the DB before the response
+        // reaches the client — sandbox callers expect instant trace visibility.
+        await traceRecorder.flush();
 
         return reply.send({
           message: choice.message,

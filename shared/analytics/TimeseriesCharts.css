@@ -97,6 +97,15 @@
   justify-content: center;
 }
 
+.chart-no-data {
+  height: 220px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #9ca3af;
+  font-size: 0.9rem;
+}
+
 .chart-skeleton {
   width: 100%;
   height: 200px;

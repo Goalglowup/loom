@@ -53,7 +53,7 @@ export const api = {
     request<{ resolved: ResolvedAgentConfig }>('GET', `/v1/portal/agents/${id}/resolved`, undefined, token),
 
   sandboxChat: (token: string, agentId: string, messages: Array<{role: string; content: string}>, model?: string) =>
-    request<{ message: { role: string; content: string }; model: string; usage: { prompt_tokens: number; completion_tokens: number; total_tokens: number } }>(
+    request<{ message: { role: string; content: string; reasoning_content?: string; reasoning?: string }; model: string; usage: { prompt_tokens: number; completion_tokens: number; total_tokens: number } }>(
       'POST', `/v1/portal/agents/${agentId}/chat`, { messages, model }, token
     ),
 
@@ -70,7 +70,7 @@ export const api = {
   switchTenant: (token: string, body: { tenantId: string }) =>
     request<{ token: string; user: User; tenant: Tenant; tenants: TenantMembership[] }>('POST', '/v1/portal/auth/switch-tenant', body, token),
 
-  updateSettings: (token: string, body: ProviderConfig) =>
+  updateSettings: (token: string, body: ProviderConfig & { availableModels?: string[] | null }) =>
     request<{ providerConfig: ProviderConfigSafe }>('PATCH', '/v1/portal/settings', body, token),
 
   listApiKeys: (token: string) =>
@@ -110,6 +110,7 @@ export interface User { id: string; email: string; role: string; }
 export interface Tenant { id: string; name: string; }
 export interface TenantDetail extends Tenant {
   providerConfig: ProviderConfigSafe;
+  availableModels?: string[] | null;
 }
 export interface TenantMembership { id: string; name: string; role: string; }
 export interface ProviderConfig {
@@ -193,6 +194,7 @@ export interface Agent {
   systemPrompt?: string | null;
   skills?: Skill[] | null;
   mcpEndpoints?: McpEndpoint[] | null;
+  availableModels?: string[] | null;
   mergePolicies: AgentMergePolicies;
   createdAt: string;
   updatedAt?: string | null;
@@ -204,6 +206,7 @@ export interface AgentInput {
   systemPrompt?: string | null;
   skills?: Skill[] | null;
   mcpEndpoints?: McpEndpoint[] | null;
+  availableModels?: string[] | null;
   mergePolicies?: AgentMergePolicies;
 }
 

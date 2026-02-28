@@ -3,11 +3,16 @@ import { api } from '../lib/api';
 import type { ProviderConfig, ProviderConfigSafe } from '../lib/api';
 import { getToken } from '../lib/auth';
 import ProviderConfigForm from '../components/ProviderConfigForm';
+import ModelListEditor from '../components/ModelListEditor';
+import { COMMON_MODELS } from '../lib/models';
 
 export default function SettingsPage() {
   const [config, setConfig] = useState<ProviderConfigSafe | null>(null);
+  const [availableModels, setAvailableModels] = useState<string[] | null>(null);
+  const [currentProviderConfig, setCurrentProviderConfig] = useState<ProviderConfig | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [modelSaveStatus, setModelSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
 
   useEffect(() => {
     const token = getToken();
@@ -16,15 +21,35 @@ export default function SettingsPage() {
       return;
     }
     api.me(token)
-      .then(({ tenant }) => setConfig(tenant.providerConfig))
+      .then(({ tenant }) => {
+        setConfig(tenant.providerConfig);
+        setAvailableModels(tenant.availableModels ?? null);
+      })
       .catch(err => setError(err.message))
       .finally(() => setLoading(false));
   }, []);
 
   async function handleSave(providerConfig: ProviderConfig) {
     const token = getToken()!;
-    const { providerConfig: updated } = await api.updateSettings(token, providerConfig);
+    setCurrentProviderConfig(providerConfig);
+    const { providerConfig: updated } = await api.updateSettings(token, { ...providerConfig, availableModels });
     setConfig(updated);
+  }
+
+  async function handleModelsChange(models: string[] | null) {
+    setAvailableModels(models);
+    const token = getToken()!;
+    setModelSaveStatus('saving');
+    try {
+      await api.updateSettings(token, {
+        ...(currentProviderConfig ?? { provider: config?.provider as ProviderConfig['provider'] ?? 'openai' }),
+        availableModels: models,
+      });
+      setModelSaveStatus('saved');
+      setTimeout(() => setModelSaveStatus('idle'), 2000);
+    } catch {
+      setModelSaveStatus('error');
+    }
   }
 
   return (
@@ -57,6 +82,18 @@ export default function SettingsPage() {
             initialConfig={config ?? { provider: null, baseUrl: null, deployment: null, apiVersion: null, hasApiKey: false }}
             onSave={handleSave}
           />
+
+          <div className="border-t border-gray-700 pt-4">
+            <ModelListEditor
+              models={availableModels}
+              onChange={handleModelsChange}
+              defaultModels={COMMON_MODELS}
+              label="Available Models"
+            />
+            {modelSaveStatus === 'saving' && <p className="text-xs text-gray-500 mt-2">Saving…</p>}
+            {modelSaveStatus === 'saved' && <p className="text-xs text-green-400 mt-2">Saved.</p>}
+            {modelSaveStatus === 'error' && <p className="text-xs text-red-400 mt-2">Failed to save model list.</p>}
+          </div>
 
           <p className="text-xs text-gray-500 border-t border-gray-700 pt-4">
             These settings are inherited by all agents in this org unless the agent defines its own.

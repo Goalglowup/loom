@@ -59,6 +59,14 @@ function LoadingChart() {
   );
 }
 
+function NoDataChart() {
+  return (
+    <div className="chart-no-data" aria-label="No data available">
+      <span>No data available</span>
+    </div>
+  );
+}
+
 interface TimeseriesChartsProps {
   data: TimeseriesData[];
   loading: boolean;
@@ -264,7 +272,7 @@ function TimeseriesCharts({ data, loading, win }: TimeseriesChartsProps) {
                 {isExpanded ? '⤡' : '⤢'}
               </button>
             </div>
-            {loading ? <LoadingChart /> : chart.render(chartData, commonAxis, commonTooltip)}
+            {loading ? <LoadingChart /> : chartData.length === 0 ? <NoDataChart /> : chart.render(chartData, commonAxis, commonTooltip)}
           </div>
         );
       })}

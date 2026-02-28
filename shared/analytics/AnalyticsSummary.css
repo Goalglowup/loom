@@ -84,6 +84,14 @@
   line-height: 1.2;
 }
 
+.card-value--empty {
+  color: #9ca3af;
+  font-weight: 400;
+}
+
+.summary-card--empty {
+  opacity: 0.7;
+}
 /* ── Skeleton ── */
 .skeleton-card {
   pointer-events: none;

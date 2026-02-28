@@ -51,7 +51,7 @@ export async function waitForUrl(page: Page, pattern: RegExp, timeout = 10000) {
 }
 
 export async function waitForVisible(page: Page, selector: string, timeout = 10000) {
-  await page.locator(selector).waitFor({ state: 'visible', timeout });
+  await page.locator(selector).first().waitFor({ state: 'visible', timeout });
 }
 
 export async function waitForElement(page: Page, selector: string, timeout = 10000) {
@@ -66,11 +66,14 @@ export async function waitForText(page: Page, selector: string, text: string, ti
 // Login helpers
 // ---------------------------------------------------------------------------
 export async function adminLogin(page: Page) {
-  await page.goto(`${BASE_URL}/admin`);
-  await page.locator('input[name="username"], input[placeholder*="username" i], input[type="text"]').first().fill(ADMIN_USERNAME);
+  await page.goto(`${BASE_URL}/dashboard/admin`);
+  // Wait for the login overlay to appear
+  await page.locator('.admin-login-overlay').waitFor({ state: 'visible', timeout: 10000 });
+  await page.locator('input[placeholder*="username" i], input[type="text"]').first().fill(ADMIN_USERNAME);
   await page.locator('input[type="password"]').fill(ADMIN_PASSWORD);
   await page.locator('button[type="submit"]').click();
-  await waitForUrl(page, /\/admin\/dashboard|\/admin\/traces/);
+  // Wait for the overlay to be dismissed after successful login
+  await page.locator('.admin-login-overlay').waitFor({ state: 'hidden', timeout: 10000 });
 }
 
 export async function portalLogin(page: Page, email: string, password: string): Promise<void> {
@@ -79,6 +82,23 @@ export async function portalLogin(page: Page, email: string, password: string): 
   await page.locator('input[type="password"]').fill(password);
   await page.locator('button[type="submit"]').click();
   await waitForUrl(page, /\/dashboard|\/traces|\/analytics|\/app/);
+}
+
+/** Navigate to a portal app URL, re-authenticating if the auth context redirects to login. */
+export async function navigateTo(
+  page: Page,
+  url: string,
+  email: string,
+  password: string
+): Promise<void> {
+  await page.goto(url);
+  // Give React time to finish auth refresh — if redirected to login, re-authenticate
+  await page.waitForTimeout(1500);
+  if (page.url().includes('/login')) {
+    await portalLogin(page, email, password);
+    await page.goto(url);
+    await page.waitForTimeout(500);
+  }
 }
 
 export async function portalSignup(
