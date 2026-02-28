@@ -5,7 +5,7 @@
 import { randomBytes, createHash, scrypt, timingSafeEqual } from 'node:crypto';
 import { promisify } from 'node:util';
 import { createSigner } from 'fast-jwt';
-import pg from 'pg';
+import type { EntityManager } from '@mikro-orm/core';
 
 const scryptAsync = promisify(scrypt);
 
@@ -33,12 +33,18 @@ function generateApiKey(): { rawKey: string; keyHash: string; keyPrefix: string 
 }
 
 export class PortalService {
-  constructor(private readonly pool: pg.Pool) {}
+  constructor(private readonly em: EntityManager) {}
+
+  private async rawQuery<T extends object = Record<string, unknown>>(sql: string, params: unknown[] = []): Promise<{ rows: T[] }> {
+    const knex = (this.em as any).getKnex();
+    const result = await knex.raw(sql, params);
+    return { rows: result.rows as T[] };
+  }
 
   // ── Auth ──────────────────────────────────────────────────────────────────
 
   async signup(email: string, password: string, tenantName: string) {
-    const emailCheck = await this.pool.query(
+    const emailCheck = await this.rawQuery(
       'SELECT id FROM users WHERE email = $1',
       [email.toLowerCase()],
     );
@@ -48,41 +54,37 @@ export class PortalService {
 
     const passwordHash = await hashPassword(password);
 
-    await this.pool.query('BEGIN');
-    try {
-      const tenantResult = await this.pool.query<{ id: string; name: string }>(
-        'INSERT INTO tenants (name) VALUES ($1) RETURNING id, name',
+    const { tenant, user } = await (this.em as any).getKnex().transaction(async (trx: any) => {
+      const tenantResult = await trx.raw(
+        'INSERT INTO tenants (name) VALUES (?) RETURNING id, name',
         [tenantName.trim()],
       );
       const tenant = tenantResult.rows[0];
 
-      const userResult = await this.pool.query<{ id: string; email: string }>(
-        'INSERT INTO users (email, password_hash) VALUES ($1, $2) RETURNING id, email',
+      const userResult = await trx.raw(
+        'INSERT INTO users (email, password_hash) VALUES (?, ?) RETURNING id, email',
         [email.toLowerCase(), passwordHash],
       );
       const user = userResult.rows[0];
 
-      await this.pool.query(
-        `INSERT INTO tenant_memberships (user_id, tenant_id, role) VALUES ($1, $2, 'owner')`,
+      await trx.raw(
+        `INSERT INTO tenant_memberships (user_id, tenant_id, role) VALUES (?, ?, 'owner')`,
         [user.id, tenant.id],
       );
       // Create default agent so API keys created later have an agent to reference
-      await this.pool.query(
-        `INSERT INTO agents (tenant_id, name) VALUES ($1, 'Default')`,
+      await trx.raw(
+        `INSERT INTO agents (tenant_id, name) VALUES (?, 'Default')`,
         [tenant.id],
       );
-      await this.pool.query('COMMIT');
+      return { tenant, user };
+    });
 
-      const token = signPortalToken({ sub: user.id, tenantId: tenant.id, role: 'owner' });
-      return { token, userId: user.id, email: user.email, tenantId: tenant.id, tenantName: tenant.name };
-    } catch (err) {
-      await this.pool.query('ROLLBACK');
-      throw err;
-    }
+    const token = signPortalToken({ sub: user.id, tenantId: tenant.id, role: 'owner' });
+    return { token, userId: user.id, email: user.email, tenantId: tenant.id, tenantName: tenant.name };
   }
 
   async signupWithInvite(email: string, password: string, inviteToken: string) {
-    const inviteResult = await this.pool.query<{
+    const inviteResult = await this.rawQuery<{
       id: string; tenant_id: string; tenant_name: string;
       max_uses: number | null; use_count: number;
     }>(
@@ -101,10 +103,9 @@ export class PortalService {
     }
     const invite = inviteResult.rows[0];
 
-    await this.pool.query('BEGIN');
-    try {
-      const existingUser = await this.pool.query<{ id: string; email: string }>(
-        'SELECT id, email FROM users WHERE email = $1',
+    const { userId, userEmail } = await (this.em as any).getKnex().transaction(async (trx: any) => {
+      const existingUser = await trx.raw(
+        'SELECT id, email FROM users WHERE email = ?',
         [email.toLowerCase()],
       );
 
@@ -114,50 +115,46 @@ export class PortalService {
       if (existingUser.rows.length > 0) {
         userId = existingUser.rows[0].id;
         userEmail = existingUser.rows[0].email;
-        const memberCheck = await this.pool.query(
-          'SELECT id FROM tenant_memberships WHERE user_id = $1 AND tenant_id = $2',
+        const memberCheck = await trx.raw(
+          'SELECT id FROM tenant_memberships WHERE user_id = ? AND tenant_id = ?',
           [userId, invite.tenant_id],
         );
         if (memberCheck.rows.length > 0) {
-          await this.pool.query('ROLLBACK');
           throw Object.assign(new Error('Already a member of this tenant'), { status: 409 });
         }
       } else {
         const passwordHash = await hashPassword(password);
-        const newUser = await this.pool.query<{ id: string; email: string }>(
-          'INSERT INTO users (email, password_hash) VALUES ($1, $2) RETURNING id, email',
+        const newUser = await trx.raw(
+          'INSERT INTO users (email, password_hash) VALUES (?, ?) RETURNING id, email',
           [email.toLowerCase(), passwordHash],
         );
         userId = newUser.rows[0].id;
         userEmail = newUser.rows[0].email;
       }
 
-      await this.pool.query(
-        `INSERT INTO tenant_memberships (user_id, tenant_id, role) VALUES ($1, $2, 'member')`,
+      await trx.raw(
+        `INSERT INTO tenant_memberships (user_id, tenant_id, role) VALUES (?, ?, 'member')`,
         [userId, invite.tenant_id],
       );
-      await this.pool.query(
-        'UPDATE invites SET use_count = use_count + 1 WHERE id = $1',
+      await trx.raw(
+        'UPDATE invites SET use_count = use_count + 1 WHERE id = ?',
         [invite.id],
       );
-      await this.pool.query('COMMIT');
+      return { userId, userEmail };
+    });
 
-      const token = signPortalToken({ sub: userId, tenantId: invite.tenant_id, role: 'member' });
-      return {
-        token,
-        userId,
-        email: userEmail,
-        tenantId: invite.tenant_id,
-        tenantName: invite.tenant_name,
-      };
-    } catch (err) {
-      await this.pool.query('ROLLBACK');
-      throw err;
-    }
+    const token = signPortalToken({ sub: userId, tenantId: invite.tenant_id, role: 'member' });
+    return {
+      token,
+      userId,
+      email: userEmail,
+      tenantId: invite.tenant_id,
+      tenantName: invite.tenant_name,
+    };
   }
 
   async login(email: string, password: string) {
-    const userResult = await this.pool.query<{
+    const userResult = await this.rawQuery<{
       id: string; email: string; password_hash: string;
     }>(
       'SELECT id, email, password_hash FROM users WHERE email = $1',
@@ -173,7 +170,7 @@ export class PortalService {
       return null;
     }
 
-    const membershipsResult = await this.pool.query<{
+    const membershipsResult = await this.rawQuery<{
       tenant_id: string; tenant_name: string; role: string; tenant_status: string;
     }>(
       `SELECT tm.tenant_id, t.name AS tenant_name, tm.role, t.status AS tenant_status
@@ -190,7 +187,7 @@ export class PortalService {
     const memberships = membershipsResult.rows;
     const defaultMembership = memberships[0];
 
-    await this.pool.query('UPDATE users SET last_login = now() WHERE id = $1', [user.id]);
+    await this.rawQuery('UPDATE users SET last_login = now() WHERE id = $1', [user.id]);
 
     const token = signPortalToken({
       sub: user.id,
@@ -208,7 +205,7 @@ export class PortalService {
   }
 
   async switchTenant(userId: string, newTenantId: string) {
-    const membershipResult = await this.pool.query<{
+    const membershipResult = await this.rawQuery<{
       role: string; tenant_name: string; tenant_status: string;
     }>(
       `SELECT tm.role, t.name AS tenant_name, t.status AS tenant_status
@@ -225,13 +222,13 @@ export class PortalService {
       throw Object.assign(new Error('Tenant is inactive'), { status: 403 });
     }
 
-    const userResult = await this.pool.query<{ id: string; email: string }>(
+    const userResult = await this.rawQuery<{ id: string; email: string }>(
       'SELECT id, email FROM users WHERE id = $1',
       [userId],
     );
     const user = userResult.rows[0];
 
-    const allMembershipsResult = await this.pool.query<{
+    const allMembershipsResult = await this.rawQuery<{
       tenant_id: string; tenant_name: string; role: string;
     }>(
       `SELECT tm.tenant_id, t.name AS tenant_name, tm.role
@@ -259,7 +256,7 @@ export class PortalService {
   // ── Profile ───────────────────────────────────────────────────────────────
 
   async getMe(userId: string, tenantId: string) {
-    const result = await this.pool.query<{
+    const result = await this.rawQuery<{
       id: string; email: string; role: string;
       tenant_id: string; tenant_name: string;
       provider_config: Record<string, unknown> | null;
@@ -274,7 +271,7 @@ export class PortalService {
     );
     if (result.rows.length === 0) return null;
 
-    const tenantsResult = await this.pool.query<{
+    const tenantsResult = await this.rawQuery<{
       tenant_id: string; tenant_name: string; role: string;
     }>(
       `SELECT tm.tenant_id, t.name AS tenant_name, tm.role
@@ -286,11 +283,11 @@ export class PortalService {
     );
 
     const [agentsResult, subtenantsResult] = await Promise.all([
-      this.pool.query<{ id: string; name: string }>(
+      this.rawQuery<{ id: string; name: string }>(
         'SELECT id, name FROM agents WHERE tenant_id = $1 ORDER BY created_at',
         [tenantId],
       ),
-      this.pool.query<{ id: string; name: string; status: string }>(
+      this.rawQuery<{ id: string; name: string; status: string }>(
         'SELECT id, name, status FROM tenants WHERE parent_id = $1 ORDER BY created_at',
         [tenantId],
       ),
@@ -312,7 +309,7 @@ export class PortalService {
     availableModels?: string[] | null,
   ) {
     if (availableModels !== undefined) {
-      await this.pool.query(
+      await this.rawQuery(
         'UPDATE tenants SET provider_config = $1, available_models = $2, updated_at = now() WHERE id = $3',
         [
           JSON.stringify(providerConfig),
@@ -321,7 +318,7 @@ export class PortalService {
         ],
       );
     } else {
-      await this.pool.query(
+      await this.rawQuery(
         'UPDATE tenants SET provider_config = $1, updated_at = now() WHERE id = $2',
         [JSON.stringify(providerConfig), tenantId],
       );
@@ -331,7 +328,7 @@ export class PortalService {
   // ── API Keys ──────────────────────────────────────────────────────────────
 
   async listApiKeys(tenantId: string) {
-    const result = await this.pool.query<{
+    const result = await this.rawQuery<{
       id: string; name: string; key_prefix: string; status: string;
       created_at: string; revoked_at: string | null;
     }>(
@@ -345,14 +342,14 @@ export class PortalService {
   }
 
   async createApiKey(tenantId: string, agentId: string, name: string) {
-    const agentCheck = await this.pool.query(
+    const agentCheck = await this.rawQuery(
       'SELECT id FROM agents WHERE id = $1 AND tenant_id = $2',
       [agentId, tenantId],
     );
     if (agentCheck.rows.length === 0) return null;
 
     const { rawKey, keyHash, keyPrefix } = generateApiKey();
-    const result = await this.pool.query<{
+    const result = await this.rawQuery<{
       id: string; name: string; key_prefix: string; status: string; created_at: string;
     }>(
       `INSERT INTO api_keys (tenant_id, agent_id, name, key_prefix, key_hash)
@@ -365,7 +362,7 @@ export class PortalService {
 
   /** Revokes an API key. Returns the key_hash for cache invalidation, or null if not found. */
   async revokeApiKey(tenantId: string, keyId: string): Promise<string | null> {
-    const result = await this.pool.query<{ key_hash: string }>(
+    const result = await this.rawQuery<{ key_hash: string }>(
       `UPDATE api_keys
        SET status = 'revoked', revoked_at = now()
        WHERE id = $1 AND tenant_id = $2
@@ -380,7 +377,7 @@ export class PortalService {
   async listTraces(tenantId: string, limit: number, cursor?: string) {
     let result;
     if (cursor) {
-      result = await this.pool.query(
+      result = await this.rawQuery(
         `SELECT id, tenant_id, model, provider, status_code, latency_ms,
                 prompt_tokens, completion_tokens, ttfb_ms, gateway_overhead_ms, created_at
          FROM   traces
@@ -391,7 +388,7 @@ export class PortalService {
         [tenantId, cursor, limit],
       );
     } else {
-      result = await this.pool.query(
+      result = await this.rawQuery(
         `SELECT id, tenant_id, model, provider, status_code, latency_ms,
                 prompt_tokens, completion_tokens, ttfb_ms, gateway_overhead_ms, created_at
          FROM   traces
@@ -407,7 +404,7 @@ export class PortalService {
   // ── Invites ───────────────────────────────────────────────────────────────
 
   async getInviteInfo(token: string) {
-    const result = await this.pool.query<{
+    const result = await this.rawQuery<{
       tenant_name: string; expires_at: string;
       revoked_at: string | null; max_uses: number | null; use_count: number;
       tenant_status: string;
@@ -430,7 +427,7 @@ export class PortalService {
   ) {
     const token = randomBytes(32).toString('base64url');
     const expiresAt = new Date(Date.now() + expiresInHours * 60 * 60 * 1000).toISOString();
-    const result = await this.pool.query<{
+    const result = await this.rawQuery<{
       id: string; token: string; max_uses: number | null;
       use_count: number; expires_at: string; created_at: string;
     }>(
@@ -443,7 +440,7 @@ export class PortalService {
   }
 
   async listInvites(tenantId: string) {
-    const result = await this.pool.query<{
+    const result = await this.rawQuery<{
       id: string; token: string; max_uses: number | null; use_count: number;
       expires_at: string; revoked_at: string | null; created_at: string;
       creator_id: string; creator_email: string;
@@ -460,7 +457,7 @@ export class PortalService {
   }
 
   async revokeInvite(tenantId: string, inviteId: string): Promise<boolean> {
-    const result = await this.pool.query(
+    const result = await this.rawQuery(
       `UPDATE invites SET revoked_at = now()
        WHERE id = $1 AND tenant_id = $2 AND revoked_at IS NULL
        RETURNING id`,
@@ -472,7 +469,7 @@ export class PortalService {
   // ── Members ───────────────────────────────────────────────────────────────
 
   async listMembers(tenantId: string) {
-    const result = await this.pool.query<{
+    const result = await this.rawQuery<{
       id: string; email: string; role: string; joined_at: string; last_login: string | null;
     }>(
       `SELECT u.id, u.email, tm.role, tm.joined_at, u.last_login
@@ -487,7 +484,7 @@ export class PortalService {
 
   async updateMemberRole(tenantId: string, targetUserId: string, role: string) {
     if (role === 'member') {
-      const ownerCount = await this.pool.query<{ count: string }>(
+      const ownerCount = await this.rawQuery<{ count: string }>(
         `SELECT COUNT(*) AS count FROM tenant_memberships
          WHERE tenant_id = $1 AND role = 'owner'`,
         [tenantId],
@@ -497,7 +494,7 @@ export class PortalService {
       }
     }
 
-    const result = await this.pool.query<{ user_id: string; role: string; joined_at: string }>(
+    const result = await this.rawQuery<{ user_id: string; role: string; joined_at: string }>(
       `UPDATE tenant_memberships SET role = $1
        WHERE user_id = $2 AND tenant_id = $3
        RETURNING user_id, role, joined_at`,
@@ -505,7 +502,7 @@ export class PortalService {
     );
     if (result.rows.length === 0) return null;
 
-    const userResult = await this.pool.query<{ email: string }>(
+    const userResult = await this.rawQuery<{ email: string }>(
       'SELECT email FROM users WHERE id = $1',
       [targetUserId],
     );
@@ -520,7 +517,7 @@ export class PortalService {
       );
     }
 
-    const targetRole = await this.pool.query<{ role: string }>(
+    const targetRole = await this.rawQuery<{ role: string }>(
       'SELECT role FROM tenant_memberships WHERE user_id = $1 AND tenant_id = $2',
       [targetUserId, tenantId],
     );
@@ -528,7 +525,7 @@ export class PortalService {
       throw Object.assign(new Error('Member not found'), { status: 404 });
     }
     if (targetRole.rows[0].role === 'owner') {
-      const ownerCount = await this.pool.query<{ count: string }>(
+      const ownerCount = await this.rawQuery<{ count: string }>(
         `SELECT COUNT(*) AS count FROM tenant_memberships
          WHERE tenant_id = $1 AND role = 'owner'`,
         [tenantId],
@@ -538,7 +535,7 @@ export class PortalService {
       }
     }
 
-    await this.pool.query(
+    await this.rawQuery(
       'DELETE FROM tenant_memberships WHERE user_id = $1 AND tenant_id = $2',
       [targetUserId, tenantId],
     );
@@ -547,7 +544,7 @@ export class PortalService {
   // ── Tenants ───────────────────────────────────────────────────────────────
 
   async listUserTenants(userId: string) {
-    const result = await this.pool.query<{
+    const result = await this.rawQuery<{
       tenant_id: string; tenant_name: string; role: string; joined_at: string;
     }>(
       `SELECT tm.tenant_id, t.name AS tenant_name, tm.role, tm.joined_at
@@ -568,7 +565,7 @@ export class PortalService {
       );
     }
 
-    const membershipResult = await this.pool.query<{ role: string }>(
+    const membershipResult = await this.rawQuery<{ role: string }>(
       'SELECT role FROM tenant_memberships WHERE user_id = $1 AND tenant_id = $2',
       [userId, targetTenantId],
     );
@@ -576,7 +573,7 @@ export class PortalService {
       throw Object.assign(new Error('Membership not found'), { status: 404 });
     }
     if (membershipResult.rows[0].role === 'owner') {
-      const ownerCount = await this.pool.query<{ count: string }>(
+      const ownerCount = await this.rawQuery<{ count: string }>(
         `SELECT COUNT(*) AS count FROM tenant_memberships
          WHERE tenant_id = $1 AND role = 'owner'`,
         [targetTenantId],
@@ -589,14 +586,14 @@ export class PortalService {
       }
     }
 
-    await this.pool.query(
+    await this.rawQuery(
       'DELETE FROM tenant_memberships WHERE user_id = $1 AND tenant_id = $2',
       [userId, targetTenantId],
     );
   }
 
   async listSubtenants(tenantId: string) {
-    const result = await this.pool.query<{
+    const result = await this.rawQuery<{
       id: string; name: string; parent_id: string; status: string; created_at: string;
     }>(
       'SELECT id, name, parent_id, status, created_at FROM tenants WHERE parent_id = $1 ORDER BY created_at',
@@ -606,33 +603,26 @@ export class PortalService {
   }
 
   async createSubtenant(parentTenantId: string, userId: string, name: string) {
-    await this.pool.query('BEGIN');
-    try {
-      const tenantResult = await this.pool.query<{
-        id: string; name: string; parent_id: string; status: string; created_at: string;
-      }>(
-        `INSERT INTO tenants (name, parent_id) VALUES ($1, $2)
+    return (this.em as any).getKnex().transaction(async (trx: any) => {
+      const tenantResult = await trx.raw(
+        `INSERT INTO tenants (name, parent_id) VALUES (?, ?)
          RETURNING id, name, parent_id, status, created_at`,
         [name.trim(), parentTenantId],
       );
       const newTenant = tenantResult.rows[0];
 
-      await this.pool.query(
-        `INSERT INTO tenant_memberships (user_id, tenant_id, role) VALUES ($1, $2, 'owner')`,
+      await trx.raw(
+        `INSERT INTO tenant_memberships (user_id, tenant_id, role) VALUES (?, ?, 'owner')`,
         [userId, newTenant.id],
       );
-      await this.pool.query('COMMIT');
       return newTenant;
-    } catch (err) {
-      await this.pool.query('ROLLBACK');
-      throw err;
-    }
+    });
   }
 
   // ── Agents ────────────────────────────────────────────────────────────────
 
   async listAgents(tenantId: string) {
-    const result = await this.pool.query<{
+    const result = await this.rawQuery<{
       id: string; name: string;
       provider_config: Record<string, unknown> | null;
       system_prompt: string | null;
@@ -665,7 +655,7 @@ export class PortalService {
     const DEFAULT_MERGE_POLICIES = { system_prompt: 'prepend', skills: 'merge', mcp_endpoints: 'merge' };
     const storedMergePolicies = data.mergePolicies ?? DEFAULT_MERGE_POLICIES;
 
-    const result = await this.pool.query<{
+    const result = await this.rawQuery<{
       id: string; name: string;
       provider_config: Record<string, unknown> | null;
       system_prompt: string | null;
@@ -691,7 +681,7 @@ export class PortalService {
   }
 
   async getAgent(agentId: string, userId: string) {
-    const result = await this.pool.query<{
+    const result = await this.rawQuery<{
       id: string; name: string;
       provider_config: Record<string, unknown> | null;
       system_prompt: string | null;
@@ -732,7 +722,7 @@ export class PortalService {
       conversationSummaryModel?: string | null;
     },
   ) {
-    const memberCheck = await this.pool.query(
+    const memberCheck = await this.rawQuery(
       `SELECT 1 FROM agents a JOIN tenant_memberships tm ON tm.tenant_id = a.tenant_id
        WHERE a.id = $1 AND tm.user_id = $2`,
       [agentId, userId],
@@ -762,7 +752,7 @@ export class PortalService {
 
     values.push(agentId, tenantId);
 
-    const result = await this.pool.query<{
+    const result = await this.rawQuery<{
       id: string; name: string;
       provider_config: Record<string, unknown> | null;
       system_prompt: string | null;
@@ -786,7 +776,7 @@ export class PortalService {
   }
 
   async deleteAgent(agentId: string, tenantId: string): Promise<boolean> {
-    const result = await this.pool.query(
+    const result = await this.rawQuery(
       'DELETE FROM agents WHERE id = $1 AND tenant_id = $2 RETURNING id',
       [agentId, tenantId],
     );
@@ -794,7 +784,7 @@ export class PortalService {
   }
 
   async getAgentResolved(agentId: string, userId: string) {
-    const agentResult = await this.pool.query<{
+    const agentResult = await this.rawQuery<{
       id: string; name: string; tenant_id: string;
       provider_config: Record<string, unknown> | null;
       system_prompt: string | null;
@@ -812,7 +802,7 @@ export class PortalService {
     if (agentResult.rows.length === 0) return null;
 
     const agent = agentResult.rows[0];
-    const chainResult = await this.pool.query<{
+    const chainResult = await this.rawQuery<{
       id: string; name: string;
       provider_config: Record<string, unknown> | null;
       system_prompt: string | null;
@@ -836,7 +826,7 @@ export class PortalService {
   }
 
   async getAgentForChat(agentId: string, userId: string) {
-    const agentResult = await this.pool.query<{
+    const agentResult = await this.rawQuery<{
       id: string; name: string; tenant_id: string;
       provider_config: Record<string, unknown> | null;
       system_prompt: string | null;
@@ -858,7 +848,7 @@ export class PortalService {
     if (agentResult.rows.length === 0) return null;
 
     const agent = agentResult.rows[0];
-    const chainResult = await this.pool.query<{
+    const chainResult = await this.rawQuery<{
       id: string; name: string;
       provider_config: Record<string, unknown> | null;
       system_prompt: string | null;
@@ -884,7 +874,7 @@ export class PortalService {
   // ── Partitions ────────────────────────────────────────────────────────────
 
   async listPartitions(tenantId: string) {
-    const result = await this.pool.query<{
+    const result = await this.rawQuery<{
       id: string; parent_id: string | null; external_id: string;
       title_encrypted: string | null; title_iv: string | null; created_at: string;
     }>(
@@ -904,7 +894,7 @@ export class PortalService {
     titleEncrypted: string | null,
     titleIv: string | null,
   ) {
-    const result = await this.pool.query<{
+    const result = await this.rawQuery<{
       id: string; external_id: string; parent_id: string | null; created_at: string;
     }>(
       `INSERT INTO partitions (tenant_id, parent_id, external_id, title_encrypted, title_iv)
@@ -937,25 +927,25 @@ export class PortalService {
     }
     if (sets.length === 0) return false;
 
-    const result = await this.pool.query(
+    const result = await this.rawQuery(
       `UPDATE partitions SET ${sets.join(', ')} WHERE id = $1 AND tenant_id = $2 RETURNING id`,
       params,
     );
-    return (result.rowCount ?? 0) > 0;
+    return (result.rows.length) > 0;
   }
 
   async deletePartition(id: string, tenantId: string): Promise<boolean> {
-    const result = await this.pool.query(
-      'DELETE FROM partitions WHERE id = $1 AND tenant_id = $2',
+    const result = await this.rawQuery(
+      'DELETE FROM partitions WHERE id = $1 AND tenant_id = $2 RETURNING id',
       [id, tenantId],
     );
-    return (result.rowCount ?? 0) > 0;
+    return result.rows.length > 0;
   }
 
   // ── Conversations ─────────────────────────────────────────────────────────
 
   async listConversations(tenantId: string, partitionId?: string | null) {
-    const result = await this.pool.query<{
+    const result = await this.rawQuery<{
       id: string; agent_id: string | null; partition_id: string | null;
       external_id: string; created_at: string; last_active_at: string;
     }>(
@@ -970,7 +960,7 @@ export class PortalService {
   }
 
   async getConversation(id: string, tenantId: string) {
-    const convResult = await this.pool.query<{
+    const convResult = await this.rawQuery<{
       id: string; agent_id: string | null; partition_id: string | null;
       external_id: string; created_at: string; last_active_at: string;
     }>(
@@ -980,7 +970,7 @@ export class PortalService {
     );
     if (convResult.rows.length === 0) return null;
 
-    const snapResult = await this.pool.query<{
+    const snapResult = await this.rawQuery<{
       id: string; summary_encrypted: string; summary_iv: string;
       messages_archived: number; created_at: string;
     }>(
@@ -989,7 +979,7 @@ export class PortalService {
       [id],
     );
 
-    const msgResult = await this.pool.query<{
+    const msgResult = await this.rawQuery<{
       id: string; role: string; content_encrypted: string; content_iv: string;
       token_estimate: number | null; snapshot_id: string | null; created_at: string;
     }>(

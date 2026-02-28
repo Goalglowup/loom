@@ -40,201 +40,132 @@ beforeAll(async () => {
   PASSWORD_HASH = await hashPassword(TEST_PASSWORD);
 });
 
-// ── Mock pool builder ───────────────────────────────────────────────────────
+// ── Mock service builders ─────────────────────────────────────────────────
 
-/**
- * Build a mock pg.Pool using SQL pattern matching.
- * Accepts an overrides map (SQL keyword → custom handler) for per-test customisation.
- */
-function buildMockPool(
-  overrides: Record<string, (params: unknown[]) => { rows: unknown[] }> = {},
-) {
-  const queryFn = vi.fn().mockImplementation((sql: string, params: unknown[] = []) => {
-    const s = sql.toLowerCase().trim();
+import { PortalService } from '../src/application/services/PortalService.js';
+import { ConversationManagementService } from '../src/application/services/ConversationManagementService.js';
 
-    // Check overrides first
-    for (const [key, handler] of Object.entries(overrides)) {
-      if (s.includes(key.toLowerCase())) {
-        return Promise.resolve(handler(params));
-      }
-    }
-
-    // BEGIN / COMMIT / ROLLBACK
-    if (s === 'begin' || s === 'commit' || s === 'rollback') {
-      return Promise.resolve({ rows: [] });
-    }
-
-    // Signup: check email exists
-    if (s.includes('select id from users where email')) {
-      return Promise.resolve({ rows: [] }); // no duplicate by default
-    }
-
-    // Login: look up user by email + password_hash
-    if (s.includes('select id, email, password_hash from users where email')) {
-      const email = params[0] as string;
-      if (email === TEST_USER_EMAIL.toLowerCase()) {
-        return Promise.resolve({
-          rows: [{ id: TEST_USER_ID, email: TEST_USER_EMAIL, password_hash: PASSWORD_HASH }],
-        });
-      }
-      return Promise.resolve({ rows: [] });
-    }
-
-    // Login: memberships for user
-    if (s.includes('from tenant_memberships tm') && s.includes("t.status = 'active'") && s.includes('order by tm.joined_at')) {
-      return Promise.resolve({
-        rows: [{
-          tenant_id: TEST_TENANT_ID,
-          tenant_name: TEST_TENANT_NAME,
-          role: 'owner',
-          tenant_status: 'active',
-        }],
-      });
-    }
-
-    // Login: update last_login
-    if (s.includes('update users set last_login')) {
-      return Promise.resolve({ rows: [] });
-    }
-
-    // Signup: insert tenant
-    if (s.includes('insert into tenants') && s.includes('name')) {
-      const name = params[0] as string;
-      return Promise.resolve({ rows: [{ id: 'new-tenant-id', name }] });
-    }
-
-    // Signup: insert user
-    if (s.includes('insert into users')) {
-      const email = params[0] as string;
-      return Promise.resolve({ rows: [{ id: 'new-user-id', email }] });
-    }
-
-    // Signup / me: insert tenant_memberships
-    if (s.includes('insert into tenant_memberships')) {
-      return Promise.resolve({ rows: [] });
-    }
-
-    // Signup / create agent: insert into agents
-    if (s.includes('insert into agents') && !s.includes('returning')) {
-      return Promise.resolve({ rows: [] });
-    }
-
-    // GET /me — user+tenant join query
-    if (
-      s.includes('select u.id, u.email, tm.role') &&
-      s.includes('join tenants t on t.id = tm.tenant_id') ||
-      (s.includes('u.email') && s.includes('tm.role') && s.includes('t.id as tenant_id'))
-    ) {
-      return Promise.resolve({
-        rows: [{
-          id: TEST_USER_ID,
-          email: TEST_USER_EMAIL,
-          role: 'owner',
-          tenant_id: TEST_TENANT_ID,
-          tenant_name: TEST_TENANT_NAME,
-          provider_config: null,
-          available_models: null,
-        }],
-      });
-    }
-
-    // GET /me — all tenants for the user
-    if (s.includes('select tm.tenant_id, t.name as tenant_name, tm.role') && s.includes('where tm.user_id = $1')) {
-      return Promise.resolve({
-        rows: [{ tenant_id: TEST_TENANT_ID, tenant_name: TEST_TENANT_NAME, role: 'owner' }],
-      });
-    }
-
-    // GET /me — agents for the tenant
-    if (s.includes('select id, name from agents where tenant_id')) {
-      return Promise.resolve({
-        rows: [{ id: TEST_AGENT_ID, name: TEST_AGENT_NAME }],
-      });
-    }
-
-    // GET /me — subtenants
-    if (s.includes('select id, name, status from tenants where parent_id')) {
-      return Promise.resolve({ rows: [] });
-    }
-
-    // GET /agents — full agent list
-    if (
-      s.includes('select id, name, provider_config') &&
-      s.includes('from agents where tenant_id')
-    ) {
-      return Promise.resolve({
-        rows: [{
-          id: TEST_AGENT_ID,
-          name: TEST_AGENT_NAME,
-          provider_config: null,
-          system_prompt: null,
-          skills: null,
-          mcp_endpoints: null,
-          merge_policies: { system_prompt: 'prepend', skills: 'merge', mcp_endpoints: 'merge' },
-          available_models: null,
-          conversations_enabled: false,
-          conversation_token_limit: null,
-          conversation_summary_model: null,
-          created_at: new Date().toISOString(),
-          updated_at: null,
-        }],
-      });
-    }
-
-    // POST /agents — insert with RETURNING
-    if (s.includes('insert into agents') && s.includes('returning')) {
-      return Promise.resolve({
-        rows: [{
-          id: 'new-agent-id',
-          name: params[1] as string ?? 'My Agent',
-          provider_config: null,
-          system_prompt: null,
-          skills: null,
-          mcp_endpoints: null,
-          merge_policies: { system_prompt: 'prepend', skills: 'merge', mcp_endpoints: 'merge' },
-          created_at: new Date().toISOString(),
-          updated_at: null,
-        }],
-      });
-    }
-
-    // GET /agents/:id — agent with membership join
-    if (s.includes('from agents a') && s.includes('join tenant_memberships tm on tm.tenant_id = a.tenant_id')) {
-      const agentId = params[0] as string;
-      if (agentId === TEST_AGENT_ID) {
-        return Promise.resolve({
-          rows: [{
-            id: TEST_AGENT_ID,
-            name: TEST_AGENT_NAME,
-            provider_config: null,
-            system_prompt: null,
-            skills: null,
-            mcp_endpoints: null,
-            merge_policies: { system_prompt: 'prepend', skills: 'merge', mcp_endpoints: 'merge' },
-            available_models: null,
-            conversations_enabled: false,
-            conversation_token_limit: null,
-            conversation_summary_model: null,
-            created_at: new Date().toISOString(),
-            updated_at: null,
-          }],
-        });
-      }
-      return Promise.resolve({ rows: [] }); // not found
-    }
-
-    // Fallback
-    return Promise.resolve({ rows: [] });
-  });
-
-  return { query: queryFn } as unknown as import('pg').Pool;
+function buildMockConvSvc(): ConversationManagementService {
+  return {
+    getOrCreatePartition: vi.fn().mockResolvedValue({ id: 'part-uuid' }),
+    getOrCreateConversation: vi.fn().mockResolvedValue({ id: 'conv-uuid', isNew: true }),
+    loadContext: vi.fn().mockResolvedValue({ messages: [], tokenEstimate: 0, latestSnapshotId: null, latestSnapshotSummary: undefined }),
+    buildInjectionMessages: vi.fn().mockReturnValue([]),
+    storeMessages: vi.fn().mockResolvedValue(undefined),
+    createSnapshot: vi.fn().mockResolvedValue('snap-uuid'),
+  } as unknown as ConversationManagementService;
 }
 
-// ── App builder ─────────────────────────────────────────────────────────────
+function buildMockPortalSvc(overrides: Partial<Record<string, any>> = {}): PortalService {
+  const defaultAgentRow = {
+    id: TEST_AGENT_ID,
+    name: TEST_AGENT_NAME,
+    provider_config: null,
+    system_prompt: null,
+    skills: null,
+    mcp_endpoints: null,
+    merge_policies: { system_prompt: 'prepend', skills: 'merge', mcp_endpoints: 'merge' },
+    available_models: null,
+    conversations_enabled: false,
+    conversation_token_limit: null,
+    conversation_summary_model: null,
+    created_at: new Date().toISOString(),
+    updated_at: null,
+  };
 
-async function buildApp(pool: import('pg').Pool): Promise<FastifyInstance> {
+  const svc = {
+    signup: vi.fn().mockImplementation((email: string, _pwd: string, tenantName: string) =>
+      Promise.resolve({ token: 'test-token', userId: 'new-user-id', email, tenantId: 'new-tenant-id', tenantName })
+    ),
+    signupWithInvite: vi.fn().mockResolvedValue({
+      token: 'test-token', userId: TEST_USER_ID, email: TEST_USER_EMAIL,
+      tenantId: TEST_TENANT_ID, tenantName: TEST_TENANT_NAME,
+    }),
+    login: vi.fn().mockImplementation(async (email: string, password: string) => {
+      if (email.toLowerCase() !== TEST_USER_EMAIL.toLowerCase()) return null;
+      const [salt, key] = PASSWORD_HASH.split(':');
+      const derivedKey = (await scryptAsync(password, salt, 64)) as Buffer;
+      const { timingSafeEqual } = await import('node:crypto');
+      const valid = timingSafeEqual(Buffer.from(key, 'hex'), derivedKey);
+      if (!valid) return null;
+      return {
+        token: signPortalToken({ sub: TEST_USER_ID, tenantId: TEST_TENANT_ID, role: 'owner' }),
+        userId: TEST_USER_ID,
+        email: TEST_USER_EMAIL,
+        tenantId: TEST_TENANT_ID,
+        tenantName: TEST_TENANT_NAME,
+        tenants: [{ id: TEST_TENANT_ID, name: TEST_TENANT_NAME, role: 'owner' }],
+      };
+    }),
+    getMe: vi.fn().mockResolvedValue({
+      row: {
+        id: TEST_USER_ID, email: TEST_USER_EMAIL, role: 'owner',
+        tenant_id: TEST_TENANT_ID, tenant_name: TEST_TENANT_NAME,
+        provider_config: null, available_models: null,
+      },
+      tenants: [{ tenant_id: TEST_TENANT_ID, tenant_name: TEST_TENANT_NAME, role: 'owner' }],
+      agents: [{ id: TEST_AGENT_ID, name: TEST_AGENT_NAME }],
+      subtenants: [],
+    }),
+    updateProviderSettings: vi.fn().mockResolvedValue(undefined),
+    listApiKeys: vi.fn().mockResolvedValue([]),
+    createApiKey: vi.fn().mockResolvedValue({ id: 'key-id', key: 'loom_sk_xxx', keyPrefix: 'loom_sk_xxx'.slice(0, 12), name: 'key', status: 'active', created_at: new Date().toISOString() }),
+    revokeApiKey: vi.fn().mockResolvedValue('keyhash'),
+    listTraces: vi.fn().mockResolvedValue([]),
+    switchTenant: vi.fn().mockResolvedValue({ token: 'new-token', userId: TEST_USER_ID, email: TEST_USER_EMAIL, tenantId: TEST_TENANT_ID, tenantName: TEST_TENANT_NAME }),
+    getInviteInfo: vi.fn().mockResolvedValue(null),
+    createInvite: vi.fn().mockResolvedValue({ id: 'invite-id', token: 'invite-token', expires_at: null, max_uses: 10, current_uses: 0, created_at: new Date().toISOString() }),
+    listInvites: vi.fn().mockResolvedValue([]),
+    revokeInvite: vi.fn().mockResolvedValue(true),
+    listMembers: vi.fn().mockResolvedValue([]),
+    updateMemberRole: vi.fn().mockResolvedValue({ user_id: TEST_USER_ID, role: 'member', joined_at: new Date().toISOString(), email: TEST_USER_EMAIL }),
+    removeMember: vi.fn().mockResolvedValue(undefined),
+    listUserTenants: vi.fn().mockResolvedValue([{ id: TEST_TENANT_ID, name: TEST_TENANT_NAME, role: 'owner' }]),
+    leaveTenant: vi.fn().mockResolvedValue(undefined),
+    listSubtenants: vi.fn().mockResolvedValue([]),
+    createSubtenant: vi.fn().mockResolvedValue({ id: 'sub-id', name: 'Sub', status: 'active', created_at: new Date().toISOString(), updated_at: null }),
+    listAgents: vi.fn().mockResolvedValue([defaultAgentRow]),
+    createAgent: vi.fn().mockImplementation((_tenantId: string, data: any) =>
+      Promise.resolve({
+        id: 'new-agent-id', name: data.name ?? 'My Agent',
+        provider_config: null, system_prompt: null, skills: null,
+        mcp_endpoints: null, merge_policies: { system_prompt: 'prepend', skills: 'merge', mcp_endpoints: 'merge' },
+        available_models: null, conversations_enabled: false,
+        conversation_token_limit: null, conversation_summary_model: null,
+        created_at: new Date().toISOString(), updated_at: null,
+      })
+    ),
+    getAgent: vi.fn().mockImplementation((agentId: string, _userId: string) => {
+      if (agentId === TEST_AGENT_ID) return Promise.resolve({ ...defaultAgentRow });
+      return Promise.resolve(null);
+    }),
+    updateAgent: vi.fn().mockResolvedValue({ ...defaultAgentRow }),
+    deleteAgent: vi.fn().mockResolvedValue(true),
+    getAgentResolved: vi.fn().mockImplementation((agentId: string, _userId: string) => {
+      if (agentId === TEST_AGENT_ID) return Promise.resolve({
+        agent: { ...defaultAgentRow, tenant_id: TEST_TENANT_ID },
+        tenantChain: [{ id: TEST_TENANT_ID, name: TEST_TENANT_NAME, provider_config: null, system_prompt: null, skills: null, mcp_endpoints: null }],
+      });
+      return Promise.resolve(null);
+    }),
+    getAgentForChat: vi.fn().mockResolvedValue(null),
+    listPartitions: vi.fn().mockResolvedValue([]),
+    createPartition: vi.fn().mockResolvedValue({ id: 'part-uuid', external_id: 'ext-id', parent_id: null, created_at: new Date().toISOString() }),
+    updatePartition: vi.fn().mockResolvedValue(true),
+    deletePartition: vi.fn().mockResolvedValue(true),
+    listConversations: vi.fn().mockResolvedValue([]),
+    getConversation: vi.fn().mockResolvedValue(null),
+    ...overrides,
+  } as unknown as PortalService;
+  return svc;
+}
+
+async function buildApp(
+  svc: PortalService = buildMockPortalSvc(),
+  conversationSvc: ConversationManagementService = buildMockConvSvc(),
+): Promise<FastifyInstance> {
   const app = Fastify({ logger: false });
-  registerPortalRoutes(app, pool);
+  registerPortalRoutes(app, svc, conversationSvc);
   await app.ready();
   return app;
 }
@@ -251,7 +182,7 @@ describe('POST /v1/portal/auth/signup', () => {
 
   beforeEach(async () => {
     process.env.ENCRYPTION_MASTER_KEY = TEST_MASTER_KEY;
-    app = await buildApp(buildMockPool());
+    app = await buildApp();
   });
 
   afterEach(async () => {
@@ -279,11 +210,9 @@ describe('POST /v1/portal/auth/signup', () => {
   });
 
   it('returns 409 when email is already registered', async () => {
-    // Override email check to return existing user
-    const pool = buildMockPool({
-      'select id from users where email': () => ({ rows: [{ id: 'existing-id' }] }),
-    });
-    const localApp = await buildApp(pool);
+    const localApp = await buildApp(
+      buildMockPortalSvc({ signup: vi.fn().mockRejectedValue(Object.assign(new Error('Email already registered'), { status: 409 })) }),
+    );
 
     const res = await localApp.inject({
       method: 'POST',
@@ -337,7 +266,7 @@ describe('POST /v1/portal/auth/login', () => {
 
   beforeEach(async () => {
     process.env.ENCRYPTION_MASTER_KEY = TEST_MASTER_KEY;
-    app = await buildApp(buildMockPool());
+    app = await buildApp();
   });
 
   afterEach(async () => {
@@ -405,7 +334,7 @@ describe('GET /v1/portal/me', () => {
 
   beforeEach(async () => {
     process.env.ENCRYPTION_MASTER_KEY = TEST_MASTER_KEY;
-    app = await buildApp(buildMockPool());
+    app = await buildApp();
   });
 
   afterEach(async () => {
@@ -449,11 +378,9 @@ describe('GET /v1/portal/me', () => {
   });
 
   it('returns 404 when user/tenant record not found', async () => {
-    const pool = buildMockPool({
-      // Override the me query to return nothing
-      'select u.id, u.email': () => ({ rows: [] }),
-    });
-    const localApp = await buildApp(pool);
+    const localApp = await buildApp(
+      buildMockPortalSvc({ getMe: vi.fn().mockResolvedValue(null) }),
+    );
 
     const res = await localApp.inject({
       method: 'GET',
@@ -473,7 +400,7 @@ describe('GET /v1/portal/agents', () => {
 
   beforeEach(async () => {
     process.env.ENCRYPTION_MASTER_KEY = TEST_MASTER_KEY;
-    app = await buildApp(buildMockPool());
+    app = await buildApp();
   });
 
   afterEach(async () => {
@@ -502,10 +429,9 @@ describe('GET /v1/portal/agents', () => {
   });
 
   it('returns empty agents array when tenant has no agents', async () => {
-    const pool = buildMockPool({
-      'from agents where tenant_id': () => ({ rows: [] }),
-    });
-    const localApp = await buildApp(pool);
+    const localApp = await buildApp(
+      buildMockPortalSvc({ listAgents: vi.fn().mockResolvedValue([]) }),
+    );
 
     const res = await localApp.inject({
       method: 'GET',
@@ -527,7 +453,7 @@ describe('POST /v1/portal/agents', () => {
 
   beforeEach(async () => {
     process.env.ENCRYPTION_MASTER_KEY = TEST_MASTER_KEY;
-    app = await buildApp(buildMockPool());
+    app = await buildApp();
   });
 
   afterEach(async () => {
@@ -578,7 +504,7 @@ describe('GET /v1/portal/agents/:id', () => {
 
   beforeEach(async () => {
     process.env.ENCRYPTION_MASTER_KEY = TEST_MASTER_KEY;
-    app = await buildApp(buildMockPool());
+    app = await buildApp();
   });
 
   afterEach(async () => {

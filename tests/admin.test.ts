@@ -51,290 +51,167 @@ async function hashPassword(password: string): Promise<string> {
   return `${salt}:${derivedKey.toString('hex')}`;
 }
 
-/**
- * Build a mock pg.Pool that responds to admin and tenant queries
- */
-function buildMockPool(options: {
+import { AdminService } from '../src/application/services/AdminService.js';
+import type { EntityManager } from '@mikro-orm/core';
+
+function buildMockAdminSvc(options: {
   adminPasswordHash?: string;
   tenants?: Map<string, any>;
   apiKeys?: Map<string, any>;
   providerConfigs?: Map<string, any>;
-} = {}) {
-  const tenants = options.tenants || new Map();
-  const apiKeys = options.apiKeys || new Map();
-  const providerConfigs = options.providerConfigs || new Map();
+} = {}): AdminService {
+  const tenants = options.tenants ?? new Map();
+  const apiKeys = options.apiKeys ?? new Map();
+  const providerConfigs = options.providerConfigs ?? new Map();
 
-  const queryFn = vi.fn().mockImplementation((sql: string, params?: unknown[]) => {
-    const sqlLower = sql.toLowerCase().trim();
-
-    // Admin user login
-    if (sqlLower.includes('select id, username, password_hash from admin_users')) {
-      const username = params?.[0];
-      if (username === ADMIN_USERNAME) {
-        return Promise.resolve({
-          rows: [{
-            id: 'admin-user-id-1',
-            username: ADMIN_USERNAME,
-            password_hash: options.adminPasswordHash || '',
-          }],
-        });
-      }
-      return Promise.resolve({ rows: [] });
-    }
-
-    // Update last_login
-    if (sqlLower.includes('update admin_users set last_login')) {
-      return Promise.resolve({ rows: [] });
-    }
-
-    // Create tenant
-    if (sqlLower.includes('insert into tenants') && sqlLower.includes('name')) {
-      const name = params?.[0] as string;
+  return {
+    validateAdminLogin: vi.fn().mockImplementation(async (username: string, password: string) => {
+      if (username !== ADMIN_USERNAME) return null;
+      if (!options.adminPasswordHash) return null;
+      const [salt, key] = options.adminPasswordHash.split(':');
+      const derivedKey = (await scryptAsync(password, salt, 64)) as Buffer;
+      const { timingSafeEqual } = await import('node:crypto');
+      let valid = false;
+      try { valid = timingSafeEqual(Buffer.from(key, 'hex'), derivedKey); } catch { return null; }
+      if (!valid) return null;
+      return { id: 'admin-user-id-1', username: ADMIN_USERNAME };
+    }),
+    updateAdminLastLogin: vi.fn().mockResolvedValue(undefined),
+    createTenant: vi.fn().mockImplementation((name: string) => {
       const newTenant = {
-        id: randomBytes(16).toString('hex').slice(0, 36),
-        name,
-        status: 'active',
+        id: randomBytes(8).toString('hex'),
+        name, status: 'active',
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       };
       tenants.set(newTenant.id, newTenant);
-      return Promise.resolve({ rows: [newTenant] });
-    }
-
-    // List tenants
-    if (sqlLower.includes('select id, name, status, created_at, updated_at from tenants')) {
-      const status = params?.find((p) => p === 'active' || p === 'inactive');
-      let filtered = Array.from(tenants.values());
-      if (status) {
-        filtered = filtered.filter((t) => t.status === status);
-      }
-      const total = filtered.length;
-      return Promise.resolve({
-        rows: filtered,
-        // Mock count query response
-        then: (resolve: any) => resolve({ rows: filtered }),
-      });
-    }
-
-    // Count tenants
-    if (sqlLower.includes('select count(*) from tenants')) {
-      const status = params?.[0];
-      let filtered = Array.from(tenants.values());
-      if (status) {
-        filtered = filtered.filter((t) => t.status === status);
-      }
-      return Promise.resolve({ rows: [{ count: filtered.length.toString() }] });
-    }
-
-    // Get tenant by ID
-    if (sqlLower.includes('from tenants t') && sqlLower.includes('left join api_keys ak')) {
-      const id = params?.[0] as string;
-      const tenant = tenants.get(id);
-      if (!tenant) {
-        return Promise.resolve({ rows: [] });
-      }
-      const keyCount = Array.from(apiKeys.values()).filter((k) => k.tenant_id === id).length;
-      const providerConfig = providerConfigs.get(id) || null;
-      return Promise.resolve({
-        rows: [{
-          ...tenant,
-          provider_config: providerConfig,
-          api_key_count: keyCount.toString(),
-        }],
-      });
-    }
-
-    // Update tenant
-    if (sqlLower.includes('update tenants set')) {
-      const id = params?.[params.length - 1] as string;
-      const tenant = tenants.get(id);
-      if (!tenant) {
-        return Promise.resolve({ rows: [] });
-      }
-      // Update fields based on params (ID is always last)
-      const updated = { ...tenant, updated_at: new Date().toISOString() };
-      
-      // Parse which fields are being updated
-      const hasName = sqlLower.includes('name =');
-      const hasStatus = sqlLower.includes('status =');
-      
-      let paramIdx = 0;
-      if (hasName) {
-        updated.name = params?.[paramIdx++] as string;
-      }
-      if (hasStatus) {
-        updated.status = params?.[paramIdx++] as string;
-      }
-      
+      return Promise.resolve(newTenant);
+    }),
+    listTenants: vi.fn().mockImplementation(({ limit, offset, status }: any) => {
+      let all = [...tenants.values()];
+      if (status) all = all.filter((t: any) => t.status === status);
+      const total = all.length;
+      const paginated = all.slice(offset, offset + limit);
+      return Promise.resolve({ tenants: paginated, total });
+    }),
+    getTenant: vi.fn().mockImplementation((id: string) => {
+      const t = tenants.get(id);
+      if (!t) return Promise.resolve(null);
+      const keyCount = [...apiKeys.values()].filter((k: any) => k.tenant_id === id).length;
+      const pc = providerConfigs.get(id) ?? null;
+      return Promise.resolve({ ...t, provider_config: pc, api_key_count: String(keyCount) });
+    }),
+    updateTenant: vi.fn().mockImplementation((id: string, fields: any) => {
+      const t = tenants.get(id);
+      if (!t) return Promise.resolve(null);
+      const updated = { ...t, ...fields, updated_at: new Date().toISOString() };
       tenants.set(id, updated);
-      return Promise.resolve({ rows: [updated] });
-    }
-
-    // Delete tenant
-    if (sqlLower.includes('delete from tenants')) {
-      const id = params?.[0] as string;
-      const tenant = tenants.get(id);
-      if (!tenant) {
-        return Promise.resolve({ rows: [] });
-      }
+      return Promise.resolve(updated);
+    }),
+    deleteTenant: vi.fn().mockImplementation((id: string) => {
+      const exists = tenants.has(id);
       tenants.delete(id);
-      return Promise.resolve({ rows: [{ id }] });
-    }
-
-    // Check tenant exists (for provider config and API key operations)
-    if (sqlLower.includes('select id from tenants where id')) {
-      const id = params?.[0] as string;
-      const tenant = tenants.get(id);
-      return Promise.resolve({ rows: tenant ? [{ id }] : [] });
-    }
-
-    // Update provider config
-    if (sqlLower.includes('update tenants set provider_config')) {
-      const [configJson, id] = params as [string, string];
-      const tenant = tenants.get(id);
-      if (tenant) {
-        const config = JSON.parse(configJson);
-        providerConfigs.set(id, config);
-        tenant.updated_at = new Date().toISOString();
-      }
-      return Promise.resolve({ rows: [] });
-    }
-
-    // Remove provider config
-    if (sqlLower.includes('set provider_config = null')) {
-      const id = params?.[0] as string;
-      const tenant = tenants.get(id);
-      if (!tenant) {
-        return Promise.resolve({ rows: [] });
-      }
+      return Promise.resolve(exists);
+    }),
+    tenantExists: vi.fn().mockImplementation((id: string) => Promise.resolve(tenants.has(id))),
+    setProviderConfig: vi.fn().mockImplementation((id: string, config: object) => {
+      providerConfigs.set(id, config);
+      const t = tenants.get(id);
+      if (t) { t.updated_at = new Date().toISOString(); tenants.set(id, t); }
+      return Promise.resolve();
+    }),
+    clearProviderConfig: vi.fn().mockImplementation((id: string) => {
+      const existed = providerConfigs.has(id);
       providerConfigs.delete(id);
-      return Promise.resolve({ rows: [{ id }] });
-    }
-
-    // Create API key
-    if (sqlLower.includes('insert into api_keys')) {
-      const [tenantId, name, keyPrefix, keyHash] = params as [string, string, string, string];
+      return Promise.resolve(existed);
+    }),
+    createApiKey: vi.fn().mockImplementation((tenantId: string, name: string, _rawKey: string, keyPrefix: string, keyHash: string) => {
       const newKey = {
-        id: randomBytes(16).toString('hex').slice(0, 36),
-        tenant_id: tenantId,
-        name,
-        key_prefix: keyPrefix,
-        key_hash: keyHash,
-        status: 'active',
-        created_at: new Date().toISOString(),
-        revoked_at: null,
+        id: randomBytes(8).toString('hex'),
+        tenant_id: tenantId, name, key_prefix: keyPrefix,
+        key_hash: keyHash, status: 'active',
+        created_at: new Date().toISOString(), revoked_at: null,
       };
       apiKeys.set(newKey.id, newKey);
-      return Promise.resolve({ rows: [newKey] });
-    }
-
-    // List API keys
-    if (sqlLower.includes('select id, name, key_prefix, status, created_at, revoked_at') && sqlLower.includes('from api_keys')) {
-      const tenantId = params?.[0] as string;
-      const keys = Array.from(apiKeys.values()).filter((k) => k.tenant_id === tenantId);
-      return Promise.resolve({ rows: keys });
-    }
-
-    // Get API key by ID (for delete/revoke)
-    if (sqlLower.includes('select key_hash from api_keys where id')) {
-      const keyId = params?.[0] as string;
+      return Promise.resolve({ id: newKey.id, name, key_prefix: keyPrefix, status: 'active', created_at: newKey.created_at });
+    }),
+    listApiKeys: vi.fn().mockImplementation((tenantId: string) => {
+      const keys = [...apiKeys.values()].filter((k: any) => k.tenant_id === tenantId);
+      return Promise.resolve(keys.map((k: any) => ({ id: k.id, name: k.name, key_prefix: k.key_prefix, status: k.status, created_at: k.created_at, revoked_at: k.revoked_at })));
+    }),
+    getApiKeyHash: vi.fn().mockImplementation((keyId: string, tenantId: string) => {
       const key = apiKeys.get(keyId);
-      if (!key) {
-        return Promise.resolve({ rows: [] });
-      }
-      return Promise.resolve({ rows: [{ key_hash: key.key_hash }] });
-    }
-
-    // Revoke API key (soft delete)
-    if (sqlLower.includes('update api_keys') && sqlLower.includes("status = 'revoked'")) {
-      const keyId = params?.[0] as string;
+      if (!key || key.tenant_id !== tenantId) return Promise.resolve(null);
+      return Promise.resolve(key.key_hash);
+    }),
+    hardDeleteApiKey: vi.fn().mockImplementation((keyId: string, _tenantId: string) => {
+      apiKeys.delete(keyId);
+      return Promise.resolve();
+    }),
+    revokeApiKey: vi.fn().mockImplementation((keyId: string, tenantId: string) => {
       const key = apiKeys.get(keyId);
-      if (!key) {
-        return Promise.resolve({ rows: [] });
-      }
+      if (!key || key.tenant_id !== tenantId) return Promise.resolve(null);
       key.status = 'revoked';
       key.revoked_at = new Date().toISOString();
-      return Promise.resolve({ rows: [{ key_hash: key.key_hash }] });
-    }
-
-    // Delete API key (hard delete)
-    if (sqlLower.includes('delete from api_keys')) {
-      const keyId = params?.[0] as string;
-      const key = apiKeys.get(keyId);
-      if (!key) {
-        return Promise.resolve({ rows: [] });
-      }
-      apiKeys.delete(keyId);
-      return Promise.resolve({ rows: [] });
-    }
-
-    // Auth middleware: lookup API key by hash
-    // This matches the query in src/auth.ts lookupTenant()
-    if (sqlLower.includes('from   api_keys ak') && sqlLower.includes('ak.key_hash = $1')) {
-      const keyHash = params?.[0] as string;
-      const key = Array.from(apiKeys.values()).find((k) => k.key_hash === keyHash);
-      if (!key || key.status !== 'active') {
-        return Promise.resolve({ rows: [] });
-      }
-      const tenant = tenants.get(key.tenant_id);
-      if (!tenant || tenant.status !== 'active') {
-        return Promise.resolve({ rows: [] });
-      }
-      const tenantProviderConfig = providerConfigs.get(tenant.id) || null;
-      return Promise.resolve({
-        rows: [{
-          tenant_id: tenant.id,
-          tenant_name: tenant.name,
-          tenant_parent_id: null,
-          agent_id: key.agent_id || null,
-          agent_provider_config: null,
-          agent_system_prompt: null,
-          agent_skills: null,
-          agent_mcp_endpoints: null,
-          merge_policies: { system_prompt: 'prepend', skills: 'merge' },
-          tenant_provider_config: tenantProviderConfig,
-          tenant_system_prompt: null,
-          tenant_skills: null,
-          tenant_mcp_endpoints: null,
-        }],
-      });
-    }
-
-    // Get all key hashes for a tenant (used by invalidateAllKeysForTenant)
-    if (sqlLower.includes('select key_hash from api_keys where tenant_id')) {
-      const tenantId = params?.[0] as string;
-      const keys = Array.from(apiKeys.values()).filter((k) => k.tenant_id === tenantId);
-      return Promise.resolve({ rows: keys.map((k) => ({ key_hash: k.key_hash })) });
-    }
-
-    console.warn('Unhandled query:', sql, params);
-    return Promise.resolve({ rows: [] });
-  });
-
-  return { query: queryFn } as unknown as import('pg').Pool;
+      apiKeys.set(keyId, key);
+      return Promise.resolve(key.key_hash);
+    }),
+    listTraces: vi.fn().mockResolvedValue([]),
+  } as unknown as AdminService;
 }
 
-/**
- * Build a Fastify app with JWT plugin, admin routes, and auth middleware
- */
-async function buildApp(pool: import('pg').Pool): Promise<FastifyInstance> {
+function buildMockEm(options: { apiKeys?: Map<string, any>; tenants?: Map<string, any>; providerConfigs?: Map<string, any> } = {}): EntityManager {
+  const apiKeys = options.apiKeys ?? new Map();
+  const tenants = options.tenants ?? new Map();
+  const providerConfigs = options.providerConfigs ?? new Map();
+
+  return {
+    findOne: vi.fn().mockImplementation(async (_Entity: any, where: any, _opts?: any) => {
+      if (where && where.keyHash !== undefined) {
+        const key = [...apiKeys.values()].find((k: any) => k.key_hash === where.keyHash && k.status === where.status);
+        if (!key) return null;
+        const tenant = tenants.get(key.tenant_id);
+        if (!tenant) return null;
+        const tenantProviderConfig = providerConfigs.get(tenant.id) ?? null;
+        return {
+          keyHash: key.key_hash,
+          status: key.status,
+          agent: null,
+          tenant: {
+            id: tenant.id,
+            name: tenant.name,
+            status: tenant.status,
+            parentId: null,
+            providerConfig: tenantProviderConfig,
+            systemPrompt: null,
+            skills: null,
+            mcpEndpoints: null,
+            availableModels: null,
+          },
+        };
+      }
+      return null;
+    }),
+    find: vi.fn().mockImplementation(async (_Entity: any, where: any) => {
+      if (where && where.tenant !== undefined) {
+        const tenantId = where.tenant;
+        return [...apiKeys.values()]
+          .filter((k: any) => k.tenant_id === tenantId)
+          .map((k: any) => ({ keyHash: k.key_hash }));
+      }
+      return [];
+    }),
+  } as unknown as EntityManager;
+}
+
+async function buildApp(adminService: AdminService, mockEm: EntityManager): Promise<FastifyInstance> {
   const app = Fastify({ logger: false });
-  
-  // Register JWT plugin (required for admin auth)
   await app.register(fastifyJWT, { secret: TEST_JWT_SECRET });
-  
-  // Register auth middleware (for H-MT5 regression tests)
-  registerAuthMiddleware(app, pool);
-  
-  // Register admin routes
-  registerAdminRoutes(app, pool);
-  
-  // Add a minimal /v1/chat/completions endpoint for auth regression tests
+  registerAuthMiddleware(app, mockEm);
+  registerAdminRoutes(app, adminService, mockEm);
   app.post('/v1/chat/completions', async (request, reply) => {
-    // If we get here, auth passed
     return reply.send({ tenant: request.tenant });
   });
-  
   await app.ready();
   return app;
 }
@@ -349,7 +226,7 @@ describe('H-MT1: Admin authentication middleware', () => {
     process.env.ENCRYPTION_MASTER_KEY = TEST_MASTER_KEY;
     process.env.ADMIN_JWT_SECRET = TEST_JWT_SECRET;
     adminPasswordHash = await hashPassword(ADMIN_PASSWORD);
-    app = await buildApp(buildMockPool({ adminPasswordHash }));
+    app = await buildApp(buildMockAdminSvc({ adminPasswordHash }), buildMockEm());
   });
 
   afterEach(async () => {
@@ -461,7 +338,7 @@ describe('H-MT2: Tenant CRUD operations', () => {
       }],
     ]);
     
-    app = await buildApp(buildMockPool({ adminPasswordHash, tenants }));
+    app = await buildApp(buildMockAdminSvc({ adminPasswordHash, tenants }), buildMockEm({ tenants }));
 
     // Get admin token
     const loginRes = await app.inject({
@@ -651,7 +528,7 @@ describe('H-MT3: API key management', () => {
       }],
     ]);
     
-    app = await buildApp(buildMockPool({ adminPasswordHash, tenants, apiKeys }));
+    app = await buildApp(buildMockAdminSvc({ adminPasswordHash, tenants, apiKeys }), buildMockEm({ tenants, apiKeys }));
 
     // Get admin token
     const loginRes = await app.inject({
@@ -769,7 +646,7 @@ describe('H-MT4: Provider config management', () => {
     ]);
     providerConfigs = new Map();
     
-    app = await buildApp(buildMockPool({ adminPasswordHash, tenants, providerConfigs }));
+    app = await buildApp(buildMockAdminSvc({ adminPasswordHash, tenants, providerConfigs }), buildMockEm({ tenants, providerConfigs }));
 
     // Get admin token
     const loginRes = await app.inject({
@@ -910,7 +787,7 @@ describe('H-MT5: Auth regression (active key + active tenant)', () => {
       }],
     ]);
     
-    const app = await buildApp(buildMockPool({ adminPasswordHash, tenants, apiKeys }));
+    const app = await buildApp(buildMockAdminSvc({ adminPasswordHash, tenants, apiKeys }), buildMockEm({ tenants, apiKeys }));
 
     // Simulate a proxy request with valid API key
     const res = await app.inject({
@@ -952,7 +829,7 @@ describe('H-MT5: Auth regression (active key + active tenant)', () => {
       }],
     ]);
 
-    const app = await buildApp(buildMockPool({ adminPasswordHash, tenants, apiKeys }));
+    const app = await buildApp(buildMockAdminSvc({ adminPasswordHash, tenants, apiKeys }), buildMockEm({ tenants, apiKeys }));
 
     const res = await app.inject({
       method: 'POST',
@@ -989,7 +866,7 @@ describe('H-MT5: Auth regression (active key + active tenant)', () => {
       }],
     ]);
 
-    const app = await buildApp(buildMockPool({ adminPasswordHash, tenants, apiKeys }));
+    const app = await buildApp(buildMockAdminSvc({ adminPasswordHash, tenants, apiKeys }), buildMockEm({ tenants, apiKeys }));
 
     const res = await app.inject({
       method: 'POST',

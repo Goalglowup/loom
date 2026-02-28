@@ -1,6 +1,6 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { randomBytes, createHash } from 'node:crypto';
-import pg from 'pg';
+import type { EntityManager } from '@mikro-orm/core';
 import { adminAuthMiddleware } from '../middleware/adminAuth.js';
 import { invalidateCachedKey, invalidateAllKeysForTenant } from '../auth.js';
 import { evictProvider } from '../providers/registry.js';
@@ -17,8 +17,7 @@ interface LoginBody {
  * Register admin routes
  * All routes except /v1/admin/auth/login require JWT authentication
  */
-export function registerAdminRoutes(fastify: FastifyInstance, pool: pg.Pool): void {
-  const adminService = new AdminService(pool);
+export function registerAdminRoutes(fastify: FastifyInstance, adminService: AdminService, em: EntityManager): void {
 
   // POST /v1/admin/auth/login — Admin login endpoint
   fastify.post<{ Body: LoginBody }>(
@@ -148,7 +147,7 @@ export function registerAdminRoutes(fastify: FastifyInstance, pool: pg.Pool): vo
 
     // If status changed to inactive, invalidate cache and evict provider
     if (status === 'inactive') {
-      await invalidateAllKeysForTenant(id, pool);
+      await invalidateAllKeysForTenant(id, em);
       evictProvider(id);
     }
 
@@ -168,7 +167,7 @@ export function registerAdminRoutes(fastify: FastifyInstance, pool: pg.Pool): vo
       }
 
       // Invalidate cache and evict provider before deletion
-      await invalidateAllKeysForTenant(id, pool);
+      await invalidateAllKeysForTenant(id, em);
       evictProvider(id);
 
       const deleted = await adminService.deleteTenant(id);

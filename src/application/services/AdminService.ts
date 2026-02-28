@@ -4,7 +4,7 @@
  */
 import { scrypt, timingSafeEqual } from 'node:crypto';
 import { promisify } from 'node:util';
-import pg from 'pg';
+import type { EntityManager } from '@mikro-orm/core';
 
 const scryptAsync = promisify(scrypt);
 
@@ -63,7 +63,13 @@ export interface ListTracesFilters {
 }
 
 export class AdminService {
-  constructor(private readonly pool: pg.Pool) {}
+  constructor(private readonly em: EntityManager) {}
+
+  private async rawQuery<T extends object>(sql: string, params: unknown[] = []): Promise<{ rows: T[] }> {
+    const knex = (this.em as any).getKnex();
+    const result = await knex.raw(sql, params);
+    return { rows: result.rows as T[] };
+  }
 
   // ── Auth ──────────────────────────────────────────────────────────────────
 
@@ -71,7 +77,7 @@ export class AdminService {
     username: string,
     password: string,
   ): Promise<{ id: string; username: string } | null> {
-    const result = await this.pool.query<{
+    const result = await this.rawQuery<{
       id: string;
       username: string;
       password_hash: string;
@@ -87,13 +93,13 @@ export class AdminService {
   }
 
   async updateAdminLastLogin(id: string): Promise<void> {
-    await this.pool.query('UPDATE admin_users SET last_login = now() WHERE id = $1', [id]);
+    await this.rawQuery('UPDATE admin_users SET last_login = now() WHERE id = $1', [id]);
   }
 
   // ── Tenants ───────────────────────────────────────────────────────────────
 
   async createTenant(name: string): Promise<TenantRow> {
-    const result = await this.pool.query<TenantRow>(
+    const result = await this.rawQuery<TenantRow>(
       'INSERT INTO tenants (name) VALUES ($1) RETURNING id, name, status, created_at, updated_at',
       [name],
     );
@@ -117,8 +123,8 @@ export class AdminService {
     params.push(limit, offset);
 
     const [tenants, countResult] = await Promise.all([
-      this.pool.query<TenantRow>(sql, params),
-      this.pool.query<{ count: string }>(
+      this.rawQuery<TenantRow>(sql, params),
+      this.rawQuery<{ count: string }>(
         status ? 'SELECT COUNT(*) FROM tenants WHERE status = $1' : 'SELECT COUNT(*) FROM tenants',
         status ? [status] : [],
       ),
@@ -131,7 +137,7 @@ export class AdminService {
   }
 
   async getTenant(id: string): Promise<TenantDetailRow | null> {
-    const result = await this.pool.query<TenantDetailRow>(
+    const result = await this.rawQuery<TenantDetailRow>(
       `SELECT
         t.id,
         t.name,
@@ -168,7 +174,7 @@ export class AdminService {
     updates.push(`updated_at = now()`);
     params.push(id);
 
-    const result = await this.pool.query<TenantRow>(
+    const result = await this.rawQuery<TenantRow>(
       `UPDATE tenants SET ${updates.join(', ')} WHERE id = $${paramIndex} RETURNING id, name, status, created_at, updated_at`,
       params,
     );
@@ -176,26 +182,26 @@ export class AdminService {
   }
 
   async deleteTenant(id: string): Promise<boolean> {
-    const result = await this.pool.query('DELETE FROM tenants WHERE id = $1 RETURNING id', [id]);
+    const result = await this.rawQuery('DELETE FROM tenants WHERE id = $1 RETURNING id', [id]);
     return result.rows.length > 0;
   }
 
   // ── Provider config ────────────────────────────────────────────────────────
 
   async tenantExists(id: string): Promise<boolean> {
-    const result = await this.pool.query('SELECT id FROM tenants WHERE id = $1', [id]);
+    const result = await this.rawQuery('SELECT id FROM tenants WHERE id = $1', [id]);
     return result.rows.length > 0;
   }
 
   async setProviderConfig(id: string, providerConfig: object): Promise<void> {
-    await this.pool.query(
+    await this.rawQuery(
       'UPDATE tenants SET provider_config = $1, updated_at = now() WHERE id = $2',
       [JSON.stringify(providerConfig), id],
     );
   }
 
   async clearProviderConfig(id: string): Promise<boolean> {
-    const result = await this.pool.query(
+    const result = await this.rawQuery(
       'UPDATE tenants SET provider_config = NULL, updated_at = now() WHERE id = $1 RETURNING id',
       [id],
     );
@@ -211,7 +217,7 @@ export class AdminService {
     keyPrefix: string,
     keyHash: string,
   ): Promise<{ id: string; name: string; key_prefix: string; status: string; created_at: string }> {
-    const result = await this.pool.query<{
+    const result = await this.rawQuery<{
       id: string;
       name: string;
       key_prefix: string;
@@ -227,7 +233,7 @@ export class AdminService {
   }
 
   async listApiKeys(tenantId: string): Promise<ApiKeyRow[]> {
-    const result = await this.pool.query<ApiKeyRow>(
+    const result = await this.rawQuery<ApiKeyRow>(
       `SELECT id, name, key_prefix, status, created_at, revoked_at
        FROM api_keys
        WHERE tenant_id = $1
@@ -238,7 +244,7 @@ export class AdminService {
   }
 
   async getApiKeyHash(keyId: string, tenantId: string): Promise<string | null> {
-    const result = await this.pool.query<{ key_hash: string }>(
+    const result = await this.rawQuery<{ key_hash: string }>(
       'SELECT key_hash FROM api_keys WHERE id = $1 AND tenant_id = $2',
       [keyId, tenantId],
     );
@@ -246,14 +252,14 @@ export class AdminService {
   }
 
   async hardDeleteApiKey(keyId: string, tenantId: string): Promise<void> {
-    await this.pool.query('DELETE FROM api_keys WHERE id = $1 AND tenant_id = $2', [
+    await this.rawQuery('DELETE FROM api_keys WHERE id = $1 AND tenant_id = $2', [
       keyId,
       tenantId,
     ]);
   }
 
   async revokeApiKey(keyId: string, tenantId: string): Promise<string | null> {
-    const result = await this.pool.query<{ key_hash: string }>(
+    const result = await this.rawQuery<{ key_hash: string }>(
       `UPDATE api_keys
        SET status = 'revoked', revoked_at = now()
        WHERE id = $1 AND tenant_id = $2
@@ -278,7 +284,7 @@ export class AdminService {
       whereClause = `WHERE created_at < $${params.push(cursor)}::timestamptz`;
     }
 
-    const result = await this.pool.query<TraceRow>(
+    const result = await this.rawQuery<TraceRow>(
       `SELECT id, tenant_id, model, provider, status_code, latency_ms,
               prompt_tokens, completion_tokens, ttfb_ms, gateway_overhead_ms, created_at
        FROM   traces

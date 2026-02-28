@@ -6,8 +6,11 @@
  * and snapshot summaries are encrypted at rest via encryptTraceBody /
  * decryptTraceBody from encryption.ts.
  */
-import pg from 'pg';
 import { encryptTraceBody, decryptTraceBody } from './encryption.js';
+
+interface DbClient {
+  query<T extends object = Record<string, unknown>>(sql: string, params?: unknown[]): Promise<{ rows: T[] }>;
+}
 
 export interface ChatMessage {
   role: string;
@@ -27,7 +30,7 @@ export const conversationManager = {
    * Returns the internal UUID.
    */
   async getOrCreatePartition(
-    db: pg.Pool,
+    db: DbClient,
     tenantId: string,
     externalId: string,
   ): Promise<{ id: string }> {
@@ -54,7 +57,7 @@ export const conversationManager = {
    * Updates last_active_at on existing conversations.
    */
   async getOrCreateConversation(
-    db: pg.Pool,
+    db: DbClient,
     tenantId: string,
     partitionId: string | null,
     externalId: string,
@@ -92,7 +95,7 @@ export const conversationManager = {
    * that have not yet been archived into a snapshot (snapshot_id IS NULL).
    */
   async loadContext(
-    db: pg.Pool,
+    db: DbClient,
     tenantId: string,
     conversationId: string,
   ): Promise<ConversationContext> {
@@ -162,7 +165,7 @@ export const conversationManager = {
    * Both messages are encrypted before storage.
    */
   async storeMessages(
-    db: pg.Pool,
+    db: DbClient,
     tenantId: string,
     conversationId: string,
     userContent: string,
@@ -198,7 +201,7 @@ export const conversationManager = {
    * Returns the new snapshot UUID.
    */
   async createSnapshot(
-    db: pg.Pool,
+    db: DbClient,
     tenantId: string,
     conversationId: string,
     summaryText: string,

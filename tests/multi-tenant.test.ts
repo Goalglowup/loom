@@ -16,6 +16,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { createHash } from 'node:crypto';
 import Fastify from 'fastify';
 import type { FastifyInstance } from 'fastify';
+import type { EntityManager } from '@mikro-orm/core';
 import { registerAuthMiddleware } from '../src/auth.js';
 import { encryptTraceBody } from '../src/encryption.js';
 
@@ -47,40 +48,44 @@ const HASH_B = sha256(TENANT_B.apiKey);
 // ── Mock pool factory ──────────────────────────────────────────────────────
 
 /**
- * Returns a fake pg.Pool whose query() resolves based on the key hash provided.
- * Simulates the api_keys + tenants JOIN the real auth middleware performs.
+ * Returns a fake EntityManager whose findOne() resolves based on the key hash.
+ * Simulates the ApiKey lookup that TenantService.loadByApiKey performs.
  */
-function buildMockPool(options: { inactiveTenantHash?: string } = {}) {
-  const queryFn = vi.fn().mockImplementation((_sql: string, params: unknown[]) => {
-    const keyHash = params?.[0] as string;
+function buildMockEm(options: { inactiveTenantHash?: string } = {}): EntityManager {
+  const findOne = vi.fn().mockImplementation(async (_Entity: any, where: any, _opts?: any) => {
+    const keyHash = where?.keyHash as string;
     if (keyHash === HASH_A) {
-      return Promise.resolve({
-        rows: [{ tenant_id: TENANT_A.id, tenant_name: TENANT_A.name, provider_config: null }],
-      });
+      return {
+        keyHash: HASH_A,
+        status: 'active',
+        agent: null,
+        tenant: { id: TENANT_A.id, name: TENANT_A.name, status: 'active', parentId: null, providerConfig: null, systemPrompt: null, skills: null, mcpEndpoints: null, availableModels: null },
+      };
     }
     if (keyHash === HASH_B) {
-      return Promise.resolve({
-        rows: [{ tenant_id: TENANT_B.id, tenant_name: TENANT_B.name, provider_config: null }],
-      });
+      return {
+        keyHash: HASH_B,
+        status: 'active',
+        agent: null,
+        tenant: { id: TENANT_B.id, name: TENANT_B.name, status: 'active', parentId: null, providerConfig: null, systemPrompt: null, skills: null, mcpEndpoints: null, availableModels: null },
+      };
     }
-    // Inactive/deleted tenants: DB query returns 0 rows (filtered at DB level)
     if (options.inactiveTenantHash && keyHash === options.inactiveTenantHash) {
-      return Promise.resolve({ rows: [] });
+      // Return null to simulate inactive/deleted tenant key not found
+      return null;
     }
-    // Unknown key → not found
-    return Promise.resolve({ rows: [] });
+    return null;
   });
-
-  return { query: queryFn } as unknown as import('pg').Pool;
+  return { findOne, find: vi.fn().mockResolvedValue([]) } as unknown as EntityManager;
 }
 
 /**
  * Build a minimal Fastify app with auth middleware and an echo endpoint
  * that returns the resolved tenant context.
  */
-async function buildApp(pool: import('pg').Pool): Promise<FastifyInstance> {
+async function buildApp(em: EntityManager): Promise<FastifyInstance> {
   const app = Fastify({ logger: false });
-  registerAuthMiddleware(app, pool);
+  registerAuthMiddleware(app, em);
 
   app.post('/v1/chat/completions', async (req) => {
     return { tenant: req.tenant };
@@ -97,7 +102,7 @@ describe('H4: Multi-Tenant Isolation', () => {
 
   beforeEach(async () => {
     process.env.ENCRYPTION_MASTER_KEY = TEST_MASTER_KEY;
-    app = await buildApp(buildMockPool());
+    app = await buildApp(buildMockEm());
   });
 
   afterEach(async () => {
@@ -176,7 +181,7 @@ describe('H4: Multi-Tenant Isolation', () => {
     // TODO: differentiate 401 vs 403 once the auth middleware inspects tenant.active flag.
     const inactiveKey = 'sk-inactive-tenant-key-zzzzzzzzz';
     const inactiveHash = sha256(inactiveKey);
-    const appWithInactive = await buildApp(buildMockPool({ inactiveTenantHash: inactiveHash }));
+    const appWithInactive = await buildApp(buildMockEm({ inactiveTenantHash: inactiveHash }));
 
     const res = await appWithInactive.inject({
       method: 'POST',

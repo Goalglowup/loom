@@ -1,24 +1,12 @@
-import pg from 'pg';
-
 /**
- * Shared PostgreSQL connection pool.
- * Reads DATABASE_URL from the environment; falls back to local dev defaults.
+ * Database query helper — thin shim over the ORM's knex instance.
+ * analytics.ts, tracing.ts, and dashboard routes use this for raw SQL.
+ * Tests mock this module via vi.mock('../src/db.js').
  */
-const pool = new pg.Pool({
-  connectionString: process.env.DATABASE_URL ?? 'postgres://loom:loom_dev_password@localhost:5432/loom',
-  max: 10,
-});
+import { orm } from './orm.js';
 
-/**
- * Execute a parameterised SQL statement against the shared pool.
- */
-export async function query(sql: string, params?: unknown[]): Promise<pg.QueryResult> {
-  return pool.query(sql, params as any[]);
+export async function query(sql: string, params?: unknown[]): Promise<{ rows: any[] }> {
+  const knex = (orm as any).em.getKnex();
+  const result = await knex.raw(sql, params ?? []);
+  return { rows: result.rows };
 }
-
-export { pool };
-
-// Drain the pool cleanly on SIGTERM so in-flight writes can complete.
-process.on('SIGTERM', () => {
-  pool.end().finally(() => process.exit(0));
-});

@@ -1,5 +1,4 @@
 import { FastifyInstance } from 'fastify';
-import pg from 'pg';
 import { registerPortalAuthMiddleware } from '../middleware/portalAuth.js';
 import { invalidateCachedKey } from '../auth.js';
 import type { TenantContext } from '../auth.js';
@@ -8,11 +7,10 @@ import { traceRecorder } from '../tracing.js';
 import { evictProvider, getProviderForTenant } from '../providers/registry.js';
 import { applyAgentToRequest } from '../agent.js';
 import { getAnalyticsSummary, getTimeseriesMetrics, getModelBreakdown } from '../analytics.js';
-import { conversationManager } from '../conversations.js';
 import { PortalService } from '../application/services/PortalService.js';
+import { ConversationManagementService } from '../application/services/ConversationManagementService.js';
 
-export function registerPortalRoutes(fastify: FastifyInstance, pool: pg.Pool): void {
-  const svc = new PortalService(pool);
+export function registerPortalRoutes(fastify: FastifyInstance, svc: PortalService, conversationSvc: ConversationManagementService): void {
   const PORTAL_BASE_URL = process.env.PORTAL_BASE_URL ?? 'http://localhost:3000';
 
   // ── Helpers ──────────────────────────────────────────────────────────────
@@ -905,15 +903,13 @@ export function registerPortalRoutes(fastify: FastifyInstance, pool: pg.Pool): v
         const incomingConversationId = body.conversation_id ?? crypto.randomUUID();
         try {
           const partitionId = body.partition_id
-            ? (await conversationManager.getOrCreatePartition(
-                pool,
+            ? (await conversationSvc.getOrCreatePartition(
                 tenantCtx.tenantId,
                 body.partition_id,
               )).id
             : null;
 
-          const conversationUUID = (await conversationManager.getOrCreateConversation(
-            pool,
+          const conversationUUID = (await conversationSvc.getOrCreateConversation(
             tenantCtx.tenantId,
             partitionId,
             incomingConversationId,
@@ -921,8 +917,8 @@ export function registerPortalRoutes(fastify: FastifyInstance, pool: pg.Pool): v
           )).id;
           resolvedConversationId = incomingConversationId;
 
-          const ctx = await conversationManager.loadContext(pool, tenantCtx.tenantId, conversationUUID);
-          const historyMessages = conversationManager.buildInjectionMessages(ctx);
+          const ctx = await conversationSvc.loadContext(tenantCtx.tenantId, conversationUUID);
+          const historyMessages = conversationSvc.buildInjectionMessages(ctx);
           if (historyMessages.length > 0) {
             effectiveMessages = [...historyMessages, ...effectiveMessages];
           }
@@ -976,14 +972,12 @@ export function registerPortalRoutes(fastify: FastifyInstance, pool: pg.Pool): v
 
         if (resolvedConversationId) {
           const partitionId = body.partition_id
-            ? (await conversationManager.getOrCreatePartition(
-                pool,
+            ? (await conversationSvc.getOrCreatePartition(
                 tenantCtx.tenantId,
                 body.partition_id,
               )).id
             : null;
-          const conversationUUID = (await conversationManager.getOrCreateConversation(
-            pool,
+          const conversationUUID = (await conversationSvc.getOrCreateConversation(
             tenantCtx.tenantId,
             partitionId,
             resolvedConversationId,
@@ -991,8 +985,8 @@ export function registerPortalRoutes(fastify: FastifyInstance, pool: pg.Pool): v
           )).id;
           const userContent = (body.messages[body.messages.length - 1] as any)?.content as string ?? '';
           const assistantContent = choice.message.content ?? '';
-          conversationManager.storeMessages(
-            pool, tenantCtx.tenantId, conversationUUID, userContent, assistantContent, null, null,
+          conversationSvc.storeMessages(
+            tenantCtx.tenantId, conversationUUID, userContent, assistantContent, null, null,
           ).catch((err) => fastify.log.warn({ err }, 'Failed to store sandbox conversation messages'));
         }
 
