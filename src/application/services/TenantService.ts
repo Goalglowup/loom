@@ -1,0 +1,131 @@
+import { createHash } from 'node:crypto';
+import type { EntityManager } from '@mikro-orm/core';
+import { ApiKey } from '../../domain/entities/ApiKey.js';
+import { Tenant } from '../../domain/entities/Tenant.js';
+import { Agent } from '../../domain/entities/Agent.js';
+import type {
+  TenantContext,
+  TenantProviderConfig,
+  MergePolicy,
+  AgentConfig,
+} from '../../auth.js';
+
+function resolveArrayChain(arrays: any[][], nameOf: (item: any) => string | undefined): any[] {
+  const seen = new Set<string>();
+  const result: any[] = [];
+  for (const arr of arrays) {
+    for (const item of arr) {
+      const name = nameOf(item);
+      if (name && !seen.has(name)) {
+        seen.add(name);
+        result.push(item);
+      } else if (!name) {
+        result.push(item);
+      }
+    }
+  }
+  return result;
+}
+
+export class TenantService {
+  constructor(private readonly em: EntityManager) {}
+
+  async loadByApiKey(rawKey: string): Promise<TenantContext> {
+    const keyHash = createHash('sha256').update(rawKey).digest('hex');
+
+    const apiKey = await this.em.findOne(
+      ApiKey,
+      { keyHash, status: 'active' },
+      { populate: ['agent', 'tenant'] },
+    );
+
+    if (!apiKey) throw new Error('Invalid API key');
+
+    const tenant = apiKey.tenant as Tenant;
+    if (tenant.status !== 'active') throw new Error('Tenant is not active');
+
+    const agent = apiKey.agent as Agent;
+
+    // Walk the parent chain if needed
+    type ChainEntry = {
+      providerConfig: TenantProviderConfig | null;
+      systemPrompt: string | null;
+      skills: any[] | null;
+      mcpEndpoints: any[] | null;
+    };
+
+    const chain: ChainEntry[] = [
+      {
+        providerConfig: agent?.providerConfig ?? null,
+        systemPrompt: agent?.systemPrompt ?? null,
+        skills: agent?.skills ?? null,
+        mcpEndpoints: agent?.mcpEndpoints ?? null,
+      },
+      {
+        providerConfig: tenant.providerConfig,
+        systemPrompt: tenant.systemPrompt,
+        skills: tenant.skills,
+        mcpEndpoints: tenant.mcpEndpoints,
+      },
+    ];
+
+    // Walk parent chain
+    if (tenant.parentId) {
+      let currentParentId: string | null = tenant.parentId;
+      let hops = 0;
+      while (currentParentId && hops < 10) {
+        const parent: Tenant | null = await this.em.findOne(Tenant, { id: currentParentId });
+        if (!parent) break;
+        chain.push({
+          providerConfig: parent.providerConfig,
+          systemPrompt: parent.systemPrompt,
+          skills: parent.skills,
+          mcpEndpoints: parent.mcpEndpoints,
+        });
+        currentParentId = parent.parentId;
+        hops++;
+      }
+    }
+
+    const resolvedProviderConfig =
+      chain.find((c) => c.providerConfig != null)?.providerConfig ?? undefined;
+    const resolvedSystemPrompt =
+      chain.find((c) => c.systemPrompt != null)?.systemPrompt ?? undefined;
+
+    const resolvedSkills = resolveArrayChain(
+      chain.map((c) => c.skills).filter(Boolean) as any[][],
+      (item) => item?.function?.name ?? item?.name,
+    );
+
+    const resolvedMcpEndpoints = resolveArrayChain(
+      chain.map((c) => c.mcpEndpoints).filter(Boolean) as any[][],
+      (item) => item?.name,
+    );
+
+    const mergePolicies: MergePolicy = agent?.mergePolicies ?? {
+      system_prompt: 'prepend',
+      skills: 'merge',
+    };
+
+    const agentConfig: AgentConfig = {
+      conversations_enabled: agent?.conversationsEnabled ?? false,
+      conversation_token_limit: agent?.conversationTokenLimit ?? 4000,
+      conversation_summary_model: agent?.conversationSummaryModel ?? null,
+    };
+
+    return {
+      tenantId: tenant.id,
+      name: tenant.name,
+      agentId: agent?.id ?? undefined,
+      providerConfig: resolvedProviderConfig,
+      agentSystemPrompt: agent?.systemPrompt ?? undefined,
+      agentSkills: agent?.skills ?? undefined,
+      agentMcpEndpoints: agent?.mcpEndpoints ?? undefined,
+      mergePolicies,
+      resolvedSystemPrompt,
+      resolvedSkills: resolvedSkills.length ? resolvedSkills : undefined,
+      resolvedMcpEndpoints: resolvedMcpEndpoints.length ? resolvedMcpEndpoints : undefined,
+      agentConfig,
+    };
+  }
+}
