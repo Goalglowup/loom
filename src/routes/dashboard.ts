@@ -1,13 +1,12 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
-import { query } from '../db.js';
-import { getAnalyticsSummary, getTimeseriesMetrics } from '../analytics.js';
+import type { DashboardService } from '../application/services/DashboardService.js';
 
 /**
  * Register dashboard REST endpoints on the given Fastify instance.
  * All routes rely on the global authMiddleware (registered in src/index.ts)
  * to populate request.tenant before these handlers run.
  */
-export async function registerDashboardRoutes(fastify: FastifyInstance): Promise<void> {
+export async function registerDashboardRoutes(fastify: FastifyInstance, svc: DashboardService): Promise<void> {
   /**
    * GET /v1/traces?limit=50&cursor={created_at_ISO}
    *
@@ -26,37 +25,8 @@ export async function registerDashboardRoutes(fastify: FastifyInstance): Promise
     const limit = Math.min(parseInt(qs.limit ?? '50', 10), 200);
     const cursor = qs.cursor;
 
-    let result;
-    if (cursor) {
-      result = await query(
-        `SELECT id, tenant_id, model, provider, status_code, latency_ms,
-                prompt_tokens, completion_tokens, ttfb_ms, gateway_overhead_ms, created_at
-         FROM   traces
-         WHERE  tenant_id = $1
-           AND  created_at < $2::timestamptz
-         ORDER  BY created_at DESC
-         LIMIT  $3`,
-        [tenant.tenantId, cursor, limit],
-      );
-    } else {
-      result = await query(
-        `SELECT id, tenant_id, model, provider, status_code, latency_ms,
-                prompt_tokens, completion_tokens, ttfb_ms, gateway_overhead_ms, created_at
-         FROM   traces
-         WHERE  tenant_id = $1
-         ORDER  BY created_at DESC
-         LIMIT  $2`,
-        [tenant.tenantId, limit],
-      );
-    }
-
-    const traces = result.rows;
-    const nextCursor =
-      traces.length === limit
-        ? (traces[traces.length - 1].created_at as Date).toISOString()
-        : null;
-
-    return reply.send({ traces, nextCursor });
+    const result = await svc.getTraces(tenant.tenantId, limit, cursor);
+    return reply.send(result);
   });
 
   /**
@@ -68,7 +38,7 @@ export async function registerDashboardRoutes(fastify: FastifyInstance): Promise
     const qs = request.query as Record<string, string>;
     const windowHours = parseInt(qs.window ?? '24', 10);
 
-    const summary = await getAnalyticsSummary(tenant.tenantId, windowHours);
+    const summary = await svc.getAnalyticsSummary(tenant.tenantId, windowHours);
     return reply.send(summary);
   });
 
@@ -82,7 +52,7 @@ export async function registerDashboardRoutes(fastify: FastifyInstance): Promise
     const windowHours  = parseInt(qs.window ?? '24', 10);
     const bucketMinutes = parseInt(qs.bucket ?? '60', 10);
 
-    const timeseries = await getTimeseriesMetrics(tenant.tenantId, windowHours, bucketMinutes);
+    const timeseries = await svc.getTimeseriesMetrics(tenant.tenantId, windowHours, bucketMinutes);
     return reply.send(timeseries);
   });
 }

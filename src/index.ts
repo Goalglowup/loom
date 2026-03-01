@@ -17,6 +17,7 @@ import { PortalService } from './application/services/PortalService.js';
 import { AdminService } from './application/services/AdminService.js';
 import { UserManagementService } from './application/services/UserManagementService.js';
 import { TenantManagementService } from './application/services/TenantManagementService.js';
+import { DashboardService } from './application/services/DashboardService.js';
 import { randomUUID } from 'node:crypto';
 import { registerDashboardRoutes } from './routes/dashboard.js';
 import { registerAdminRoutes } from './routes/admin.js';
@@ -51,6 +52,7 @@ const start = async () => {
     const conversationSvc = new ConversationManagementService(em);
     const portalSvc = new PortalService(em);
     const adminSvc = new AdminService(em);
+    const dashboardSvc = new DashboardService(em);
     const userMgmtSvc = new UserManagementService(em);
     const tenantMgmtSvc = new TenantManagementService(em);
 
@@ -103,7 +105,9 @@ const start = async () => {
     });
 
     // Register dashboard API routes (/v1/traces, /v1/analytics/*)
-    fastify.register(registerDashboardRoutes);
+    fastify.register((instance, opts, done) => {
+      registerDashboardRoutes(instance, dashboardSvc).then(() => done()).catch(done);
+    });
 
     // Register admin routes (/v1/admin/*)
     fastify.register((instance, opts, done) => {
