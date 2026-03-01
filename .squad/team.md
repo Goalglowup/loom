@@ -17,5 +17,7 @@
 | Fenster | Backend Dev | Gateway proxy, streaming, trace recording, APIs, database | 🔧 Backend |
 | McManus | Frontend Dev | Observability dashboard, React, UI components | ⚛️ Frontend |
 | Hockney | Tester | Integration tests, streaming validation, quality assurance | 🧪 Tester |
+| Redfoot | Data Engineer | Analytics pipelines, time-series queries, aggregation, observability metrics, dashboard data contracts | 📊 Data Engineer |
+| Verbal | Domain Model Expert | Peter Coad Color Modeling, DDD, aggregate roots, domain events, ubiquitous language | 🏛️ Domain Expert |
 | Kobayashi | AI Expert | LLM integration, model routing, prompt engineering, token management, LLM observability | 🤖 AI Expert |
 | Scribe | Session Logger | Memory, decisions, session logs | 📋 Scribe |

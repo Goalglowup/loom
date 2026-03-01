@@ -10,6 +10,13 @@
 | Multi-tenant architecture, database schema | Fenster | Backend owns data layer |
 | Observability, metrics display | McManus | Frontend owns visualization layer |
 | Integration testing, streaming validation | Hockney | Tester validates end-to-end flows |
+| Analytics pipelines, aggregation, time-series queries | Redfoot | Data Engineer owns analytics layer above raw trace storage |
+| Token/cost/latency analytics, per-tenant usage metrics | Redfoot | Data Engineer aggregates observability signal |
+| Dashboard data contracts, analytics data shapes | Redfoot | Data Engineer defines what McManus visualizes |
+| Observability metrics definition, granularity strategy | Redfoot | Data Engineer owns what gets measured and how |
+| Domain modeling, entity definitions, aggregate boundaries | Verbal | Domain Expert owns the domain model |
+| Color Modeling archetypes (Moment-Interval, Role, Catalog-Entry, Party/Place/Thing) | Verbal | Domain Expert applies Peter Coad's methodology |
+| Value objects vs entities, domain events, ubiquitous language | Verbal | Domain Expert defines domain vocabulary and invariants |
 | AI provider integration, OpenAI/Anthropic/Azure adapters | Kobayashi | AI Expert owns provider-side implementation |
 | Prompt engineering, system messages, context strategies | Kobayashi | AI Expert owns LLM input design |
 | Model routing, cost/latency/capability tradeoffs | Kobayashi | AI Expert owns model selection logic |

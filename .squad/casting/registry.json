@@ -33,6 +33,22 @@
       "status": "active"
     },
     {
+      "persistent_name": "Redfoot",
+      "universe": "the-usual-suspects",
+      "role": "Data Engineer",
+      "created_at": "2026-03-01T20:21:30.727Z",
+      "legacy_named": false,
+      "status": "active"
+    },
+    {
+      "persistent_name": "Verbal",
+      "universe": "the-usual-suspects",
+      "role": "Domain Model Expert",
+      "created_at": "2026-03-01T20:21:30.727Z",
+      "legacy_named": false,
+      "status": "active"
+    },
+    {
       "persistent_name": "Kobayashi",
       "universe": "the-usual-suspects",
       "role": "AI Expert",
