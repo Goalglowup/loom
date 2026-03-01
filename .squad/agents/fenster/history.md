@@ -1081,3 +1081,54 @@ These remain because they're still called from `portal.ts`:
 - PortalService is now focused on: profiles, traces, invites (read-only), agents (read-only), partitions, conversations
 
 **Status:** ✅ Complete — Phase 4 done. PortalService successfully slimmed down by removing all migrated methods.
+
+---
+
+### 2026-02-27: User.create() Factory — Domain Invariant Enforcement
+
+**Task:** Implement domain invariant where User creation ALWAYS creates a personal Tenant, owner TenantMembership, and default Agent together.
+
+**Implementation:**
+- Added `User.create(email, passwordHash, tenantName?)` static factory to `src/domain/entities/User.ts`
+- Factory returns `{ user, tenant, membership, defaultAgent }` — all entities ready for persistence
+- Updated `UserManagementService.createUser` to use factory (reduced from 48 lines to 6 lines)
+- Updated `UserManagementService.acceptInvite` to use factory for new users (invited users now get personal tenant too)
+- Used parameterless `new Entity()` pattern (MikroORM requirement)
+- Imports: User imports Tenant/TenantMembership/Agent (no circular deps)
+
+**Learnings:**
+- **Domain invariants belong in domain entities, not service layer**: Moving the creation logic to User.create() makes the invariant explicit and impossible to violate
+- **Static factories > constructors for MikroORM entities**: Entities need parameterless constructors for ORM hydration, but factories can accept params
+- **Default tenant name uses full email**: `${email}'s Workspace` (not just email prefix) to match existing behavior
+- **Users created via invite also get personal tenant**: Respects the invariant universally (signup AND invite flows)
+- **Service layer simplification**: UserManagementService went from constructing 4 entities manually to calling one factory method
+- **Return object pattern**: Returning `{ user, tenant, membership, defaultAgent }` is cleaner than out-params or aggregate classes
+
+**Verification:**
+- ✅ TypeScript: `npx tsc --noEmit` — passes
+- ✅ Tests: `npm test` — all 381 tests pass
+- Factory creates User with lowercased email, personal Tenant (status='active'), owner TenantMembership, and default Agent with standard merge policies
+- Both signup and invite flows now consistently create the full entity graph
+
+**Key Pattern:**
+```typescript
+// Domain: encapsulate invariant
+static create(email, passwordHash, tenantName?) {
+  const user = new User();
+  const tenant = new Tenant();
+  const membership = new TenantMembership();
+  const defaultAgent = new Agent();
+  // ... initialize all fields ...
+  return { user, tenant, membership, defaultAgent };
+}
+
+// Service: call factory + persist
+const { user, tenant, membership, defaultAgent } = User.create(...);
+em.persist(user);
+em.persist(tenant);
+em.persist(membership);
+em.persist(defaultAgent);
+await em.flush();
+```
+
+**Status:** ✅ Complete — User creation invariant now enforced at domain level.

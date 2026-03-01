@@ -44,58 +44,15 @@ export class UserManagementService {
     }
 
     const passwordHash = await hashPassword(dto.password);
+    const normalizedEmail = dto.email.toLowerCase();
+    const tenantName = dto.tenantName?.trim() || undefined;
 
-    const user = new User();
-    user.id = randomUUID();
-    user.email = dto.email.toLowerCase();
-    user.passwordHash = passwordHash;
-    user.createdAt = new Date();
-    user.lastLogin = null;
-
-    const tenant = new Tenant();
-    tenant.id = randomUUID();
-    tenant.name = (dto.tenantName ?? `${dto.email}'s Workspace`).trim();
-    tenant.parentId = null;
-    tenant.providerConfig = null;
-    tenant.systemPrompt = null;
-    tenant.skills = null;
-    tenant.mcpEndpoints = null;
-    tenant.status = 'active';
-    tenant.availableModels = null;
-    tenant.updatedAt = null;
-    tenant.createdAt = new Date();
-    tenant.agents = [];
-    tenant.members = [];
-    tenant.invites = [];
-
-    const membership = new TenantMembership();
-    membership.id = randomUUID();
-    membership.user = user;
-    membership.tenant = tenant;
-    membership.role = 'owner';
-    membership.joinedAt = new Date();
-
-    // Create default agent for the tenant
-    const agent = new Agent();
-    agent.id = randomUUID();
-    agent.tenant = tenant;
-    agent.name = 'Default';
-    agent.providerConfig = null;
-    agent.systemPrompt = null;
-    agent.skills = null;
-    agent.mcpEndpoints = null;
-    agent.mergePolicies = { system_prompt: 'prepend', skills: 'merge', mcp_endpoints: 'merge' };
-    agent.availableModels = null;
-    agent.conversationsEnabled = false;
-    agent.conversationTokenLimit = 0;
-    agent.conversationSummaryModel = null;
-    agent.createdAt = new Date();
-    agent.updatedAt = null;
+    const { user, tenant, membership, defaultAgent } = User.create(normalizedEmail, passwordHash, tenantName);
 
     this.em.persist(user);
     this.em.persist(tenant);
     this.em.persist(membership);
-    this.em.persist(agent);
+    this.em.persist(defaultAgent);
     await this.em.flush();
 
     const token = signToken({ sub: user.id, tenantId: tenant.id, role: 'owner' });
@@ -178,13 +135,15 @@ export class UserManagementService {
 
     if (!user) {
       const passwordHash = await hashPassword(dto.password);
-      user = new User();
-      user.id = randomUUID();
-      user.email = dto.email.toLowerCase();
-      user.passwordHash = passwordHash;
-      user.createdAt = new Date();
-      user.lastLogin = null;
+      const normalizedEmail = dto.email.toLowerCase();
+      const { user: newUser, tenant: personalTenant, membership: personalMembership, defaultAgent: personalAgent } = 
+        User.create(normalizedEmail, passwordHash);
+      
+      user = newUser;
       this.em.persist(user);
+      this.em.persist(personalTenant);
+      this.em.persist(personalMembership);
+      this.em.persist(personalAgent);
     }
 
     // Check for existing membership
