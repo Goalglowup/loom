@@ -1,6 +1,5 @@
 import { randomUUID } from 'node:crypto';
 import { Tenant } from './Tenant.js';
-import { Agent } from './Agent.js';
 
 export class User {
   id!: string;
@@ -9,24 +8,20 @@ export class User {
   createdAt!: Date;
   lastLogin!: Date | null;
 
+  /** Set during construction; undefined after ORM hydration (not an ORM column). */
+  tenant?: Tenant;
+
   /**
    * Domain invariant: every User has a default personal Tenant and owner TenantMembership.
    */
-  static create(
-    email: string,
-    passwordHash: string,
-    tenantName?: string,
-  ): { user: User; tenant: Tenant } {
-    const user = new User();
-    user.id = randomUUID();
-    user.email = email.toLowerCase();
-    user.passwordHash = passwordHash;
-    user.createdAt = new Date();
-    user.lastLogin = null;
+  constructor(email: string, passwordHash: string, tenantName?: string) {
+    this.id = randomUUID();
+    this.email = email.toLowerCase();
+    this.passwordHash = passwordHash;
+    this.createdAt = new Date();
+    this.lastLogin = null;
 
-    const tenant = new Tenant(user, tenantName ?? `${email.split('@')[0]}'s Workspace`);
-    tenant.createAgent('Default');
-
-    return { user, tenant };
+    this.tenant = new Tenant(this, tenantName ?? `${email.split('@')[0]}'s Workspace`);
+    this.tenant.createAgent('Default');
   }
 }

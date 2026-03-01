@@ -70,14 +70,14 @@ function makeAgent(tenant: Tenant, overrides: Partial<Agent> = {}): Agent {
 }
 
 function makeUser(overrides: Partial<User> = {}): User {
-  const u = new User();
-  u.id = 'user-1';
-  u.email = 'test@example.com';
-  u.passwordHash = 'hash';
-  u.createdAt = new Date();
-  u.lastLogin = null;
-  Object.assign(u, overrides);
-  return u;
+  return Object.assign(Object.create(User.prototype) as User, {
+    id: 'user-1',
+    email: 'test@example.com',
+    passwordHash: 'hash',
+    createdAt: new Date(),
+    lastLogin: null,
+    ...overrides,
+  });
 }
 
 // ─── UserManagementService ────────────────────────────────────────────────────

@@ -46,7 +46,8 @@ export class UserManagementService {
     const normalizedEmail = dto.email.toLowerCase();
     const tenantName = dto.tenantName?.trim() || undefined;
 
-    const { user, tenant } = User.create(normalizedEmail, passwordHash, tenantName);
+    const user = new User(normalizedEmail, passwordHash, tenantName);
+    const tenant = user.tenant!;
 
     this.em.persist(user);
     this.em.persist(tenant);
@@ -133,12 +134,9 @@ export class UserManagementService {
     if (!user) {
       const passwordHash = await hashPassword(dto.password);
       const normalizedEmail = dto.email.toLowerCase();
-      const { user: newUser, tenant: personalTenant } = 
-        User.create(normalizedEmail, passwordHash);
-      
-      user = newUser;
+      user = new User(normalizedEmail, passwordHash);
       this.em.persist(user);
-      this.em.persist(personalTenant);
+      this.em.persist(user.tenant!);
     }
 
     // Check for existing membership
