@@ -1427,3 +1427,326 @@ Consolidate onto `jsonwebtoken` directly, with a shared `signJwt`/`verifyJwt` ut
 - 401 error messages unified to `{ error: 'Unauthorized' }` (no longer distinguishes missing header from invalid token)
 - `ADMIN_JWT_SECRET` and `PORTAL_JWT_SECRET` remain as separate env vars
 - `request.adminUser` and `request.portalUser` shapes unchanged
+# Decision: GitHub Issue Backlog Created
+
+**Date:** 2026-02-27  
+**Author:** Keaton (Lead)
+
+## Summary
+
+A full GitHub issue backlog has been created for Loom at `Goalglowup/loom`.
+
+## Details
+
+- **10 epics** created (issues #18–#27), labeled `epic`, covering all planned Phase 2 and Phase 3 work areas
+- **27 stories** created (issues #28–#54), labeled `story`, written from user POV with acceptance criteria and dev task checkboxes
+- All epic bodies updated with links to their constituent stories
+- Stories span: Admin Dashboard, Cost Management, Error Analytics, Agent Analytics, Security & Compliance, Streaming/MCP, Developer Experience, Multi-Tenant Management, Conversation Management, Provider Management
+
+## Phase Distribution
+- Phase 1 (Admin Dashboard): 3 stories
+- Phase 2: 21 stories
+- Phase 3: 3 stories (5.3, 8.2, 9.3)
+# Analytics Recommendations for Loom Gateway
+
+**By:** Redfoot (Data Engineer)  
+**Date:** 2026-03-01  
+**Status:** Proposed  
+
+## Context
+
+Loom users fall into distinct personas with different analytics needs:
+- **Tenant Operators** (managing costs, monitoring usage patterns, forecasting spend)
+- **Developers** (debugging failures, optimizing performance, understanding bottlenecks)
+- **Product Teams** (tracking adoption, feature usage, user behavior)
+- **Finance Teams** (cost attribution, budget tracking, chargeback)
+- **Platform Admins** (system health, capacity planning, abuse detection)
+
+Current analytics provide foundational metrics (requests, tokens, cost, latency, errors, model breakdown, time-series). The following recommendations extend this foundation.
+
+---
+
+## Priority 1: Cost Management & Attribution
+
+### 1.1 Cost Breakdown by Dimension
+**What:** Multi-dimensional cost views beyond just model breakdown  
+**Why:** Different orgs need to attribute costs differently (by team, project, environment, user)  
+**Analytics:**
+- Cost by agent (agent-level attribution for chargeback)
+- Cost by API key (which keys are driving spend?)
+- Cost by user metadata (if request includes user ID in metadata/tags)
+- Cost by endpoint pattern (chat vs embeddings vs completions)
+- Cost by tenant hierarchy (subtenant rollups already exist, but surfacing total vs. per-child is valuable)
+
+**Implementation:** Group by `agent_id`, join to `api_keys` table, extract metadata from `request_body` JSONB.
+
+### 1.2 Cost Forecasting & Budget Alerts
+**What:** Projected monthly cost based on current run rate  
+**Why:** Prevent bill shock; enable proactive budget management  
+**Analytics:**
+- Current month spend vs. same period last month (growth rate)
+- Projected end-of-month cost (linear extrapolation from daily average)
+- Day-over-day and week-over-week cost trends
+- Budget burn rate (if budget configured per tenant/agent)
+
+**Implementation:** Simple linear projection: `(total_cost_to_date / days_elapsed) * days_in_month`. Optionally store budget thresholds in tenant settings.
+
+### 1.3 Token Efficiency Metrics
+**What:** Token usage patterns that highlight waste or optimization opportunities  
+**Why:** High token counts = high costs; identifying inefficiencies saves money  
+**Analytics:**
+- Average tokens per request by agent (which agents are verbose?)
+- Prompt tokens vs completion tokens ratio (are prompts too long?)
+- Requests with unusually high token counts (outlier detection: >95th percentile)
+- Token usage by time of day (batch workloads vs. interactive)
+
+**Implementation:** Percentile queries on `prompt_tokens`, `completion_tokens`, `total_tokens`. Flag traces where `prompt_tokens` dominates (may indicate overly verbose system prompts).
+
+---
+
+## Priority 2: Performance & Reliability
+
+### 2.1 Error Analytics
+**What:** Detailed error breakdowns beyond aggregate error rate  
+**Why:** Current `error_rate` is a single number; operators need actionable diagnostics  
+**Analytics:**
+- Errors by status code (400 vs 429 vs 500 vs 503)
+- Errors by model (some models more flaky than others?)
+- Errors by provider (provider reliability comparison)
+- Error messages clustering (extract common error patterns from `response_body`)
+- Time-to-recovery after error spike
+
+**Implementation:** Group by `status_code`, extract error messages from `response_body.error.message`, pattern matching for common errors (rate limits, timeouts, invalid requests).
+
+### 2.2 Latency Distribution & Outliers
+**What:** Beyond p95/p99, show full latency distribution and outlier identification  
+**Why:** p95/p99 hide the long tail; outliers indicate systemic issues  
+**Analytics:**
+- Latency histogram buckets (<100ms, 100-500ms, 500ms-1s, 1-5s, >5s)
+- Slowest requests (top 10 by latency, with model/provider/agent context)
+- Latency by model and provider (comparative performance analysis)
+- Latency degradation trends (is performance getting worse over time?)
+
+**Implementation:** Bucket `latency_ms` into ranges, `ORDER BY latency_ms DESC LIMIT 10` for outliers, join to agents/models for context.
+
+### 2.3 Gateway Overhead Analysis
+**What:** Deep dive into `gateway_overhead_ms` and `ttfb_ms`  
+**Why:** High overhead suggests gateway bottlenecks (auth, MCP routing, encryption)  
+**Analytics:**
+- Overhead by agent (do certain agents have expensive MCP pipelines?)
+- Overhead distribution (histogram)
+- Overhead trends over time (is overhead increasing as traffic grows?)
+- TTFB by provider (provider comparison for first-byte latency)
+
+**Implementation:** Already have `gateway_overhead_ms` and `ttfb_ms` in traces; aggregate by agent, provider, time window.
+
+### 2.4 Streaming vs Non-Streaming Performance
+**What:** Comparative analytics for streaming vs. JSON responses  
+**Why:** Streaming has different performance characteristics; users need visibility  
+**Analytics:**
+- Streaming adoption rate (% of requests with `stream: true`)
+- TTFB comparison (streaming should be faster to first token)
+- Total latency comparison (streaming may have higher total latency due to buffering)
+- Error rate comparison (streaming vs non-streaming)
+
+**Implementation:** Detect streaming via `request_body.stream`, split metrics by this flag.
+
+---
+
+## Priority 3: Usage Patterns & Adoption
+
+### 3.1 Agent Analytics
+**What:** Per-agent usage, performance, and cost metrics  
+**Why:** Agents are first-class entities; operators need agent-level visibility  
+**Analytics:**
+- Requests per agent (which agents are most active?)
+- Cost per agent (for chargeback to teams)
+- Agent error rates (which agents misconfigured?)
+- Agent latency comparison
+- Agent adoption trends (new agents over time, agent churn)
+
+**Implementation:** Group by `traces.agent_id`, join to `agents` table for metadata.
+
+### 3.2 API Key Analytics
+**What:** Per-API-key usage and security monitoring  
+**Why:** API keys are access control boundary; need usage tracking and abuse detection  
+**Analytics:**
+- Requests per API key (which keys are most active?)
+- API key activity timeline (first seen, last seen, gaps)
+- Anomalous API key behavior (sudden spike in usage, new models/providers)
+- Inactive API keys (candidates for rotation/revocation)
+
+**Implementation:** Join traces to `api_keys` via `agent_id`, group by `api_keys.id`. Detect anomalies via stddev from historical mean.
+
+### 3.3 Provider & Model Adoption
+**What:** Trends in provider/model usage over time  
+**Why:** Understand migration patterns (e.g., GPT-4 → GPT-4o → Claude), provider diversification  
+**Analytics:**
+- Provider mix over time (are we diversifying away from single provider?)
+- Model version adoption curves (how fast do users adopt new models?)
+- Provider failover patterns (do users switch providers after errors?)
+- Deprecated model usage (flag usage of soon-to-be-retired models)
+
+**Implementation:** Time-series group by `provider` and `model`, track version strings (e.g., `gpt-4-0613` vs `gpt-4-turbo-2024-04-09`).
+
+### 3.4 Endpoint Usage Patterns
+**What:** Breakdown by endpoint type (chat, completions, embeddings, etc.)  
+**Why:** Different endpoints have different cost/performance profiles  
+**Analytics:**
+- Requests by endpoint (`/v1/chat/completions` vs `/v1/embeddings`)
+- Cost by endpoint (embeddings cheaper but higher volume?)
+- Latency by endpoint (embeddings fast, chat slow)
+
+**Implementation:** Group by `endpoint` column.
+
+---
+
+## Priority 4: Operational Intelligence
+
+### 4.1 Rate Limit & Throttling Analytics
+**What:** Track rate limit hits and near-misses  
+**Why:** Rate limits = degraded UX; need proactive detection  
+**Analytics:**
+- 429 rate limit errors by provider (which provider throttling most?)
+- 429 errors by agent (which agents hitting limits?)
+- Requests per minute by tenant (approaching rate limits?)
+- Retry patterns (do clients back off properly after 429?)
+
+**Implementation:** Filter `status_code = 429`, extract rate-limit headers from `response_body` if available, calculate requests/min per tenant.
+
+### 4.2 Request Size Analytics
+**What:** Distribution of request/response sizes  
+**Why:** Large payloads = higher latency, higher cost, potential issues  
+**Analytics:**
+- Request body size distribution (JSONB size via `pg_column_size`)
+- Response body size distribution
+- Largest requests/responses (outliers for investigation)
+- Correlation between size and latency
+
+**Implementation:** `pg_column_size(request_body)`, `pg_column_size(response_body)`, bucket into ranges.
+
+### 4.3 Tenant Health Scorecards
+**What:** Single-number health metric per tenant combining cost, performance, reliability  
+**Why:** Executives need "green/yellow/red" dashboard, not raw metrics  
+**Analytics:**
+- Health score = composite of error_rate (<5% green, 5-10% yellow, >10% red), latency (p95 <2s green), cost trend (growth <20% MoM green)
+- Tenant ranking by health score
+- Alerts when tenant moves from green to yellow/red
+
+**Implementation:** Weighted scoring function, thresholds configurable per deployment.
+
+### 4.4 MCP Tool Routing Analytics
+**What:** Metrics specific to MCP (Model Context Protocol) tool routing  
+**Why:** MCP adds latency and complexity; need visibility into tool usage  
+**Analytics:**
+- Requests with tool calls (% of requests triggering MCP routing)
+- MCP round-trip latency (time spent in MCP layer)
+- Tool call success rate (did MCP server respond successfully?)
+- Most-used MCP tools (which tools invoked most frequently?)
+
+**Implementation:** Parse `request_body.tools` and `response_body.tool_calls`, track MCP-specific latency (if instrumented), extract tool names.
+
+---
+
+## Priority 5: Compliance & Security
+
+### 5.1 Data Retention & Compliance Reporting
+**What:** Analytics to support compliance requirements (GDPR, SOC 2, etc.)  
+**Why:** Enterprises need audit trails and retention policies  
+**Analytics:**
+- Trace volume by age (how much data in each monthly partition?)
+- Traces eligible for deletion (past retention window)
+- Encrypted vs unencrypted traces (if encryption migration in progress)
+- PII detection (flag requests with email/phone patterns in `request_body`)
+
+**Implementation:** Query partition metadata, regex scan for PII patterns (email, phone, SSN), track `encryption_key_version`.
+
+### 5.2 Audit Log Analytics
+**What:** Admin actions and configuration changes  
+**Why:** Security teams need who-did-what visibility  
+**Analytics:**
+- Agent config changes (who modified provider configs?)
+- API key creation/deletion events
+- Tenant creation/deletion events
+- Failed authentication attempts (if logged)
+
+**Implementation:** Separate audit log table (not in traces), queryable by actor, action, timestamp.
+
+---
+
+## Priority 6: Business Intelligence
+
+### 6.1 Tenant Segmentation & Cohort Analysis
+**What:** Group tenants by usage patterns  
+**Why:** Product teams need to understand user segments  
+**Analytics:**
+- Tenant tiers by usage (light: <1K req/mo, medium: 1K-100K, heavy: >100K)
+- Cohort retention (% of tenants active each month since signup)
+- Tenant growth curves (usage trajectory over first 90 days)
+- Churn detection (tenants with declining usage)
+
+**Implementation:** Bucketing by request volume, cohort tracking via tenant `created_at`, month-over-month comparison.
+
+### 6.2 Feature Adoption
+**What:** Track usage of specific features (streaming, tool calls, vision, etc.)  
+**Why:** Product teams need to know which features resonate  
+**Analytics:**
+- Streaming adoption rate (% tenants using `stream: true`)
+- Vision adoption (requests with image inputs)
+- Tool calling adoption (requests with `tools` array)
+- Multi-turn conversation depth (requests per `conversation_id`)
+
+**Implementation:** Parse `request_body` for feature flags (stream, tools, image URLs), join to conversations table for turn count.
+
+### 6.3 Revenue Analytics (for SaaS deployments)
+**What:** If Loom is monetized, tie usage to revenue  
+**Why:** Finance teams need revenue attribution  
+**Analytics:**
+- Usage-based billing (cost * markup = revenue)
+- Revenue by tenant tier
+- Revenue growth trends
+- Customer lifetime value (LTV) = cumulative revenue per tenant
+
+**Implementation:** Requires pricing tiers in tenant metadata, markup calculation on top of estimated cost.
+
+---
+
+## Implementation Notes
+
+### Data Modeling
+- **Pre-aggregated tables:** For expensive queries (e.g., daily rollups), materialize into summary tables refreshed hourly/daily
+- **Materialized views:** Postgres supports materialized views for complex aggregations
+- **Cube/rollup tables:** Store pre-computed metrics at multiple granularities (hour/day/week/month)
+
+### Query Performance
+- **Partition pruning:** All time-windowed queries already benefit from monthly partitions
+- **Composite indexes:** Add indexes for common group-by dimensions (agent_id + created_at, provider + model, etc.)
+- **Approximate queries:** For very large datasets, use sampling or HyperLogLog for cardinality estimates
+
+### Dashboard Contracts
+McManus (frontend) should consume:
+- **Summary cards:** Single-metric tiles (total cost, request count, error rate)
+- **Time-series charts:** Arrays of {timestamp, value} for line graphs
+- **Breakdowns:** Arrays of {dimension, metric} for bar/pie charts
+- **Tables:** Paginated arrays for detailed drill-downs
+
+### Extensibility
+- **Custom dimensions:** Allow tenants to tag requests with custom metadata (project, environment, user_id) stored in `request_body.metadata` JSONB
+- **Custom metrics:** Allow tenants to define custom aggregations (e.g., "cost per active user")
+
+---
+
+## Recommended Phasing
+
+**Phase 1 (Now):** Cost attribution (agent/key), error breakdowns, latency outliers  
+**Phase 2:** Forecasting, MCP analytics, API key monitoring  
+**Phase 3:** Tenant health scores, cohort analysis, compliance reporting  
+**Phase 4:** Custom metrics, advanced BI (revenue, LTV, churn prediction)
+
+---
+
+## Open Questions
+1. Should we materialize daily/hourly rollups, or keep all queries real-time?
+2. Do we need tenant-configurable custom dimensions (tags/labels)?
+3. Should we expose raw trace exports (CSV/Parquet) for external BI tools?
+4. Do we need alerting on top of analytics (e.g., email when error rate >10%)?

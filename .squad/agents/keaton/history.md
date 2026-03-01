@@ -451,3 +451,48 @@ Each issue includes:
 **Deliverables:**
 - `docs/architecture.md` — 13-section architecture reference with Mermaid diagrams
 - `README.md` — Updated Architecture section to link to the full doc
+
+## GitHub Issue Backlog Created (2026-02-27)
+
+Created full GitHub issue backlog at Goalglowup/loom with 10 epics and 27 stories.
+
+### Epic Issue Numbers
+- Epic 1: [Admin Dashboard] — #18
+- Epic 2: [Cost Management & Attribution] — #19
+- Epic 3: [Error & Reliability Analytics] — #20
+- Epic 4: [Agent & API Key Analytics] — #21
+- Epic 5: [Security & Compliance] — #22
+- Epic 6: [Streaming & MCP Phase 2] — #23
+- Epic 7: [Developer Experience] — #24
+- Epic 8: [Multi-Tenant Management] — #25
+- Epic 9: [Conversation Management UX] — #26
+- Epic 10: [Provider Management] — #27
+
+### Story Issue Numbers
+- #28 1.1 Admin can log in via a web UI
+- #29 1.2 Admin can view and manage tenants
+- #30 1.3 Admin can view system-wide analytics
+- #31 2.1 Tenant operator can see costs broken down by agent
+- #32 2.2 Tenant operator can forecast monthly LLM spend
+- #33 2.3 Tenant operator receives budget alerts when spend exceeds threshold
+- #34 2.4 Tenant operator can see token efficiency metrics
+- #35 3.1 Developer can see errors broken down by type
+- #36 3.2 Operator can see latency distributions and slowest requests
+- #37 3.3 Operator can track rate limit events by provider
+- #38 4.1 Tenant operator can see per-agent usage and cost analytics
+- #39 4.2 Security admin can monitor API key usage and identify anomalies
+- #40 5.1 Compliance officer can view an audit log of configuration changes
+- #41 5.2 Security admin can set API key expiry and rotate keys
+- #42 5.3 Compliance officer can see traces flagged for potential PII
+- #43 6.1 Agent developer can use MCP tool routing with streaming responses
+- #44 6.2 Operator can see analytics on MCP tool invocations
+- #45 7.1 Developer can see token count and cost for each sandbox request
+- #46 7.2 Developer can test multi-turn conversations in the sandbox
+- #47 7.3 New user sees helpful empty states and onboarding guidance
+- #48 8.1 Parent tenant operator can see health scorecards for all subtenants
+- #49 8.2 Parent tenant operator can delegate management to subtenant admins
+- #50 9.1 Tenant member can browse and search conversation history
+- #51 9.2 Tenant member can organize conversations with partitions
+- #52 9.3 Tenant operator can configure conversation retention policies
+- #53 10.1 Tenant operator can configure different providers per agent
+- #54 10.2 Tenant operator can test provider configuration directly from the portal
