@@ -1311,3 +1311,42 @@ Falls back to `user.role` for backward compatibility.
 **Decision:** Revoked/expired invites shown in collapsed `<details>` element below active invites table.
 
 **Rationale:** Keeps page clean. Owners rarely need historical revoked invites. No new dependencies.
+
+---
+
+# Portal & Analytics UI Test Coverage
+
+**Author:** Hockney (Test Suite Generation)  
+**Date:** 2026-03-01  
+**Status:** Complete
+
+## Portal Pages Tests (Agent 33)
+
+8 portal pages with 51 comprehensive test cases:
+- AgentsPage
+- ApiKeysPage
+- AnalyticsPage
+- ConversationsPage
+- MembersPage
+- SettingsPage
+- SubtenantsPage
+- TracesPage
+
+All tests passing. Coverage includes component rendering, user interactions, API integration, and edge cases.
+
+## Analytics UI Components Tests (Agent 34)
+
+5 shared analytics components with 38 comprehensive test cases:
+- AnalyticsSummary
+- AnalyticsPage
+- TimeseriesCharts
+- ModelBreakdown
+- TenantSelector
+
+Infrastructure improvements:
+- Recharts mock for chart component testing
+- tsconfig.json @/shared resolve alias
+
+All tests passing. Suite total: 502 tests.
+
+**Commit:** c25c81c
