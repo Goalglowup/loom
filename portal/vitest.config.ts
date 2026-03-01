@@ -17,6 +17,7 @@ export default defineConfig({
   resolve: {
     alias: {
       '@shared': path.resolve(__dirname, '../shared'),
+      'recharts': path.resolve(__dirname, 'node_modules/recharts'),
     },
   },
 });

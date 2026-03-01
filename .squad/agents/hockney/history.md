@@ -392,3 +392,99 @@
 **Build Status:**
 - ✅ `npm test tests/application-services.test.ts` — 64 tests passing (26 new, 38 existing)
 - ✅ All new/changed methods in UserManagementService and TenantManagementService now have comprehensive unit test coverage
+
+---
+
+### 2025-present: Portal Page Tests — Full Coverage
+
+**Task:** Write tests for 8 portal pages missing test files (AgentsPage, ApiKeysPage, AnalyticsPage, ConversationsPage, MembersPage, SettingsPage, SubtenantsPage, TracesPage).
+
+**Test files created:**
+- `portal/src/pages/__tests__/AgentsPage.test.tsx` — 6 tests (list agents, empty state, create/edit/delete, AgentEditor/AgentSandbox modals)
+- `portal/src/pages/__tests__/ApiKeysPage.test.tsx` — 7 tests (list keys, create key with agent selection, revoke key, empty state)
+- `portal/src/pages/__tests__/AnalyticsPage.test.tsx` — 5 tests (shared component integration, rollup/org scope toggle, fetch functions)
+- `portal/src/pages/__tests__/ConversationsPage.test.tsx` — 7 tests (partitions tree, conversations list, detail loading, filtering)
+- `portal/src/pages/__tests__/MembersPage.test.tsx` — 7 tests (members list, invites, role changes, owner-only sections)
+- `portal/src/pages/__tests__/SettingsPage.test.tsx` — 6 tests (provider config, model list editor, loading/error states)
+- `portal/src/pages/__tests__/SubtenantsPage.test.tsx` — 7 tests (list subtenants, create subtenant, owner permissions)
+- `portal/src/pages/__tests__/TracesPage.test.tsx` — 6 tests (traces list, pagination, detail panel, fetch with cursor)
+
+**Total new tests: 51** (added to existing 161, total 212 passing in portal workspace)
+
+**Key Learnings:**
+
+- **Mock heavy child components for isolation**: AgentEditor and AgentSandbox mocked with minimal `data-testid` stubs in parent tests. Prevents cascading mock requirements and keeps tests focused on page logic.
+
+- **useAuth context mocking pattern**: Pages using `useAuth` (MembersPage, SubtenantsPage) require `vi.mock('../../context/AuthContext')` at module level, then `vi.mocked(useAuth).mockReturnValue({ currentRole, user } as any)` in beforeEach. Critical for owner/member permission testing.
+
+- **Global fetch mocking for portal analytics endpoints**: AnalyticsPage and TracesPage use native `fetch` (not `api` lib). Mock with `global.fetch = vi.fn()` and return `{ ok: true, json: async () => ({...}) }` shape.
+
+- **Multiple loading states in single page**: MembersPage shows "Loading…" for members AND "Loading invites…" for invites simultaneously. Use `getAllByText(/loading/i).length > 0` instead of `getByText` to avoid "multiple elements" error.
+
+- **Owner-only component visibility**: MembersPage and SubtenantsPage render different UI for owner vs member roles. Test with `isOwner = currentRole === 'owner'` pattern: owners see create buttons + invite sections, members see permission warning.
+
+- **Shared analytics component testing**: AnalyticsPage imports `@shared/analytics` AnalyticsPage component. Mock the entire module with `vi.mock('@shared/analytics', () => ({ AnalyticsPage: ({ fetchSummary }: any) => <div data-testid="analytics-page" />... }))` to test prop passing without recharts dependency.
+
+- **Pagination cursor pattern**: TracesPage uses cursor-based pagination (`nextCursor`). Tests verify `fetch` called with `?limit=50` initially, then `?limit=50&cursor=cursor123` on "Load more" click.
+
+- **Conversation detail loading**: ConversationsPage loads partitions, conversations, and conversation detail in sequence. Use three-tier mocking: `api.getPartitions`, `api.getConversations(token, partitionId)`, `api.getConversation(token, conversationId)`.
+
+- **getAllByText vs getByText for duplicates**: When text appears in multiple places (agent name in both sidebar button and AgentSandbox, "Loading" in members + invites), use `getAllByText(...).length > 0` or check specific element content.
+
+**Test Infrastructure:**
+- All tests follow established patterns: `vi.mock` at top, MemoryRouter wrapper, `beforeEach` with `vi.resetAllMocks()`
+- 4-7 tests per page covering: loading, success, empty, error, key interactions
+- Mocked API responses use complete type shapes (Agent, ApiKeyEntry, Member, etc.)
+- Owner/member permission checks use `useAuth` mock with different `currentRole` values
+
+**Build Status:**
+- ✅ `npx vitest run --project portal` — 212 tests passing (51 new, 161 existing)
+- ✅ All 8 portal pages now have comprehensive unit test coverage
+- ✅ No breaking changes to existing tests
+
+---
+
+### $(date -u +%Y-%m-%dT%H:%M:%SZ): Shared Analytics UI Component Tests
+
+**Task:** Write Vitest + RTL unit tests for shared analytics UI components (AnalyticsSummary, AnalyticsPage, TimeseriesCharts, ModelBreakdown, TenantSelector).
+
+**Test files created:**
+- `portal/src/components/__tests__/shared-AnalyticsSummary.test.tsx` — 7 tests (skeleton loading, empty states, data values, window selector, aria attributes)
+- `portal/src/components/__tests__/shared-AnalyticsPage.test.tsx` — 8 tests (fetch on mount, loading state, window/tenant changes, admin mode behavior)
+- `portal/src/components/__tests__/shared-TimeseriesCharts.test.tsx` — 6 tests (empty data, chart titles, loading state, drag handles, expand buttons)
+- `portal/src/components/__tests__/shared-ModelBreakdown.test.tsx` — 10 tests (skeleton/empty states, data rendering, formatting, error rate styling)
+- `portal/src/components/__tests__/shared-TenantSelector.test.tsx` — 7 tests (label, options, selection state, onChange calls)
+
+**Total new tests: 38** (100% passing)
+
+**Key Learnings:**
+
+- **Recharts import resolution in shared components**: When testing components from `shared/` (via `@shared` alias) that import `recharts`, Vite cannot resolve `recharts` because it's only installed in `portal/node_modules`. Solution: Add explicit resolve.alias in `portal/vitest.config.ts` mapping `'recharts': path.resolve(__dirname, 'node_modules/recharts')` so Vite can resolve the module when processing shared files.
+
+- **Global vi.mock for recharts in test-setup.ts**: Instead of mocking recharts in every test file, add a global mock in `portal/src/test-setup.ts` that returns simple pass-through components. This avoids repetitive mock declarations and keeps tests focused on component logic.
+
+- **localStorage mock for chart preferences**: TimeseriesCharts uses localStorage to persist chart order/expand state. Tests need a custom localStorage mock defined in the test file (vitest's default jsdom doesn't implement all localStorage methods).
+
+- **Testing loading states with skeleton cards**: AnalyticsSummary and ModelBreakdown render skeleton placeholders during loading. Use `document.querySelectorAll('.skeleton-card')` to verify skeleton count since they have `aria-hidden="true"` and won't appear in screen queries.
+
+- **Window selector aria-pressed state**: AnalyticsSummary window buttons use `aria-pressed` to indicate active state. Test both `true` for active and `false` for inactive buttons to validate accessibility.
+
+- **AnalyticsPage polling behavior**: AnalyticsPage re-fetches data every 30 seconds via setInterval. Tests must use `waitFor` when asserting fetch call counts to handle async timing.
+
+- **Admin mode conditional rendering**: AnalyticsPage only calls `fetchTenants` and renders TenantSelector when `isAdmin={true}` and `fetchTenants` is provided. Tests must verify absence of tenant UI in non-admin mode.
+
+- **Empty state vs. zero-data distinction**: AnalyticsSummary shows "—" cards when `summary=null` OR when `summary.totalRequests=0`. Both conditions should be tested separately.
+
+- **userEvent for interactions**: Use `@testing-library/user-event` for all user interactions (clicks, select changes) to simulate realistic user behavior (not fireEvent).
+
+**Test Infrastructure:**
+- All tests placed in `portal/src/components/__tests__/shared-*.test.tsx` (not in `shared/` itself, which has no package.json or vitest config)
+- Tests import components via `@shared/analytics/*` alias (configured in portal's vitest.config.ts)
+- Recharts globally mocked in test-setup.ts; no real chart rendering needed for these tests
+- Follows existing portal test patterns (render, screen, userEvent, vi.fn mocks)
+
+**Build Status:**
+- ✅ `npx vitest run portal/src/components/__tests__/shared-*.test.tsx` — 38 tests passing
+- ✅ No breaking changes to existing tests
+- ✅ All shared analytics components now have comprehensive unit test coverage
+
