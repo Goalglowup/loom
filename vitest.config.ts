@@ -8,7 +8,7 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'html'],
-      exclude: ['tests/**', '**/*.config.*', '**/node_modules/**', 'dist/**', 'migrations/**', 'scripts/**', 'dashboard/**']
+      exclude: ['tests/**', '**/*.config.*', 'vitest.workspace.ts', '**/node_modules/**', 'dist/**', 'migrations/**', 'scripts/**', 'dashboard/**', '**/__mocks__/**']
     },
     testTimeout: 10000,
     hookTimeout: 10000

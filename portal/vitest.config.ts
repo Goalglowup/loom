@@ -12,6 +12,7 @@ export default defineConfig({
       provider: 'v8',
       reporter: ['text', 'html'],
       include: ['src/components/**', 'src/pages/**'],
+      exclude: ['**/__mocks__/**', '**/dist/**'],
     },
   },
   resolve: {
