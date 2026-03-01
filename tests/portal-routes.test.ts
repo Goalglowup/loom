@@ -10,7 +10,7 @@ import { scrypt, randomBytes } from 'node:crypto';
 import { promisify } from 'node:util';
 import Fastify from 'fastify';
 import type { FastifyInstance } from 'fastify';
-import { createSigner } from 'fast-jwt';
+import { signJwt } from '../src/auth/jwtUtils.js';
 import { registerPortalRoutes } from '../src/routes/portal.js';
 
 const scryptAsync = promisify(scrypt);
@@ -18,7 +18,6 @@ const scryptAsync = promisify(scrypt);
 const TEST_MASTER_KEY = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
 // Must match the default used in src/routes/portal.ts and src/middleware/portalAuth.ts
 const PORTAL_JWT_SECRET = 'unsafe-portal-secret-change-in-production';
-const signPortalToken = createSigner({ key: PORTAL_JWT_SECRET, expiresIn: 86400000 });
 
 // Pre-hashed password for 'Password1!' (computed once in beforeAll)
 let PASSWORD_HASH: string;
@@ -83,7 +82,7 @@ function buildMockUserMgmtSvc(): UserManagementService {
         throw new Error('Invalid credentials');
       }
       return {
-        token: signPortalToken({ sub: TEST_USER_ID, tenantId: TEST_TENANT_ID, role: 'owner' }),
+        token: signJwt({ sub: TEST_USER_ID, tenantId: TEST_TENANT_ID, role: 'owner' }, PORTAL_JWT_SECRET, 86400000),
         userId: TEST_USER_ID,
         email: TEST_USER_EMAIL,
         tenantId: TEST_TENANT_ID,
@@ -183,7 +182,7 @@ function buildMockPortalSvc(overrides: Partial<Record<string, any>> = {}): Porta
       const valid = timingSafeEqual(Buffer.from(key, 'hex'), derivedKey);
       if (!valid) return null;
       return {
-        token: signPortalToken({ sub: TEST_USER_ID, tenantId: TEST_TENANT_ID, role: 'owner' }),
+        token: signJwt({ sub: TEST_USER_ID, tenantId: TEST_TENANT_ID, role: 'owner' }, PORTAL_JWT_SECRET, 86400000),
         userId: TEST_USER_ID,
         email: TEST_USER_EMAIL,
         tenantId: TEST_TENANT_ID,
@@ -268,7 +267,7 @@ async function buildApp(
 
 /** Sign a JWT as if the user is already logged in. */
 function authToken(userId = TEST_USER_ID, tenantId = TEST_TENANT_ID, role = 'owner'): string {
-  return signPortalToken({ sub: userId, tenantId, role }) as string;
+  return signJwt({ sub: userId, tenantId, role }, PORTAL_JWT_SECRET, 86400000);
 }
 
 // ── POST /v1/portal/auth/signup ─────────────────────────────────────────────

@@ -1392,3 +1392,38 @@ This document should be updated when:
 - Migration strategy changes
 - Service topology changes (e.g., Phase 2 service split)
 - Auth model changes
+
+---
+
+# Decision: Use `jsonwebtoken` directly for JWT signing/verification
+
+**Date:** 2026-03  
+**Author:** Fenster (Backend Dev)  
+**Status:** Accepted
+
+## Context
+
+Loom had two separate JWT implementations:
+- Admin routes used `@fastify/jwt` (Fastify plugin), calling `fastify.jwt.sign()` and `request.jwtVerify()`
+- Portal routes used `fast-jwt` (`createSigner`/`createVerifier`)
+
+This created unnecessary coupling to framework plugins and two different JWT libraries.
+
+## Decision
+
+Consolidate onto `jsonwebtoken` directly, with a shared `signJwt`/`verifyJwt` utility in `src/auth/jwtUtils.ts` and a generic preHandler factory `createBearerAuth` in `src/middleware/createBearerAuth.ts`.
+
+## Rationale
+
+- **No framework coupling**: `jsonwebtoken` works without registering a Fastify plugin; logic is portable and testable in isolation
+- **Single library**: eliminates `fast-jwt` and `@fastify/jwt` as dependencies
+- **Shared factory pattern**: `createBearerAuth` handles header extraction, verification, and 401 response uniformly for both admin and portal auth
+- **Explicit secrets**: secrets are read from env vars in the middleware/service files directly, not passed through plugin registration
+
+## Consequences
+
+- `@fastify/jwt` and `fast-jwt` removed from `package.json`
+- `jsonwebtoken` + `@types/jsonwebtoken` added
+- 401 error messages unified to `{ error: 'Unauthorized' }` (no longer distinguishes missing header from invalid token)
+- `ADMIN_JWT_SECRET` and `PORTAL_JWT_SECRET` remain as separate env vars
+- `request.adminUser` and `request.portalUser` shapes unchanged

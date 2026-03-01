@@ -1,6 +1,6 @@
 import { promisify } from 'node:util';
 import { scrypt, randomBytes, timingSafeEqual } from 'node:crypto';
-import { createSigner } from 'fast-jwt';
+import { signJwt } from '../../auth/jwtUtils.js';
 import type { EntityManager } from '@mikro-orm/core';
 import { User } from '../../domain/entities/User.js';
 import { Tenant } from '../../domain/entities/Tenant.js';
@@ -12,8 +12,6 @@ const scryptAsync = promisify(scrypt);
 
 const PORTAL_JWT_SECRET =
   process.env.PORTAL_JWT_SECRET ?? 'unsafe-portal-secret-change-in-production';
-
-const signToken = createSigner({ key: PORTAL_JWT_SECRET, expiresIn: 86_400_000 });
 
 async function hashPassword(password: string): Promise<string> {
   const salt = randomBytes(16).toString('hex');
@@ -59,7 +57,7 @@ export class UserManagementService {
     this.em.persist(tenant);
     await this.em.flush();
 
-    const token = signToken({ sub: user.id, tenantId: tenant.id, role: 'owner' });
+    const token = signJwt({ sub: user.id, tenantId: tenant.id, role: 'owner' }, PORTAL_JWT_SECRET, 86_400_000);
     return { token, userId: user.id, tenantId: tenant.id, email: user.email, tenantName: tenant.name };
   }
 
@@ -105,7 +103,7 @@ export class UserManagementService {
       role: m.role,
     }));
 
-    const token = signToken({ sub: user.id, tenantId, role: primaryMembership.role });
+    const token = signJwt({ sub: user.id, tenantId, role: primaryMembership.role }, PORTAL_JWT_SECRET, 86_400_000);
     return { token, userId: user.id, tenantId, email: user.email, tenantName, tenants };
   }
 
@@ -161,7 +159,7 @@ export class UserManagementService {
     invite.useCount += 1;
     await this.em.flush();
 
-    const token = signToken({ sub: user.id, tenantId: tenant.id, role });
+    const token = signJwt({ sub: user.id, tenantId: tenant.id, role }, PORTAL_JWT_SECRET, 86_400_000);
     return {
       token,
       userId: user.id,
@@ -206,7 +204,7 @@ export class UserManagementService {
       role: m.role,
     }));
 
-    const token = signToken({ sub: userId, tenantId: newTenantId, role: membership.role });
+    const token = signJwt({ sub: userId, tenantId: newTenantId, role: membership.role }, PORTAL_JWT_SECRET, 86_400_000);
     return {
       token,
       userId: user.id,

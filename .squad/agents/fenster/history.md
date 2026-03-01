@@ -1299,3 +1299,24 @@ const t = Object.assign(Object.create(Tenant.prototype) as Tenant, {
 - **`readonly rawKey` pattern for transient crypto material**: `ApiKey` exposes `rawKey` as a `readonly` non-persistent property set in the constructor. This keeps raw secret material available immediately post-construction without ever storing it in the DB, and TypeScript's `readonly` signals it's one-time use.
 - **Test fixtures use `Object.assign(Object.create(Entity.prototype), {...})`**: This mirrors MikroORM's own hydration pattern. It gives full instanceof checks, prototype method access, and bypasses required-param constructors for test fixture objects — same pattern already established for `User` and `Tenant`.
 - **Thin factory wrappers on aggregates**: `Tenant.createAgent`, `createInvite`, `addMembership` are now 3-line wrappers — construct entity, push to collection, return. All initialization logic lives in entity constructors. This keeps the aggregate root's role as an orchestrator, not an initializer.
+
+### JWT Consolidation (Admin + Portal)
+
+**Files changed:**
+- `src/auth/jwtUtils.ts` — NEW: `signJwt` and `verifyJwt` wrappers around `jsonwebtoken`
+- `src/middleware/createBearerAuth.ts` — NEW: generic preHandler factory for Bearer token auth
+- `src/middleware/adminAuth.ts` — Replaced `request.jwtVerify()` with `createBearerAuth`; removed `@fastify/jwt` coupling
+- `src/middleware/portalAuth.ts` — Replaced `fast-jwt` `createVerifier` with `createBearerAuth`
+- `src/routes/admin.ts` — Replaced `fastify.jwt.sign()` with `signJwt()`; added `ADMIN_JWT_SECRET` const
+- `src/application/services/UserManagementService.ts` — Replaced `fast-jwt` `createSigner`/`signToken` with `signJwt()`
+- `src/index.ts` — Removed `@fastify/jwt` import and `fastify.register(fastifyJWT, ...)` call
+- `tests/admin.test.ts` — Removed `@fastify/jwt` import and plugin registration in `buildApp`; updated 2 test assertions to match new `'Unauthorized'` error message
+- `tests/portal-routes.test.ts` — Replaced `fast-jwt` `createSigner` with `signJwt` for test token generation
+
+**Packages removed:** `fast-jwt`, `@fastify/jwt`
+**Packages added:** `jsonwebtoken`, `@types/jsonwebtoken`
+
+**Gotchas:**
+- `createBearerAuth` returns `{ error: 'Unauthorized' }` for all auth failures (no distinction between missing header vs invalid token). The old `adminAuth.ts` had distinct messages for each case. Two test assertions were checking for the old specific messages and needed updating.
+- `fast-jwt`'s `createSigner` takes `expiresIn` in milliseconds; `jsonwebtoken`'s `sign` takes `expiresIn` in seconds. `signJwt` handles the conversion internally (`Math.floor(expiresInMs / 1000)`).
+- The `@fastify/jwt` plugin decorated `fastify` with `.jwt.sign()` and augmented `FastifyRequest` with `.jwtVerify()`. Both are now gone — no TypeScript augmentation needed for those.

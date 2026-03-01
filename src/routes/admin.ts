@@ -7,6 +7,9 @@ import { evictProvider } from '../providers/registry.js';
 import { encryptTraceBody, decryptTraceBody } from '../encryption.js';
 import { getAdminAnalyticsSummary, getAdminTimeseriesMetrics, getAdminModelBreakdown } from '../analytics.js';
 import { AdminService } from '../application/services/AdminService.js';
+import { signJwt } from '../auth/jwtUtils.js';
+
+const ADMIN_JWT_SECRET = process.env.ADMIN_JWT_SECRET ?? 'unsafe-dev-secret-change-in-production';
 
 interface LoginBody {
   username: string;
@@ -45,9 +48,10 @@ export function registerAdminRoutes(fastify: FastifyInstance, adminService: Admi
       await adminService.updateAdminLastLogin(adminUser.id);
 
       // Issue JWT (8 hour expiry)
-      const token = fastify.jwt.sign(
+      const token = signJwt(
         { sub: adminUser.id, username: adminUser.username },
-        { expiresIn: '8h' }
+        ADMIN_JWT_SECRET,
+        8 * 60 * 60 * 1000
       );
 
       return reply.send({ token, username: adminUser.username });

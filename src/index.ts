@@ -2,7 +2,6 @@ import 'dotenv/config';
 import Fastify from 'fastify';
 import fastifyCors from '@fastify/cors';
 import fastifyStatic from '@fastify/static';
-import fastifyJWT from '@fastify/jwt';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { readFileSync } from 'fs';
@@ -55,11 +54,6 @@ const start = async () => {
     const dashboardSvc = new DashboardService(em);
     const userMgmtSvc = new UserManagementService(em);
     const tenantMgmtSvc = new TenantManagementService(em);
-
-    // Register JWT plugin for admin authentication
-    fastify.register(fastifyJWT, {
-      secret: process.env.ADMIN_JWT_SECRET || 'unsafe-dev-secret-change-in-production'
-    });
 
     registerAuthMiddleware(fastify, em);
 

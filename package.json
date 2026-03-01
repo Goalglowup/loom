@@ -36,6 +36,7 @@
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
     "@testing-library/user-event": "^14.6.1",
+    "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^22.19.11",
     "@vitejs/plugin-react": "^5.1.4",
     "@vitest/coverage-v8": "^2.1.8",
@@ -47,7 +48,6 @@
   },
   "dependencies": {
     "@fastify/cors": "^11.2.0",
-    "@fastify/jwt": "^10.0.0",
     "@fastify/static": "^9.0.0",
     "@mikro-orm/better-sqlite": "^6.6.7",
     "@mikro-orm/core": "^6.6.7",
@@ -55,6 +55,7 @@
     "@mikro-orm/postgresql": "^6.6.7",
     "dotenv": "^17.3.1",
     "fastify": "^5.7.4",
+    "jsonwebtoken": "^9.0.3",
     "node-pg-migrate": "^8.0.4",
     "undici": "^7.22.0"
   },

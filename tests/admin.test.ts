@@ -17,7 +17,6 @@ import { scrypt, randomBytes, createHash } from 'node:crypto';
 import { promisify } from 'node:util';
 import Fastify from 'fastify';
 import type { FastifyInstance } from 'fastify';
-import fastifyJWT from '@fastify/jwt';
 import { registerAdminRoutes } from '../src/routes/admin.js';
 import { registerAuthMiddleware, invalidateCachedKey } from '../src/auth.js';
 
@@ -206,7 +205,6 @@ function buildMockEm(options: { apiKeys?: Map<string, any>; tenants?: Map<string
 
 async function buildApp(adminService: AdminService, mockEm: EntityManager): Promise<FastifyInstance> {
   const app = Fastify({ logger: false });
-  await app.register(fastifyJWT, { secret: TEST_JWT_SECRET });
   registerAuthMiddleware(app, mockEm);
   registerAdminRoutes(app, adminService, mockEm);
   app.post('/v1/chat/completions', async (request, reply) => {
@@ -281,7 +279,7 @@ describe('H-MT1: Admin authentication middleware', () => {
 
     expect(res.statusCode).toBe(401);
     const body = res.json<{ error: string }>();
-    expect(body.error).toContain('Authorization');
+    expect(body.error).toContain('Unauthorized');
   });
 
   it('protected route with invalid token returns 401', async () => {
@@ -293,7 +291,7 @@ describe('H-MT1: Admin authentication middleware', () => {
 
     expect(res.statusCode).toBe(401);
     const body = res.json<{ error: string }>();
-    expect(body.error).toBe('Invalid or expired token');
+    expect(body.error).toBe('Unauthorized');
   });
 
   it('protected route with valid token passes through', async () => {

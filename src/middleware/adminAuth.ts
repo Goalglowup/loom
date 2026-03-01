@@ -1,4 +1,5 @@
 import { FastifyRequest, FastifyReply } from 'fastify';
+import { createBearerAuth } from './createBearerAuth.js';
 
 /**
  * Admin authentication middleware for Fastify
@@ -21,27 +22,11 @@ if (!process.env.ADMIN_JWT_SECRET) {
   console.warn('⚠️  WARNING: ADMIN_JWT_SECRET is not set. Admin authentication will fail. Set this env var in .env before starting the gateway.');
 }
 
-export async function adminAuthMiddleware(
-  request: FastifyRequest,
-  reply: FastifyReply
-): Promise<void> {
-  const authHeader = request.headers['authorization'];
+const ADMIN_JWT_SECRET = process.env.ADMIN_JWT_SECRET ?? 'unsafe-dev-secret-change-in-production';
 
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return reply.code(401).send({
-      error: 'Missing or invalid Authorization header. Expected: Bearer <token>'
-    });
+export const adminAuthMiddleware = createBearerAuth<AdminUser>(
+  ADMIN_JWT_SECRET,
+  (payload: AdminUser, request: FastifyRequest) => {
+    request.adminUser = { sub: payload.sub, username: payload.username };
   }
-
-  const token = authHeader.slice(7).trim();
-
-  try {
-    // Verify JWT using Fastify's JWT plugin
-    const decoded = await request.jwtVerify();
-    request.adminUser = decoded as AdminUser;
-  } catch (err) {
-    return reply.code(401).send({
-      error: 'Invalid or expired token'
-    });
-  }
-}
+);

@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
-import { createVerifier } from 'fast-jwt';
+import { createBearerAuth } from './createBearerAuth.js';
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -8,7 +8,8 @@ declare module 'fastify' {
 }
 
 const PORTAL_JWT_SECRET = process.env.PORTAL_JWT_SECRET || 'unsafe-portal-secret-change-in-production';
-const verifyPortalToken = createVerifier({ key: async () => PORTAL_JWT_SECRET });
+
+type PortalTokenPayload = { sub: string; tenantId: string; role: string };
 
 /**
  * Returns a Fastify preHandler that verifies the portal JWT and attaches
@@ -18,21 +19,19 @@ export function registerPortalAuthMiddleware(
   _fastify: FastifyInstance,
   requiredRole?: 'owner' | 'member'
 ): (request: FastifyRequest, reply: FastifyReply) => Promise<void> {
+  const verifyAndExtract = createBearerAuth<PortalTokenPayload>(
+    PORTAL_JWT_SECRET,
+    (payload: PortalTokenPayload, request: FastifyRequest) => {
+      request.portalUser = { userId: payload.sub, tenantId: payload.tenantId, role: payload.role };
+    }
+  );
+
   return async function portalAuthPreHandler(
     request: FastifyRequest,
     reply: FastifyReply
   ): Promise<void> {
-    const authHeader = request.headers['authorization'];
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return reply.code(401).send({ error: 'Missing or invalid Authorization header' });
-    }
-    const token = authHeader.slice(7);
-    try {
-      const decoded = await verifyPortalToken(token) as { sub: string; tenantId: string; role: string };
-      request.portalUser = { userId: decoded.sub, tenantId: decoded.tenantId, role: decoded.role };
-    } catch {
-      return reply.code(401).send({ error: 'Invalid or expired portal token' });
-    }
+    await verifyAndExtract(request, reply);
+    if (reply.sent) return;
     if (requiredRole && request.portalUser!.role !== requiredRole) {
       return reply.code(403).send({ error: 'Insufficient permissions' });
     }
