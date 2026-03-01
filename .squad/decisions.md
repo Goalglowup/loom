@@ -1750,3 +1750,259 @@ McManus (frontend) should consume:
 2. Do we need tenant-configurable custom dimensions (tags/labels)?
 3. Should we expose raw trace exports (CSV/Parquet) for external BI tools?
 4. Do we need alerting on top of analytics (e.g., email when error rate >10%)?
+
+---
+
+# RAG-Specific Analytics Metrics for Loom Gateway
+
+**Author:** Kobayashi (AI Expert)  
+**Date:** 2026-03-01  
+**Context:** RAG system metrics observable at the gateway layer during knowledge-base-augmented requests
+
+## Executive Summary
+
+When an agent has a `knowledgeBaseRef`, the Gateway performs: (1) query embedding, (2) similarity search against `kb_chunks`, (3) context injection into system prompt, (4) provider inference. This document defines **raw signals** to capture at each stage and **derived signals** that Redfoot will compute in the analytics pipeline.
+
+### Raw Signals (Captured at Gateway)
+
+**Embedding Performance:**
+- `embedding_latency_ms` — time to embed query via EmbeddingAgent
+- `embedding_token_count` — token count from tokenizer/API response
+- `embedding_model` — model used (e.g., text-embedding-3-small)
+
+**Retrieval Performance:**
+- `retrieval_latency_ms` — pgvector similarity search duration
+- `chunks_retrieved_count` — number returned (top-K)
+- `chunks_requested_k` — configured K parameter
+- `retrieval_similarity_scores` — JSONB array of scores [0-1]
+
+**Context Injection:**
+- `context_tokens_added` — token count of injected RAG context
+- `context_injection_position` — system_prompt | user_message_prefix | assistant_history
+- `original_prompt_tokens` — baseline before RAG augmentation
+
+**Chunk Utilization:**
+- `chunks_cited_count` — chunks explicitly cited in response (parse for citations)
+- `chunk_ids_retrieved` — JSONB array of chunk UUIDs
+
+**Cost Attribution:**
+- `rag_overhead_tokens` — extra tokens added by RAG (prompt_tokens - original_prompt_tokens)
+- `rag_cost_overhead_usd` — incremental cost due to RAG
+
+**Failure Modes:**
+- `rag_stage_failed` — embedding | retrieval | injection | none
+- `fallback_to_no_rag` — boolean, true if fallback triggered
+- `retrieval_timeout_ms` — configured timeout (null if none)
+
+### Derived Signals (Computed by Redfoot)
+
+**Retrieval Quality:**
+- `avg_max_similarity_score` — trend of top-1 scores
+- `avg_similarity_variance` — diversity of retrieved chunks
+- `chunk_utilization_rate` — chunks_cited / chunks_retrieved (%)
+- `kb_exhaustion_rate` — freq where retrieved < K
+
+**Latency Analysis:**
+- `rag_overhead_percentage` — RAG time as % of total
+- `ttfb_impact_of_rag` — TTFB difference vs non-RAG
+- `retrieval_latency_p95` — 95th percentile retrieval time
+
+**Token Economics:**
+- `context_overhead_ratio` — tokens_added / original_prompt
+- `rag_cost_per_request_avg` — average incremental cost
+- `token_utilization_by_kb` — cost per KB artifact
+
+**Reliability:**
+- `rag_failure_rate` — freq of failures
+- `fallback_rate` — freq of silent degradation
+- `retrieval_timeout_rate` — freq of timeouts
+
+### Implementation Strategy
+
+- Add nullable RAG columns to `traces` table (backward compatible)
+- Store similarity scores as JSONB arrays (efficient aggregation)
+- Pre-compute `rag_overhead_tokens` at capture time (avoids joins)
+- Token counting via tiktoken (~0.5ms overhead acceptable)
+- Citation parsing deferred if >2ms
+
+### Open Questions
+
+1. Citation format standard (e.g., `[1]`, `[chunk-id]`, markdown footnotes)?
+2. Acceptable chunk utilization threshold (proposed: >40%)?
+3. Separate `embedding_traces` table vs embedding in traces?
+4. Fallback policy: automatic or fail-fast?
+5. Top-K recommended range (proposed: 3-10)?
+
+---
+
+# RAG Analytics Recommendations
+
+**Author:** Redfoot (Data Engineer)  
+**Date:** 2026-03-01  
+**Context:** RAG system implementation (pgvector, artifacts, kb_chunks, deployments)
+
+## Executive Summary
+
+RAG introduces new signals: embedding operations, retrieval quality, KB utilization, artifact lifecycle. Operators need visibility into KB performance; developers need debugging tools for failures and latency.
+
+This document proposes **15 RAG-specific metrics** organized into 5 categories.
+
+### Category 1: Knowledge Base Health
+
+**kb_coverage_ratio:** % of queries with non-empty retrievals  
+- Aggregation: (queries with retrieved_chunks > 0) / (total RAG queries)
+- Dimensions: per KB, per agent, per tenant, time-series
+- Dashboard: KB detail page (tenant), KB health scorecard (ops)
+
+**kb_chunk_utilization:** Distribution of retrieval frequency per chunk  
+- Aggregation: Histogram of retrieval counts over 7/30 days
+- Dimensions: per KB artifact
+- Dashboard: KB detail → "Hot Chunks" tab
+
+**kb_staleness_days:** Days since KB last updated  
+- Aggregation: CURRENT_DATE - MAX(artifact.updated_at)
+- Dimensions: per KB, per tenant
+- Dashboard: KB list, stale KB alert
+
+### Category 2: Retrieval Performance
+
+**rag_retrieval_latency_ms:** Time from embedding start to retrieval completion  
+- Aggregation: p50/p95/p99 latencies, bucketed by time
+- Dimensions: per KB, per EmbeddingAgent, per tenant, time-series
+- Why: p99 > 500ms indicates pgvector index degradation
+
+**rag_overhead_ratio:** RAG latency as % of total request latency  
+- Aggregation: AVG(rag_retrieval_latency_ms / total_latency_ms)
+- Dimensions: per agent, per KB, time-series
+- Healthy: <15%; >30% warrants optimization
+
+**retrieved_chunk_count:** Actual chunks returned vs configured topK  
+- Aggregation: Histogram and AVG chunks per query
+- Dimensions: per KB, per agent
+- Why: Sparse KB or overly specific queries if < topK
+
+### Category 3: Embedding Operations
+
+**embedding_requests_per_second:** QPS to EmbeddingAgents  
+- Aggregation: Time-series count by operation type
+- Dimensions: per EmbeddingAgent, per tenant, by operation type (query vs weave)
+- Why: Identify bottlenecks, scale capacity
+
+**embedding_cost_usd:** Cost of embedding operations  
+- Aggregation: SUM(tokens * cost_per_token) by embedder, tenant
+- Dimensions: per EmbeddingAgent, per KB, per tenant, time-series
+- Why: Hidden cost visibility, forecasting, chargeback
+
+**embedding_error_rate:** % of embedding requests that failed  
+- Aggregation: failed / total
+- Dimensions: per EmbeddingAgent, per provider, time-series
+- Alert: >5% indicates provider issues
+
+### Category 4: Artifact Lifecycle
+
+**artifact_weave_duration_s:** Time to complete `loom weave` operation  
+- Aggregation: p50/p95 durations, bucketed by artifact size
+- Dimensions: per KB, per EmbeddingAgent, per tenant
+- Why: Slow weave (p95 > 60s) indicates chunking inefficiency
+
+**artifact_size_mb:** Size of artifact bundles in storage  
+- Aggregation: SUM and histogram of sizes
+- Dimensions: per artifact, per tenant, per org
+- Why: Large bundles (>100MB) impact performance and costs
+
+**deployment_status_distribution:** Count of deployments by status  
+- Aggregation: Count grouped by status (READY/PENDING/FAILED)
+- Dimensions: per tenant, per environment, per artifact
+- Why: Stuck PENDING/FAILED indicates provisioning issues
+
+### Category 5: RAG Quality Signals
+
+**citation_click_rate:** % of responses where user clicked citations  
+- Aggregation: responses_with_clicks / total_rag_responses
+- Dimensions: per agent, per KB, time-series
+- Why: Proxy for retrieval quality (requires frontend instrumentation)
+
+**rag_relevance_score:** Average pgvector similarity of top-K chunks  
+- Aggregation: AVG of top-1 score, histogram of distribution
+- Dimensions: per KB, per query, time-series
+- Why: Scores <0.6 indicate poor semantic match
+
+**zero_shot_fallback_rate:** % of queries with no chunks retrieved  
+- Aggregation: queries_no_chunks / total_rag_queries
+- Dimensions: per KB, per agent, time-series
+- Alert: >40% indicates KB doesn't cover query space
+
+### Data Contracts: Trace Extensions
+
+Extended `TraceInput` with RAG fields (nullable):
+```
+knowledgeBaseId?: string;
+embeddingAgentId?: string;
+ragRetrievalLatencyMs?: number;
+embeddingLatencyMs?: number;
+vectorSearchLatencyMs?: number;
+retrievedChunkCount?: number;
+retrievedChunkIds?: string[];
+topChunkSimilarity?: number;
+avgChunkSimilarity?: number;
+```
+
+New tables:
+- `embedding_operations` — embedding request logs
+- `artifact_operations` — weave/push/deploy tracking
+- `chunk_retrievals` (optional) — granular `(trace_id, chunk_id)` pairs
+
+### Aggregation Strategy
+
+**Real-time (24h):** Use partition pruning on traces  
+**Pre-aggregated:** Hourly/daily rollups via background job  
+**Materialized:** "Hot chunks" summary (top 100) daily  
+**Indexes:** `(knowledgeBaseId, created_at)`, `(embeddingAgentId, created_at)`
+
+### Dashboard Placement
+
+**Operator Dashboard (McManus):** New "RAG Analytics" section
+- Tiles: RAG requests, overhead, embedding cost, fallback rate
+- Charts: latency trends, KB coverage, embedding QPS, deployment status
+- Tables: top KBs, slowest retrievals, failures
+
+**Tenant Portal:**
+- KB detail → "Analytics" tab (coverage, trends, hot chunks)
+- Agent pages → RAG latency breakdown
+- New "RAG Performance" page (per-KB trends, cost attribution)
+
+### Implementation Phases
+
+**P0 (Launch):**
+1. Extend traces with RAG fields
+2. Create `embedding_operations` table
+3. Basic RAG tiles in operator dashboard
+4. KB coverage ratio in tenant portal
+
+**P1 (2 weeks):**
+5. `artifact_operations` table
+6. Overhead ratio and embedding cost metrics
+7. Pre-aggregated hourly rollups
+8. Chunk utilization (hot chunks) in KB detail
+
+**P2 (Scale):**
+9. `chunk_retrievals` table for granular analytics
+10. Citation click tracking (frontend instrumentation)
+11. Advanced quality signals and alerts
+12. Tenant-facing "RAG Performance" page
+
+### Open Questions
+
+1. Chunk retrieval granularity: separate table vs JSONB array?
+2. Embedding cost calculation: expand provider pricing?
+3. Real-time vs batch metrics SLA?
+4. Alert thresholds: error >5%? fallback >40%? overhead >30%?
+5. Portal vs CLI visibility: `loom analytics <kb-name>` command?
+
+### Success Metrics
+
+- Operators identify underperforming KBs within 30s
+- Developers debug RAG latency via trace drill-down
+- Finance teams attribute embedding costs per tenant/KB
+- Product teams measure KB adoption and request patterns
+- SRE detects embedding provider degradation via alerts

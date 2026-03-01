@@ -496,3 +496,25 @@ Created full GitHub issue backlog at Goalglowup/loom with 10 epics and 27 storie
 - #52 9.3 Tenant operator can configure conversation retention policies
 - #53 10.1 Tenant operator can configure different providers per agent
 - #54 10.2 Tenant operator can test provider configuration directly from the portal
+
+### 2026-03-01: RAG Analytics Planning Complete
+
+**Collaboration:** Kobayashi + Redfoot designed comprehensive RAG analytics framework for gateway layer observability.
+
+**Deliverables Merged:**
+- Kobayashi's raw signal specification (6 categories, 20+ metrics captured per-request)
+- Redfoot's derived metrics + aggregation strategy (15 metrics, 5 categories)
+- Three-phase implementation plan (P0/P1/P2) with phased feature rollout
+- Dashboard design for operator and tenant portals
+
+**Key Decisions Documented in `.squad/decisions.md`:**
+1. Nullable RAG columns in `traces` table (backward compatible)
+2. Similarity scores as JSONB arrays (efficient aggregation, no N+1)
+3. Pre-compute `rag_overhead_tokens` at capture time (avoids joins)
+4. Separate `embedding_operations` and `artifact_operations` tables for non-request events
+5. Real-time 24h dashboard queries with partition pruning; hourly/daily rollups for scale
+6. Three-phase rollout: P0 (MVP metrics + basic tiles), P1 (depth + rollups), P2 (granularity + citations)
+
+**Pending:** Stories #64-#67 implementation (schema, ingestion, dashboard UI). Story #68 (pending) for advanced quality signals.
+
+**Open Questions for Team:** Citation format, chunk utilization threshold (>40%?), retrieval granularity (table vs JSONB), embedding provider pricing expansion, alert thresholds.

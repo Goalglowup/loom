@@ -280,6 +280,23 @@ _What changes:_ WeaveService handles `kind: EmbeddingAgent` (config-only, no chu
 
 ---
 
+### Story 12 — RAG Analytics (new)
+**As an operator and tenant developer, I want visibility into RAG retrieval performance, embedding costs, and KB quality so that I can optimize my knowledge bases and control costs.**
+
+Captures RAG-specific signals at the gateway layer and surfaces them in operator and tenant dashboards. Phase 1 (P0) focuses on the core signals needed to assess system health.
+
+_Key metrics captured per-request:_
+- **Retrieval:** `retrieval_latency_ms`, `vector_search_latency_ms`, `retrieved_chunk_count`, `top_chunk_similarity`, `avg_chunk_similarity`
+- **Embedding:** `embedding_latency_ms`, `embedding_agent_id`
+- **Context:** `context_tokens_added`, `rag_overhead_tokens`, `rag_cost_overhead_usd`
+- **Failures:** `rag_stage_failed` (embedding | retrieval | injection | none), `fallback_to_no_rag`
+
+_New tables:_ `embedding_operations` (per-embedding event log), `artifact_operations` (weave/push/deploy event log)
+
+_What changes:_ Extend `traces` table with RAG fields. New `embedding_operations` + `artifact_operations` tables. RAG latency/cost tiles in operator dashboard. KB coverage ratio in tenant portal KB detail view.
+
+---
+
 ## Database Changes
 
 One migration adds:
@@ -291,6 +308,9 @@ One migration adds:
 6. `kb_chunks` — document chunks with `embedding vector` column (pgvector)
 7. `deployments` — tenant attachment records with env, status, runtime_token
 8. `kind` column on `agents` table — values: `inference` (default), `embedding`
+9. RAG fields added to `traces` table (nullable): `knowledge_base_id`, `embedding_agent_id`, `rag_retrieval_latency_ms`, `embedding_latency_ms`, `vector_search_latency_ms`, `retrieved_chunk_count`, `top_chunk_similarity`, `avg_chunk_similarity`, `context_tokens_added`, `rag_overhead_tokens`, `rag_cost_overhead_usd`, `rag_stage_failed`, `fallback_to_no_rag`
+10. `embedding_operations` table — per-embedding event log (query embeddings + weave operations)
+11. `artifact_operations` table — weave/push/deploy lifecycle events
 
 ---
 
@@ -320,6 +340,7 @@ CLI commands (`loom weave`, `loom push`, `loom deploy`) use the stored portal JW
 - [ ] Tenant org slug is configurable and unique; defaults correctly on creation
 - [ ] EmbeddingAgent kind works: tenant creates embedder, KB references it via agentRef
 - [ ] System `system-embedder` EmbeddingAgent bootstrapped from env vars as fallback
+- [ ] RAG analytics: operator dashboard shows retrieval latency, embedding cost, KB coverage ratio
 
 ---
 
