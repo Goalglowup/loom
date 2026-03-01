@@ -347,3 +347,48 @@
 - **SandboxPage renders agent name in both list button and AgentSandbox mock**: Both the agent button in the sidebar and the mocked AgentSandbox render the agent name. Use `getAllByText()` when the same text appears in multiple places.
 
 - **AuthContext tests need api.me and auth lib both mocked**: The AuthProvider calls `getToken()` on mount and `api.me()` if token is present. Mock both `../../lib/api` and `../../lib/auth` to control loading behavior.
+
+---
+
+### $(date -u +%Y-%m-%dT%H:%M:%SZ): Portal Migration Unit Tests — UserManagementService & TenantManagementService
+
+**Task:** Write unit tests for the new methods added to UserManagementService and TenantManagementService during the portal migration.
+
+**Tests added to `tests/application-services.test.ts` (26 new tests, 64 total):**
+
+**UserManagementService new/changed tests (14 new):**
+- `createUser`: throws 409 if email already exists, trims tenant name whitespace, creates a default agent during signup
+- `login`: returns tenants array with all active memberships, throws 403 if user has no active tenant memberships, does NOT include inactive tenants in returned tenants array
+- `acceptInvite`: throws 400 if invite's tenant is not active, throws 409 if user is already a member
+- `switchTenant` (new method): throws 403 if user is not a member of the target tenant, throws 400 if target tenant is inactive, returns AuthResult with a new JWT on success
+- `leaveTenant` (new method): throws 400 "Switch to a different tenant before leaving" if tenantId === currentTenantId, throws 400 if user is the last owner, removes membership on success
+
+**TenantManagementService new/changed tests (12 new):**
+- `updateSettings`: calls evictProvider when providerConfig is updated (mocked evictProvider import)
+- `revokeApiKey`: returns `{ keyHash }` that can be used for cache invalidation
+- `createSubtenant`: creates an owner membership for createdByUserId
+- `revokeInvite` (new): throws 404 if invite not found, sets revokedAt on the invite
+- `listInvites` (new): returns invites for the tenant
+- `updateMemberRole` (new): throws 400 "Cannot demote the last owner" when demoting the only owner, updates role successfully when >1 owner
+- `removeMember` (new): throws 400 "Use leave instead" if targeting self, throws 404 if membership not found, throws 400 if trying to remove the last owner, removes membership on success
+
+**Key Learnings:**
+
+- **vi.mock for module-level singleton mocking**: To mock `evictProvider` from `providers/registry.js`, use `vi.mock('../src/providers/registry.js', () => ({ evictProvider: vi.fn() }))` at the top of the file before imports. Use `vi.clearAllMocks()` in `beforeEach` to reset mock call counts between tests.
+
+- **Testing multi-tenant filtering logic**: The `login` method now filters memberships to only active tenants and throws 403 if no active memberships exist. Tests must mock both the user lookup and the memberships array with tenant status fields.
+
+- **Last owner protection pattern**: Both `leaveTenant`, `updateMemberRole`, and `removeMember` must prevent removing/demoting the last owner. Tests use `em.count()` mock to simulate owner count checks.
+
+- **Cache invalidation contract testing**: `revokeApiKey` now returns `{ keyHash }` for cache invalidation. The test verifies the return value matches the entity's keyHash field, ensuring the caller can invalidate cached keys.
+
+- **Entity persistence verification**: `createSubtenant` must create both a child tenant AND an owner membership. Tests verify both entities are persisted by checking `(em.persist as any).mock.calls.length === 2` and inspecting the second persist call's entity type and properties.
+
+**Test Infrastructure:**
+- All tests follow the existing `buildMockEm()` pattern for mocking EntityManager
+- Helper functions `makeTenant()`, `makeUser()`, `makeAgent()` used to construct test entities with sensible defaults
+- Real password hashing used in `beforeAll` to generate valid passwordHash for login tests (not mocked strings)
+
+**Build Status:**
+- ✅ `npm test tests/application-services.test.ts` — 64 tests passing (26 new, 38 existing)
+- ✅ All new/changed methods in UserManagementService and TenantManagementService now have comprehensive unit test coverage

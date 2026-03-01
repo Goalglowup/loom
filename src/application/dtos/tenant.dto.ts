@@ -24,6 +24,7 @@ export interface InviteViewModel {
   maxUses: number | null;
   useCount: number;
   expiresAt: string;
+  revokedAt: string | null;
   createdAt: string;
 }
 
@@ -44,4 +45,5 @@ export interface UpdateTenantDto {
 
 export interface CreateSubtenantDto {
   name: string;
+  createdByUserId: string;
 }

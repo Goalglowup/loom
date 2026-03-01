@@ -371,3 +371,64 @@ Each issue includes:
 - UPDATED: `README.md` — Product-focused with full capability descriptions, architecture overview, API extensions, and comprehensive database schema
 
 **Documentation Strategy:** Lean, bullet-point heavy, developer audience. No marketing fluff. Accurate reflection of what the codebase actually does.
+
+## 2026-02-27: Legacy Service Audit — PortalService & AdminService vs Domain Layer
+
+**Task:** Comprehensive audit comparing legacy services (PortalService, AdminService) against domain-layer services (UserManagementService, TenantManagementService, TenantService) to identify ALL custom logic in legacy that is missing from domain.
+
+**Key Findings:**
+
+1. **Critical Infrastructure Gaps (13 must-fix issues):**
+   - **Default agent creation on signup:** PortalService creates a "Default" agent during tenant signup transaction. UserManagementService does NOT. Without this, subsequent API key creation fails (keys require an agent).
+   - **Cache invalidation after API key revocation:** PortalService returns `key_hash` and route calls `invalidateCachedKey(keyHash)`. Domain layer does NOT. Revoked keys remain cached and usable for up to 60 seconds.
+   - **Provider cache eviction after config updates:** PortalService calls `evictProvider(tenantId)` after updating provider config. Domain layer does NOT. Updated config won't take effect until cache expires.
+   - **Subtenant creator membership:** PortalService creates owner membership for subtenant creator. Tenant.createSubtenant does NOT. Subtenant is orphaned (no members).
+   - **Invite revocation:** PortalService has `revokeInvite`. Domain layer does not.
+   - **Member role updates:** PortalService has `updateMemberRole` with last-owner protection (prevents demoting last owner). Domain layer does not.
+   - **Member removal:** PortalService has `removeMember` with last-owner protection and self-removal check. Domain layer does not.
+   - **Leave tenant:** PortalService has `leaveTenant` with active-tenant check and last-owner protection. Domain layer does not.
+   - **Tenant switching:** PortalService has `switchTenant` (validates membership, checks tenant status, re-signs JWT). Domain layer has NONE. Entire multi-tenant switching flow missing.
+   - **Login: active tenant filtering:** PortalService filters by `t.status = 'active'` in multi-tenant list. UserManagementService does NOT. Returns inactive tenants.
+   - **Login: multi-tenant list:** PortalService returns `tenants: [{id, name, role}, ...]` for tenant switcher. UserManagementService returns only primary tenant.
+   - **Invite acceptance: tenant status check:** PortalService validates `t.status = 'active'` in invite query. UserManagementService does NOT. Can accept invite for inactive tenant.
+   - **Invite acceptance: duplicate membership error:** PortalService throws 409 if already a member. UserManagementService silently skips membership creation (no error).
+
+2. **Feature Parity Gaps (7 nice-to-have issues):**
+   - **Profile/dashboard bootstrap:** PortalService has `getMe` (composite query: user + role + tenant + provider config + agents + subtenants + all tenants). Domain layer has NONE.
+   - **Resolved agent view:** PortalService has `getAgentResolved` (recursive CTE walks parent chain, resolves inherited config). Domain layer has NONE.
+   - **Conversation/partition management:** PortalService has full CRUD for conversations and partitions. Domain layer has ZERO conversation management.
+   - **Admin tenant management:** AdminService has admin-level tenant CRUD (create without users, hard delete, list with filters). Domain layer has NONE.
+   - **Agent cache eviction:** PortalService does NOT call `evictProvider` after agent updates. Neither does domain layer. Shared gap: agent config changes don't invalidate cache.
+   - **Email uniqueness check with 409:** PortalService pre-checks email and throws 409. UserManagementService relies on DB constraint (generic error).
+   - **Tenant name trimming:** PortalService trims tenant name. UserManagementService uses raw `dto.tenantName`.
+
+3. **Password Hashing & JWT Signing:**
+   - Both PortalService and UserManagementService use **scrypt** with same pattern (16-byte salt, 64-byte derived key, `salt:key` format).
+   - Both use **fast-jwt** with same secret (`PORTAL_JWT_SECRET`), same expiry (24h), same payload (`{ sub, tenantId, role }`).
+   - AdminService uses scrypt for admin users (isolated from portal auth).
+   - **No gap** — domain layer has password hashing and JWT signing.
+
+4. **Architecture Pattern Differences:**
+   - **PortalService:** Raw SQL via Knex (`rawQuery()` helper). Explicit transactions. Manual JSONB serialization.
+   - **Domain Services:** ORM (MikroORM) with entities. EntityManager flush (implicit transactions). Auto JSONB handling.
+   - **Cache helpers:** Both legacy services import `invalidateCachedKey` and `evictProvider` from `src/auth.ts` and `src/providers/registry.ts`. Domain services do NOT import or call these.
+
+5. **Business Rules in Legacy Services:**
+   - **Last-owner protection:** PortalService checks owner count before demotion/removal/leave (`SELECT COUNT(*) ... WHERE role = 'owner'`). Prevents leaving/removing last owner. Domain layer has NONE.
+   - **Self-removal check:** PortalService prevents self-removal via `removeMember` ("use leave instead"). Domain layer has NONE.
+   - **Active tenant check on leave:** PortalService prevents leaving currently active tenant. Domain layer has NONE.
+   - **Active tenant filtering:** PortalService filters inactive tenants in login response and tenant lists. Domain layer does NOT.
+
+6. **Side Effects Missing from Domain Layer:**
+   - **Cache invalidation:** After API key revocation, provider config updates, tenant deactivation.
+   - **Provider eviction:** After provider config updates, tenant deletion.
+   - **Default agent creation:** On tenant signup.
+   - **Membership creation:** On subtenant creation.
+
+**Deliverable:** `.squad/decisions/inbox/keaton-portal-service-audit.md` — 20+ gap items categorized by complexity, with recommendations for 2-sprint migration strategy.
+
+**Migration Recommendation:** Enhance domain services (Option A) over 2 sprints:
+- **Sprint 1:** Fix 13 must-fix issues (blocking functionality, security gaps). Estimated: 3-5 days.
+- **Sprint 2:** Feature parity (7 nice-to-have). Estimated: 5-7 days.
+
+**Key Insight:** Domain layer is structurally sound (ORM, entities, clean patterns) but missing **critical infrastructure** (cache invalidation, default data creation, business rules) and **entire features** (tenant switching, member management, conversation CRUD). Legacy services are production-proven but use raw SQL and lack domain modeling. Path forward: backport infrastructure and features into domain layer, then deprecate legacy services.

@@ -6,6 +6,7 @@ import { User } from '../../domain/entities/User.js';
 import { Tenant } from '../../domain/entities/Tenant.js';
 import { TenantMembership } from '../../domain/entities/TenantMembership.js';
 import { Invite } from '../../domain/entities/Invite.js';
+import { Agent } from '../../domain/entities/Agent.js';
 import type { CreateUserDto, LoginDto, AcceptInviteDto, AuthResult } from '../dtos/index.js';
 
 const scryptAsync = promisify(scrypt);
@@ -36,6 +37,12 @@ export class UserManagementService {
       throw new Error('Valid email and password (min 8 chars) required');
     }
 
+    // Email uniqueness pre-check
+    const existingUser = await this.em.findOne(User, { email: dto.email.toLowerCase() });
+    if (existingUser) {
+      throw Object.assign(new Error('Email already registered'), { status: 409 });
+    }
+
     const passwordHash = await hashPassword(dto.password);
 
     const user = new User();
@@ -47,7 +54,7 @@ export class UserManagementService {
 
     const tenant = new Tenant();
     tenant.id = randomUUID();
-    tenant.name = dto.tenantName ?? `${dto.email}'s Workspace`;
+    tenant.name = (dto.tenantName ?? `${dto.email}'s Workspace`).trim();
     tenant.parentId = null;
     tenant.providerConfig = null;
     tenant.systemPrompt = null;
@@ -68,9 +75,27 @@ export class UserManagementService {
     membership.role = 'owner';
     membership.joinedAt = new Date();
 
+    // Create default agent for the tenant
+    const agent = new Agent();
+    agent.id = randomUUID();
+    agent.tenant = tenant;
+    agent.name = 'Default';
+    agent.providerConfig = null;
+    agent.systemPrompt = null;
+    agent.skills = null;
+    agent.mcpEndpoints = null;
+    agent.mergePolicies = { system_prompt: 'prepend', skills: 'merge', mcp_endpoints: 'merge' };
+    agent.availableModels = null;
+    agent.conversationsEnabled = false;
+    agent.conversationTokenLimit = 0;
+    agent.conversationSummaryModel = null;
+    agent.createdAt = new Date();
+    agent.updatedAt = null;
+
     this.em.persist(user);
     this.em.persist(tenant);
     this.em.persist(membership);
+    this.em.persist(agent);
     await this.em.flush();
 
     const token = signToken({ sub: user.id, tenantId: tenant.id, role: 'owner' });
@@ -91,17 +116,36 @@ export class UserManagementService {
     user.lastLogin = new Date();
     await this.em.flush();
 
-    // Find the user's primary tenant (first 'owner' membership)
-    const membership = await this.em.findOne(
+    // Load all tenant memberships for the user
+    const memberships = await this.em.find(
       TenantMembership,
       { user: user.id },
       { populate: ['tenant'], orderBy: { joinedAt: 'ASC' } },
     );
-    const tenantId = (membership?.tenant as any)?.id ?? '';
-    const tenantName = (membership?.tenant as any)?.name ?? '';
 
-    const token = signToken({ sub: user.id, tenantId, role: membership?.role ?? 'member' });
-    return { token, userId: user.id, tenantId, email: user.email, tenantName };
+    // Filter to only active tenants
+    const activeMemberships = memberships.filter(
+      (m) => (m.tenant as Tenant).status === 'active'
+    );
+
+    if (activeMemberships.length === 0) {
+      throw Object.assign(new Error('No active tenant memberships'), { status: 403 });
+    }
+
+    // Primary tenant is the first active membership
+    const primaryMembership = activeMemberships[0];
+    const tenantId = (primaryMembership.tenant as any)?.id ?? '';
+    const tenantName = (primaryMembership.tenant as any)?.name ?? '';
+
+    // Build tenants list for response
+    const tenants = activeMemberships.map((m) => ({
+      id: (m.tenant as any)?.id ?? '',
+      name: (m.tenant as any)?.name ?? '',
+      role: m.role,
+    }));
+
+    const token = signToken({ sub: user.id, tenantId, role: primaryMembership.role });
+    return { token, userId: user.id, tenantId, email: user.email, tenantName, tenants };
   }
 
   async acceptInvite(dto: AcceptInviteDto): Promise<AuthResult> {
@@ -123,6 +167,12 @@ export class UserManagementService {
     }
 
     const tenant = invite.tenant as Tenant;
+
+    // Check tenant status
+    if (tenant.status !== 'active') {
+      throw Object.assign(new Error('Tenant is not active'), { status: 400 });
+    }
+
     let user = await this.em.findOne(User, { email: dto.email.toLowerCase() });
     let role = 'member';
 
@@ -137,23 +187,23 @@ export class UserManagementService {
       this.em.persist(user);
     }
 
-    // Add membership if not already a member
+    // Check for existing membership
     const existingMembership = await this.em.findOne(TenantMembership, {
       user: user.id,
       tenant: tenant.id,
     });
 
-    if (!existingMembership) {
-      const membership = new TenantMembership();
-      membership.id = randomUUID();
-      membership.user = user;
-      membership.tenant = tenant;
-      membership.role = role;
-      membership.joinedAt = new Date();
-      this.em.persist(membership);
-    } else {
-      role = existingMembership.role;
+    if (existingMembership) {
+      throw Object.assign(new Error('Already a member of this tenant'), { status: 409 });
     }
+
+    const membership = new TenantMembership();
+    membership.id = randomUUID();
+    membership.user = user;
+    membership.tenant = tenant;
+    membership.role = role;
+    membership.joinedAt = new Date();
+    this.em.persist(membership);
 
     invite.useCount += 1;
     await this.em.flush();
@@ -166,5 +216,81 @@ export class UserManagementService {
       email: user.email,
       tenantName: tenant.name,
     };
+  }
+
+  async switchTenant(userId: string, newTenantId: string): Promise<AuthResult> {
+    const user = await this.em.findOneOrFail(User, { id: userId });
+    
+    const membership = await this.em.findOne(
+      TenantMembership,
+      { user: userId, tenant: newTenantId },
+      { populate: ['tenant'] },
+    );
+
+    if (!membership) {
+      throw Object.assign(new Error('No membership in requested tenant'), { status: 403 });
+    }
+
+    const tenant = membership.tenant as Tenant;
+    if (tenant.status !== 'active') {
+      throw Object.assign(new Error('Tenant is not active'), { status: 400 });
+    }
+
+    // Load all active tenant memberships
+    const allMemberships = await this.em.find(
+      TenantMembership,
+      { user: userId },
+      { populate: ['tenant'] },
+    );
+
+    const activeMemberships = allMemberships.filter(
+      (m) => (m.tenant as Tenant).status === 'active'
+    );
+
+    const tenants = activeMemberships.map((m) => ({
+      id: (m.tenant as any)?.id ?? '',
+      name: (m.tenant as any)?.name ?? '',
+      role: m.role,
+    }));
+
+    const token = signToken({ sub: userId, tenantId: newTenantId, role: membership.role });
+    return {
+      token,
+      userId: user.id,
+      tenantId: newTenantId,
+      email: user.email,
+      tenantName: tenant.name,
+      tenants,
+    };
+  }
+
+  async leaveTenant(userId: string, tenantId: string, currentTenantId: string): Promise<void> {
+    // Prevent leaving currently active tenant
+    if (tenantId === currentTenantId) {
+      throw Object.assign(new Error('Switch to a different tenant before leaving'), { status: 400 });
+    }
+
+    const membership = await this.em.findOne(TenantMembership, {
+      user: userId,
+      tenant: tenantId,
+    });
+
+    if (!membership) {
+      throw Object.assign(new Error('Membership not found'), { status: 404 });
+    }
+
+    // Check if user is the last owner
+    if (membership.role === 'owner') {
+      const ownerCount = await this.em.count(TenantMembership, {
+        tenant: tenantId,
+        role: 'owner',
+      });
+
+      if (ownerCount === 1) {
+        throw Object.assign(new Error('Cannot leave tenant as the last owner'), { status: 400 });
+      }
+    }
+
+    await this.em.removeAndFlush(membership);
   }
 }

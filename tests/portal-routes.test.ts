@@ -44,6 +44,8 @@ beforeAll(async () => {
 
 import { PortalService } from '../src/application/services/PortalService.js';
 import { ConversationManagementService } from '../src/application/services/ConversationManagementService.js';
+import { UserManagementService } from '../src/application/services/UserManagementService.js';
+import { TenantManagementService } from '../src/application/services/TenantManagementService.js';
 
 function buildMockConvSvc(): ConversationManagementService {
   return {
@@ -54,6 +56,98 @@ function buildMockConvSvc(): ConversationManagementService {
     storeMessages: vi.fn().mockResolvedValue(undefined),
     createSnapshot: vi.fn().mockResolvedValue('snap-uuid'),
   } as unknown as ConversationManagementService;
+}
+
+function buildMockUserMgmtSvc(): UserManagementService {
+  const existingEmails = new Set<string>();
+  return {
+    createUser: vi.fn().mockImplementation((dto: any) => {
+      const email = dto.email.toLowerCase();
+      if (existingEmails.has(email)) {
+        const error: any = new Error('Email already registered');
+        error.status = 409;
+        throw error;
+      }
+      existingEmails.add(email);
+      return Promise.resolve({ token: 'test-token', userId: 'new-user-id', email: dto.email, tenantId: 'new-tenant-id', tenantName: dto.tenantName });
+    }),
+    login: vi.fn().mockImplementation(async (dto: any) => {
+      if (dto.email.toLowerCase() !== TEST_USER_EMAIL.toLowerCase()) {
+        throw new Error('Invalid credentials');
+      }
+      const [salt, key] = PASSWORD_HASH.split(':');
+      const derivedKey = (await scryptAsync(dto.password, salt, 64)) as Buffer;
+      const { timingSafeEqual } = await import('node:crypto');
+      const valid = timingSafeEqual(Buffer.from(key, 'hex'), derivedKey);
+      if (!valid) {
+        throw new Error('Invalid credentials');
+      }
+      return {
+        token: signPortalToken({ sub: TEST_USER_ID, tenantId: TEST_TENANT_ID, role: 'owner' }),
+        userId: TEST_USER_ID,
+        email: TEST_USER_EMAIL,
+        tenantId: TEST_TENANT_ID,
+        tenantName: TEST_TENANT_NAME,
+        tenants: [{ id: TEST_TENANT_ID, name: TEST_TENANT_NAME, role: 'owner' }],
+      };
+    }),
+    acceptInvite: vi.fn().mockResolvedValue({
+      token: 'test-token', userId: TEST_USER_ID, email: TEST_USER_EMAIL,
+      tenantId: TEST_TENANT_ID, tenantName: TEST_TENANT_NAME,
+    }),
+    switchTenant: vi.fn().mockResolvedValue({
+      token: 'test-token', userId: TEST_USER_ID, email: TEST_USER_EMAIL,
+      tenantId: TEST_TENANT_ID, tenantName: TEST_TENANT_NAME,
+      tenants: [{ id: TEST_TENANT_ID, name: TEST_TENANT_NAME, role: 'owner' }],
+    }),
+    leaveTenant: vi.fn().mockResolvedValue(undefined),
+  } as unknown as UserManagementService;
+}
+
+function buildMockTenantMgmtSvc(): TenantManagementService {
+  return {
+    listApiKeys: vi.fn().mockResolvedValue([]),
+    createApiKey: vi.fn().mockResolvedValue({
+      id: 'key-uuid', name: 'Test Key', keyPrefix: 'loom_test', status: 'active',
+      createdAt: new Date().toISOString(), rawKey: 'loom_test_secret', agentId: TEST_AGENT_ID, agentName: TEST_AGENT_NAME,
+    }),
+    revokeApiKey: vi.fn().mockResolvedValue({ keyHash: 'hash123' }),
+    createAgent: vi.fn().mockImplementation((tenantId: string, dto: any) => Promise.resolve({
+      id: 'new-agent-id', tenantId, name: dto.name, providerConfig: dto.providerConfig,
+      systemPrompt: dto.systemPrompt, skills: dto.skills, mcpEndpoints: dto.mcpEndpoints,
+      mergePolicies: dto.mergePolicies, availableModels: dto.availableModels,
+      conversationsEnabled: false, conversationTokenLimit: null, conversationSummaryModel: null,
+      createdAt: new Date().toISOString(), updatedAt: null,
+    })),
+    updateAgent: vi.fn().mockResolvedValue({
+      id: TEST_AGENT_ID, tenantId: TEST_TENANT_ID, name: 'Updated', providerConfig: null,
+      systemPrompt: null, skills: null, mcpEndpoints: null,
+      mergePolicies: { system_prompt: 'prepend', skills: 'merge', mcp_endpoints: 'merge' },
+      availableModels: null, conversationsEnabled: false, conversationTokenLimit: null,
+      conversationSummaryModel: null, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+    }),
+    deleteAgent: vi.fn().mockResolvedValue(undefined),
+    listMembers: vi.fn().mockResolvedValue([]),
+    updateMemberRole: vi.fn().mockResolvedValue(undefined),
+    removeMember: vi.fn().mockResolvedValue(undefined),
+    inviteUser: vi.fn().mockResolvedValue({
+      id: 'invite-uuid', token: 'invite-token-123', tenantId: TEST_TENANT_ID,
+      maxUses: null, useCount: 0, expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+      revokedAt: null, createdAt: new Date().toISOString(),
+    }),
+    listInvites: vi.fn().mockResolvedValue([]),
+    revokeInvite: vi.fn().mockResolvedValue(undefined),
+    createSubtenant: vi.fn().mockResolvedValue({
+      id: 'subtenant-uuid', name: 'Subtenant', status: 'active',
+      createdAt: new Date().toISOString(), providerConfig: null, systemPrompt: null,
+      skills: null, mcpEndpoints: null, availableModels: null,
+    }),
+    updateSettings: vi.fn().mockResolvedValue({
+      id: TEST_TENANT_ID, name: TEST_TENANT_NAME, status: 'active',
+      createdAt: new Date().toISOString(), providerConfig: null, systemPrompt: null,
+      skills: null, mcpEndpoints: null, availableModels: null,
+    }),
+  } as unknown as TenantManagementService;
 }
 
 function buildMockPortalSvc(overrides: Partial<Record<string, any>> = {}): PortalService {
@@ -163,9 +257,11 @@ function buildMockPortalSvc(overrides: Partial<Record<string, any>> = {}): Porta
 async function buildApp(
   svc: PortalService = buildMockPortalSvc(),
   conversationSvc: ConversationManagementService = buildMockConvSvc(),
+  userMgmtSvc: UserManagementService = buildMockUserMgmtSvc(),
+  tenantMgmtSvc: TenantManagementService = buildMockTenantMgmtSvc(),
 ): Promise<FastifyInstance> {
   const app = Fastify({ logger: false });
-  registerPortalRoutes(app, svc, conversationSvc);
+  registerPortalRoutes(app, svc, conversationSvc, userMgmtSvc, tenantMgmtSvc);
   await app.ready();
   return app;
 }
@@ -210,8 +306,14 @@ describe('POST /v1/portal/auth/signup', () => {
   });
 
   it('returns 409 when email is already registered', async () => {
+    const mockUserMgmtSvc = buildMockUserMgmtSvc();
+    (mockUserMgmtSvc.createUser as any).mockRejectedValue(
+      Object.assign(new Error('Email already registered'), { status: 409 })
+    );
     const localApp = await buildApp(
-      buildMockPortalSvc({ signup: vi.fn().mockRejectedValue(Object.assign(new Error('Email already registered'), { status: 409 })) }),
+      buildMockPortalSvc(),
+      buildMockConvSvc(),
+      mockUserMgmtSvc,
     );
 
     const res = await localApp.inject({

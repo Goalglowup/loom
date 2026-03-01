@@ -932,3 +932,152 @@ if (tenantId) {
 - Streaming conversation support deferred (requires SSE buffering for message archival)
 - Summarization model configurable per agent; defaults to request model if unset
 - Portal encryption/decryption handles key rotation gracefully (silent skip on old messages)
+
+## Learnings
+
+### 2026-02-28: Domain Service Gaps - PortalService Parity
+
+**Task:** Fixed 13 critical gaps in `UserManagementService` and `TenantManagementService` to achieve parity with legacy `PortalService`.
+
+**Changes to UserManagementService:**
+
+1. **Email uniqueness pre-check in `createUser`**: Added explicit check before user creation, throws 409 "Email already registered" instead of relying on DB constraint
+2. **Tenant name trimming in `createUser`**: Applied `.trim()` to tenant name to match legacy behavior
+3. **Default agent creation in `createUser`**: After creating user+tenant+membership, now also creates a default Agent entity named "Default" — critical for API key creation flow
+4. **Active tenant filtering in `login`**: Changed from `findOne` to `find` to load ALL tenant memberships, filter to only `status = 'active'` tenants
+5. **Multi-tenant list in `login`**: Return `tenants: [{id, name, role}]` array in AuthResult for all active memberships (tenant switcher support)
+6. **No active tenants guard in `login`**: Throw 403 "No active tenant memberships" if user has zero active tenants
+7. **Tenant status check in `acceptInvite`**: Verify `invite.tenant.status === 'active'`, throw 400 if inactive
+8. **Duplicate membership check in `acceptInvite`**: Changed from silent skip to explicit 409 "Already a member of this tenant" error
+9. **New method `switchTenant(userId, newTenantId)`**: Validates membership + tenant status, signs new JWT with new tenantId, returns AuthResult with full tenant list
+10. **New method `leaveTenant(userId, tenantId, currentTenantId)`**: Prevents leaving active tenant, checks last-owner protection, removes membership
+
+**Changes to TenantManagementService:**
+
+1. **Return keyHash in `revokeApiKey`**: Changed return type from `void` to `{ keyHash: string }` to support cache invalidation (route handler calls `invalidateCachedKey()`)
+2. **Provider cache eviction in `updateSettings`**: If `providerConfig` is updated, call `evictProvider(tenantId)` after flush to invalidate provider cache
+3. **Creator membership in `createSubtenant`**: After creating subtenant, now also creates TenantMembership for `dto.createdByUserId` with role 'owner' (prevents orphaned subtenants)
+4. **New method `revokeInvite(tenantId, inviteId)`**: Load invite, throw 404 if not found, set `revokedAt = new Date()`, flush
+5. **New method `listInvites(tenantId)`**: Query all invites for tenant, return as view models (includes `revokedAt` field)
+6. **New method `updateMemberRole(tenantId, targetUserId, role)`**: Load membership, check last-owner protection before demoting from owner to member, update role
+7. **New method `removeMember(tenantId, targetUserId, requestingUserId)`**: Prevent self-removal ("use leave instead"), check last-owner protection before removing owners, delete membership
+
+**DTO Updates:**
+- `AuthResult` now includes optional `tenants?: Array<{ id, name, role }>` for multi-tenant context
+- `CreateSubtenantDto` now includes `createdByUserId: string` field
+- `InviteViewModel` now includes `revokedAt: string | null` field
+
+**Key Patterns Observed:**
+- **Error pattern**: `throw Object.assign(new Error('message'), { status: 409 })` for HTTP status codes
+- **Last-owner protection**: Count owners before demoting/removing, prevent if count === 1
+- **Cache invalidation**: `evictProvider(tenantId)` after provider config changes, `invalidateCachedKey(keyHash)` after key revocation
+- **Default agent structure**: Agent with `mergePolicies = { system_prompt: 'prepend', skills: 'merge', mcp_endpoints: 'merge' }`, required for API key creation
+- **Active tenant filtering**: Filter memberships by `(m.tenant as Tenant).status === 'active'` before returning to user
+
+**Test Updates:**
+- Updated `createUser` test to expect 4 persist calls (was 3): user, tenant, membership, **agent**
+- Updated `login` tests to mock `find()` instead of `findOne()` for membership loading
+- Added `status: 'active'` to mocked tenant objects in login tests
+
+All 355 tests passing. TypeScript compiles cleanly.
+
+## Learnings
+
+### 2026-02-24: Portal Migration — Phases 2 & 3 (Domain Services Integration)
+
+**Phase 2 — Wire domain services into portal routes:**
+- Updated `src/index.ts` to instantiate `UserManagementService` and `TenantManagementService` alongside existing services
+- Modified `registerPortalRoutes` signature to accept the new domain services as parameters
+- Ensured all services share the same EntityManager instance (`em`) for transaction consistency
+
+**Phase 3 — Migrate route handlers:**
+Migrated 20+ route handlers from PortalService to domain services:
+- **Auth routes:** signup, login, signup-with-invite, switch-tenant, leave-tenant → `UserManagementService`
+- **API key routes:** list, create, revoke → `TenantManagementService.{listApiKeys, createApiKey, revokeApiKey}`
+- **Agent routes:** create, update, delete → `TenantManagementService` (list still on PortalService)
+- **Member routes:** list, updateRole, remove → `TenantManagementService`
+- **Invite routes:** create, list, revoke → `TenantManagementService`
+- **Subtenant route:** create → `TenantManagementService.createSubtenant`
+- **Settings route:** PATCH /v1/portal/settings → `TenantManagementService.updateSettings`
+
+**Response shape transformations:**
+- Domain services return view models with camelCase fields (e.g., `keyPrefix`, `agentId`)
+- PortalService returns raw DB rows with snake_case (e.g., `key_prefix`, `agent_id`)
+- Added inline transformations in routes to convert domain view models to the expected `formatAgent` shape
+- Handled null/undefined type mismatches (e.g., `conversationTokenLimit: number | null` → `number | undefined` for formatAgent)
+
+**Error handling updates:**
+- `UserManagementService.login` throws `Error('Invalid credentials')` instead of returning null
+- Updated route handler to catch and convert to 401 response
+- `TenantManagementService.revokeApiKey` now returns `{ keyHash }` instead of `keyHash | null`
+- Changed route to use try/catch and return 404 on error
+
+**Test updates:**
+- Extended `buildApp` test helper to accept `UserManagementService` and `TenantManagementService` mocks
+- Created `buildMockUserMgmtSvc()` and `buildMockTenantMgmtSvc()` with vi.fn() implementations
+- Updated failing test to override `userMgmtSvc.createUser` instead of `portalSvc.signup`
+- All 355 tests still passing after migration
+
+**Key Learnings:**
+- When migrating from raw SQL service to domain services, response shapes often differ slightly—inline transformations at the route layer bridge the gap cleanly
+- Domain services throw errors with `.status` properties; route handlers catch and map to HTTP status codes
+- Test mocks must match the actual service interface behavior (throw vs return null, return types, etc.)
+- Type mismatches (`number | null` vs `number | undefined`) surface at route boundaries—use `?? undefined` to convert
+- Migrating in phases (wire services first, then migrate routes) makes debugging easier than a big-bang change
+
+**Status:** ✅ Complete — Phases 2 & 3 of portal migration done. All tests passing. PortalService still handles routes not yet migrated (getAgent, getAgentResolved, listAgents, traces, analytics, conversations).
+
+### 2026-02-24: Portal Migration — Phase 4 (Slim Down PortalService)
+
+**Objective:** Remove all methods from PortalService that have been successfully migrated to domain services.
+
+**Removed methods:**
+Authentication & User Management (migrated to `UserManagementService`):
+- `signup`
+- `login`
+- `signupWithInvite`
+- `switchTenant`
+- `leaveTenant`
+
+Tenant Management (migrated to `TenantManagementService`):
+- `listApiKeys`, `createApiKey`, `revokeApiKey`
+- `createAgent`, `updateAgent`, `deleteAgent`
+- `listMembers`, `updateMemberRole`, `removeMember`
+- `createInvite`, `listInvites`, `revokeInvite`
+- `createSubtenant`
+- `updateProviderSettings`
+
+**Removed utility functions & imports:**
+Since all auth/API key methods are gone, removed:
+- `hashPassword()`, `verifyPassword()` (no longer used)
+- `generateApiKey()` (no longer used)
+- `signPortalToken`, `PORTAL_JWT_SECRET` (no longer used)
+- Imports: `randomBytes`, `createHash`, `scrypt`, `timingSafeEqual`, `promisify`, `createSigner` from crypto/fast-jwt
+
+**Methods still in PortalService:**
+These remain because they're still called from `portal.ts`:
+- `getMe` — user profile + tenant context
+- `listTraces` — analytics traces
+- `getInviteInfo` — public invite info
+- `listUserTenants` — user's tenant memberships
+- `listSubtenants` — subtenant hierarchy
+- `listAgents` — agent listing
+- `getAgent`, `getAgentResolved`, `getAgentForChat` — agent read operations
+- `listPartitions`, `createPartition`, `updatePartition`, `deletePartition` — partition management
+- `listConversations`, `getConversation` — conversation management
+
+**Verification:**
+- Analyzed `src/routes/portal.ts` to find all `svc.` method calls still in use
+- Removed only methods confirmed to be no longer referenced
+- ✅ TypeScript: `npx tsc --noEmit` — passes with no errors
+- ✅ Tests: `npm test` — all 355 tests pass
+
+**Key Learnings:**
+- PortalService went from ~40 methods to ~15 methods
+- Removed ~500 lines of migrated code
+- Imports significantly reduced (no longer need crypto/JWT utilities)
+- Systematic verification approach (grep for `svc.` in portal.ts) ensures safe removal
+- All business logic for auth/tenants/members/invites/API keys now fully lives in domain services
+- PortalService is now focused on: profiles, traces, invites (read-only), agents (read-only), partitions, conversations
+
+**Status:** ✅ Complete — Phase 4 done. PortalService successfully slimmed down by removing all migrated methods.

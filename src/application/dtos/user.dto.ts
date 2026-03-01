@@ -22,4 +22,5 @@ export interface AuthResult {
   tenantId: string;
   email: string;
   tenantName: string;
+  tenants?: Array<{ id: string; name: string; role: string }>;
 }

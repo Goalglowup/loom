@@ -5,6 +5,8 @@ import { Agent } from '../../domain/entities/Agent.js';
 import { ApiKey } from '../../domain/entities/ApiKey.js';
 import { TenantMembership } from '../../domain/entities/TenantMembership.js';
 import { User } from '../../domain/entities/User.js';
+import { Invite } from '../../domain/entities/Invite.js';
+import { evictProvider } from '../../providers/registry.js';
 import type {
   TenantViewModel,
   MemberViewModel,
@@ -89,6 +91,7 @@ export class TenantManagementService {
   async updateSettings(tenantId: string, dto: UpdateTenantDto): Promise<TenantViewModel> {
     const tenant = await this.em.findOneOrFail(Tenant, { id: tenantId });
     if (dto.name !== undefined) tenant.name = dto.name;
+    const providerConfigChanged = dto.providerConfig !== undefined;
     if (dto.providerConfig !== undefined) tenant.providerConfig = dto.providerConfig;
     if (dto.systemPrompt !== undefined) tenant.systemPrompt = dto.systemPrompt;
     if (dto.skills !== undefined) tenant.skills = dto.skills;
@@ -97,6 +100,11 @@ export class TenantManagementService {
     if (dto.status !== undefined) tenant.status = dto.status;
     tenant.updatedAt = new Date();
     await this.em.flush();
+    
+    if (providerConfigChanged) {
+      evictProvider(tenantId);
+    }
+    
     return toTenantViewModel(tenant);
   }
 
@@ -117,6 +125,7 @@ export class TenantManagementService {
       maxUses: invite.maxUses,
       useCount: invite.useCount,
       expiresAt: invite.expiresAt.toISOString(),
+      revokedAt: null,
       createdAt: invite.createdAt.toISOString(),
     };
   }
@@ -139,6 +148,16 @@ export class TenantManagementService {
     const parent = await this.em.findOneOrFail(Tenant, { id: parentTenantId });
     const child = parent.createSubtenant(dto.name);
     this.em.persist(child);
+    
+    // Create owner membership for the creator
+    const membership = new TenantMembership();
+    membership.id = randomUUID();
+    membership.user = await this.em.findOneOrFail(User, { id: dto.createdByUserId });
+    membership.tenant = child;
+    membership.role = 'owner';
+    membership.joinedAt = new Date();
+    this.em.persist(membership);
+    
     await this.em.flush();
     return toTenantViewModel(child);
   }
@@ -199,15 +218,101 @@ export class TenantManagementService {
     return { ...toApiKeyViewModel(apiKey), rawKey };
   }
 
-  async revokeApiKey(tenantId: string, keyId: string): Promise<void> {
+  async revokeApiKey(tenantId: string, keyId: string): Promise<{ keyHash: string }> {
     const key = await this.em.findOneOrFail(ApiKey, { id: keyId, tenant: tenantId });
+    const keyHash = key.keyHash;
     key.status = 'revoked';
     key.revokedAt = new Date();
     await this.em.flush();
+    return { keyHash };
   }
 
   async listApiKeys(tenantId: string): Promise<ApiKeyViewModel[]> {
     const keys = await this.em.find(ApiKey, { tenant: tenantId }, { populate: ['agent'] });
     return keys.map(toApiKeyViewModel);
+  }
+
+  async revokeInvite(tenantId: string, inviteId: string): Promise<void> {
+    const invite = await this.em.findOne(Invite, { id: inviteId, tenant: tenantId });
+    
+    if (!invite) {
+      throw Object.assign(new Error('Invite not found'), { status: 404 });
+    }
+    
+    invite.revokedAt = new Date();
+    await this.em.flush();
+  }
+
+  async listInvites(tenantId: string): Promise<InviteViewModel[]> {
+    const invites = await this.em.find(Invite, { tenant: tenantId });
+    return invites.map((invite) => ({
+      id: invite.id,
+      token: invite.token,
+      tenantId: (invite.tenant as any)?.id ?? tenantId,
+      maxUses: invite.maxUses,
+      useCount: invite.useCount,
+      expiresAt: invite.expiresAt.toISOString(),
+      revokedAt: invite.revokedAt ? invite.revokedAt.toISOString() : null,
+      createdAt: invite.createdAt.toISOString(),
+    }));
+  }
+
+  async updateMemberRole(
+    tenantId: string,
+    targetUserId: string,
+    role: 'owner' | 'member',
+  ): Promise<void> {
+    const membership = await this.em.findOneOrFail(TenantMembership, {
+      tenant: tenantId,
+      user: targetUserId,
+    });
+
+    // If demoting from owner to member, check we're not removing the last owner
+    if (membership.role === 'owner' && role === 'member') {
+      const ownerCount = await this.em.count(TenantMembership, {
+        tenant: tenantId,
+        role: 'owner',
+      });
+
+      if (ownerCount === 1) {
+        throw Object.assign(new Error('Cannot demote the last owner'), { status: 400 });
+      }
+    }
+
+    membership.role = role;
+    await this.em.flush();
+  }
+
+  async removeMember(
+    tenantId: string,
+    targetUserId: string,
+    requestingUserId: string,
+  ): Promise<void> {
+    if (targetUserId === requestingUserId) {
+      throw Object.assign(new Error('Use leave instead'), { status: 400 });
+    }
+
+    const membership = await this.em.findOne(TenantMembership, {
+      tenant: tenantId,
+      user: targetUserId,
+    });
+
+    if (!membership) {
+      throw Object.assign(new Error('Membership not found'), { status: 404 });
+    }
+
+    // If removing an owner, check we're not removing the last owner
+    if (membership.role === 'owner') {
+      const ownerCount = await this.em.count(TenantMembership, {
+        tenant: tenantId,
+        role: 'owner',
+      });
+
+      if (ownerCount === 1) {
+        throw Object.assign(new Error('Cannot remove the last owner'), { status: 400 });
+      }
+    }
+
+    await this.em.removeAndFlush(membership);
   }
 }

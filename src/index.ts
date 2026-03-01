@@ -15,6 +15,8 @@ import { applyAgentToRequest, handleMcpRoundTrip } from './agent.js';
 import { ConversationManagementService } from './application/services/ConversationManagementService.js';
 import { PortalService } from './application/services/PortalService.js';
 import { AdminService } from './application/services/AdminService.js';
+import { UserManagementService } from './application/services/UserManagementService.js';
+import { TenantManagementService } from './application/services/TenantManagementService.js';
 import { randomUUID } from 'node:crypto';
 import { registerDashboardRoutes } from './routes/dashboard.js';
 import { registerAdminRoutes } from './routes/admin.js';
@@ -49,6 +51,8 @@ const start = async () => {
     const conversationSvc = new ConversationManagementService(em);
     const portalSvc = new PortalService(em);
     const adminSvc = new AdminService(em);
+    const userMgmtSvc = new UserManagementService(em);
+    const tenantMgmtSvc = new TenantManagementService(em);
 
     // Register JWT plugin for admin authentication
     fastify.register(fastifyJWT, {
@@ -109,7 +113,7 @@ const start = async () => {
 
     // Register portal routes (/v1/portal/*)
     fastify.register((instance, opts, done) => {
-      registerPortalRoutes(instance, portalSvc, conversationSvc);
+      registerPortalRoutes(instance, portalSvc, conversationSvc, userMgmtSvc, tenantMgmtSvc);
       done();
     });
 
