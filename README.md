@@ -80,12 +80,9 @@ Admin operations:
 
 ## Architecture
 
-**Stack:**
-- **Framework:** Fastify (HTTP server with middleware support)
-- **HTTP Client:** undici (efficient upstream provider requests)
-- **Database:** PostgreSQL with JSONB and native partitioning
-- **Encryption:** AES-256-GCM (PBKDF2 derived keys)
-- **Authentication:** JWT (both portal and admin), API key hashing (SHA-256)
+For the full architecture reference — component diagrams, data flows, multi-tenancy model, encryption design, and more — see **[docs/architecture.md](docs/architecture.md)**.
+
+**Stack:** Fastify, undici, PostgreSQL, MikroORM, AES-256-GCM encryption, JWT + API key auth
 
 **Key Components:**
 - `src/index.ts` — Server startup, route registration

@@ -432,3 +432,22 @@ Each issue includes:
 - **Sprint 2:** Feature parity (7 nice-to-have). Estimated: 5-7 days.
 
 **Key Insight:** Domain layer is structurally sound (ORM, entities, clean patterns) but missing **critical infrastructure** (cache invalidation, default data creation, business rules) and **entire features** (tenant switching, member management, conversation CRUD). Legacy services are production-proven but use raw SQL and lack domain modeling. Path forward: backport infrastructure and features into domain layer, then deprecate legacy services.
+
+### Architecture Document Created (2026-02-27)
+
+**Task:** Created comprehensive architecture document at `docs/architecture.md`.
+
+**Key architectural facts captured:**
+1. **Single Fastify process** serves gateway, portal API, dashboard API, admin API, and two static SPAs (portal at `/`, dashboard at `/dashboard`)
+2. **Two persistence strategies coexist** — legacy services (PortalService, AdminService) use raw SQL via Knex; domain services use MikroORM entities. Migration in progress.
+3. **Three auth domains** — Gateway (API key + LRU cache), Portal (fast-jwt), Admin (@fastify/jwt). Each has its own secret and middleware.
+4. **Trace recorder** is a singleton with batched async flush (100 rows / 5s). Fire-and-forget from the hot path.
+5. **Analytics computed on-read** from traces table via raw SQL — no materialized views or pre-aggregation.
+6. **Encryption** uses AES-256-GCM with HMAC-SHA256 per-tenant key derivation from a master key. Applied to traces, conversations, snapshots, and provider API keys.
+7. **Provider abstraction** — BaseProvider → OpenAI/Azure adapters with lazy-cached instances per agent. Ollama supported via OpenAI adapter with custom baseUrl.
+8. **14 migrations** (CommonJS), traces partitioned by month, 12 core entities.
+9. **Subtenant hierarchy** via `parent_id` self-FK with recursive CTE resolution for inherited config.
+
+**Deliverables:**
+- `docs/architecture.md` — 13-section architecture reference with Mermaid diagrams
+- `README.md` — Updated Architecture section to link to the full doc

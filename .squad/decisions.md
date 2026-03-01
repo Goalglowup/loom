@@ -1350,3 +1350,45 @@ Infrastructure improvements:
 All tests passing. Suite total: 502 tests.
 
 **Commit:** c25c81c
+
+---
+
+# Architecture Document Created
+
+**By:** Keaton (Lead)  
+**Date:** 2026-02-27  
+**Status:** Active
+
+`docs/architecture.md` is now the **canonical architecture reference** for Loom.
+
+## What Was Created
+
+A 13-section architecture document grounded in the actual codebase, covering:
+
+1. System Overview
+2. High-Level Architecture (Mermaid diagram)
+3. Component Breakdown (gateway, services, domain, infrastructure, routes, frontends)
+4. Request Data Flow (sequence diagrams for streaming and non-streaming)
+5. Multi-Tenancy Model (ER diagram, isolation mechanics, lifecycle)
+6. Authentication & Authorization (three auth domains)
+7. Database & Persistence (MikroORM, migrations, partitioning)
+8. Analytics Pipeline (on-read SQL, cost estimation, subtenant rollup)
+9. Provider Abstraction (class diagram, adapter patterns)
+10. Encryption (AES-256-GCM envelope encryption)
+11. Testing Strategy (Vitest, test patterns, coverage)
+12. Configuration & Deployment (env vars, docker-compose, service topology)
+13. Key Design Principles
+
+## Impact
+
+- README.md Architecture section updated to link to `docs/architecture.md`
+- All future architecture discussions should reference this document
+- Document reflects code-as-built, not aspirational design
+
+## Maintenance
+
+This document should be updated when:
+- New services, routes, or providers are added
+- Migration strategy changes
+- Service topology changes (e.g., Phase 2 service split)
+- Auth model changes
