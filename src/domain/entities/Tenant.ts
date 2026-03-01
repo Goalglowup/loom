@@ -22,24 +22,22 @@ export class Tenant {
   members: TenantMembership[] = [];
   invites: Invite[] = [];
 
-  constructor(owner?: User, name?: string) {
-    if (owner !== undefined && name !== undefined) {
-      this.id = randomUUID();
-      this.name = name;
-      this.parentId = null;
-      this.providerConfig = null;
-      this.systemPrompt = null;
-      this.skills = null;
-      this.mcpEndpoints = null;
-      this.status = 'active';
-      this.availableModels = null;
-      this.updatedAt = null;
-      this.createdAt = new Date();
-      this.agents = [];
-      this.members = [];
-      this.invites = [];
-      this.addMembership(owner, 'owner');
-    }
+  constructor(owner: User, name: string) {
+    this.id = randomUUID();
+    this.name = name;
+    this.parentId = null;
+    this.providerConfig = null;
+    this.systemPrompt = null;
+    this.skills = null;
+    this.mcpEndpoints = null;
+    this.status = 'active';
+    this.availableModels = null;
+    this.updatedAt = null;
+    this.createdAt = new Date();
+    this.agents = [];
+    this.members = [];
+    this.invites = [];
+    this.addMembership(owner, 'owner');
   }
 
   createAgent(name: string, config?: Partial<Agent>): Agent {
@@ -94,21 +92,22 @@ export class Tenant {
   }
 
   createSubtenant(name: string): Tenant {
-    const child = new Tenant();
-    child.id = randomUUID();
-    child.name = name;
-    child.parentId = this.id;
-    child.providerConfig = null;
-    child.systemPrompt = null;
-    child.skills = null;
-    child.mcpEndpoints = null;
-    child.status = 'active';
-    child.availableModels = null;
-    child.updatedAt = null;
-    child.createdAt = new Date();
-    child.agents = [];
-    child.members = [];
-    child.invites = [];
+    const child = Object.assign(Object.create(Tenant.prototype) as Tenant, {
+      id: randomUUID(),
+      name,
+      parentId: this.id,
+      providerConfig: null,
+      systemPrompt: null,
+      skills: null,
+      mcpEndpoints: null,
+      status: 'active',
+      availableModels: null,
+      updatedAt: null,
+      createdAt: new Date(),
+      agents: [],
+      members: [],
+      invites: [],
+    });
     // Inherit parent member list
     for (const m of this.members) {
       child.addMembership(m.user, m.role);

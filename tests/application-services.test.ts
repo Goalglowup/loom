@@ -28,21 +28,22 @@ function buildMockEm(overrides: Partial<Record<string, any>> = {}): EntityManage
 }
 
 function makeTenant(overrides: Partial<Tenant> = {}): Tenant {
-  const t = new Tenant();
-  t.id = 'tenant-1';
-  t.name = 'Test Tenant';
-  t.parentId = null;
-  t.providerConfig = null;
-  t.systemPrompt = null;
-  t.skills = null;
-  t.mcpEndpoints = null;
-  t.status = 'active';
-  t.availableModels = null;
-  t.updatedAt = null;
-  t.createdAt = new Date();
-  t.agents = [];
-  t.members = [];
-  t.invites = [];
+  const t = Object.assign(Object.create(Tenant.prototype) as Tenant, {
+    id: 'tenant-1',
+    name: 'Test Tenant',
+    parentId: null,
+    providerConfig: null,
+    systemPrompt: null,
+    skills: null,
+    mcpEndpoints: null,
+    status: 'active',
+    availableModels: null,
+    updatedAt: null,
+    createdAt: new Date(),
+    agents: [],
+    members: [],
+    invites: [],
+  });
   Object.assign(t, overrides);
   return t;
 }

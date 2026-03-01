@@ -11,12 +11,13 @@ describe('Tenant', () => {
   let tenant: Tenant;
 
   beforeEach(() => {
-    tenant = new Tenant();
-    tenant.id = 'tenant-1';
-    tenant.name = 'Test Tenant';
-    tenant.agents = [];
-    tenant.members = [];
-    tenant.invites = [];
+    tenant = Object.assign(Object.create(Tenant.prototype) as Tenant, {
+      id: 'tenant-1',
+      name: 'Test Tenant',
+      agents: [],
+      members: [],
+      invites: [],
+    });
   });
 
   describe('createAgent', () => {
@@ -112,9 +113,10 @@ describe('Agent', () => {
   let tenant: Tenant;
 
   beforeEach(() => {
-    tenant = new Tenant();
-    tenant.id = 'tenant-1';
-    tenant.name = 'Test Tenant';
+    tenant = Object.assign(Object.create(Tenant.prototype) as Tenant, {
+      id: 'tenant-1',
+      name: 'Test Tenant',
+    });
 
     agent = new Agent();
     agent.id = 'agent-1';
