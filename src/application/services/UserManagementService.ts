@@ -31,6 +31,13 @@ async function verifyPassword(password: string, storedHash: string): Promise<boo
 export class UserManagementService {
   constructor(private readonly em: EntityManager) {}
 
+  private createUserWithTenant(email: string, passwordHash: string, tenantName?: string): { user: User; tenant: Tenant } {
+    const user = new User(email, passwordHash);
+    const tenant = new Tenant(user, tenantName ?? `${email.split('@')[0]}'s Workspace`);
+    tenant.createAgent('Default');
+    return { user, tenant };
+  }
+
   async createUser(dto: CreateUserDto): Promise<AuthResult> {
     if (!dto.email || !dto.password || dto.password.length < 8) {
       throw new Error('Valid email and password (min 8 chars) required');
@@ -46,8 +53,7 @@ export class UserManagementService {
     const normalizedEmail = dto.email.toLowerCase();
     const tenantName = dto.tenantName?.trim() || undefined;
 
-    const user = new User(normalizedEmail, passwordHash, tenantName);
-    const tenant = user.tenant!;
+    const { user, tenant } = this.createUserWithTenant(normalizedEmail, passwordHash, tenantName);
 
     this.em.persist(user);
     this.em.persist(tenant);
@@ -134,9 +140,10 @@ export class UserManagementService {
     if (!user) {
       const passwordHash = await hashPassword(dto.password);
       const normalizedEmail = dto.email.toLowerCase();
-      user = new User(normalizedEmail, passwordHash);
+      const { user: newUser, tenant: personalTenant } = this.createUserWithTenant(normalizedEmail, passwordHash);
+      user = newUser;
       this.em.persist(user);
-      this.em.persist(user.tenant!);
+      this.em.persist(personalTenant);
     }
 
     // Check for existing membership

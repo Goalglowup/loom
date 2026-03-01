@@ -1221,3 +1221,72 @@ em.persist(tenant); // cascade handles membership persistence
 
 **Status:** ✅ Complete — Tenant aggregate boundaries enforced; memberships only via `addMembership()`.
 
+
+## Learnings
+
+### Tenant Constructor — Required Params (2025)
+
+**Task:** Tighten `Tenant` constructor so `new Tenant()` is a TypeScript compile error.
+
+**Change:** Removed optional params (`owner?: User, name?: string`) and the `if (owner !== undefined && name !== undefined)` guard. Constructor now requires both `owner: User` and `name: string`, and always runs full initialization.
+
+**Why it's safe with MikroORM:** MikroORM uses `Object.create(Entity.prototype)` during hydration — the constructor is never called on the ORM path. Required constructor params impose zero runtime cost on the ORM.
+
+**Fixture pattern for tests and internal factory methods** that need a Tenant without running constructor logic:
+```typescript
+const t = Object.assign(Object.create(Tenant.prototype) as Tenant, {
+  id: 'tenant-1',
+  name: 'Test Tenant',
+  // ... other fields
+});
+```
+
+**createSubtenant fix:** This internal method used `new Tenant()` to build a child object manually. Refactored to use the same `Object.assign(Object.create(...))` pattern since it sets all fields itself and should not trigger owner-membership creation.
+
+**Status:** ✅ Complete — `npx tsc --noEmit` clean, all 381 tests pass.
+
+### User Constructor — Static Factory → Constructor (2025)
+
+**Task:** Convert `User.create()` static factory into a proper constructor, following the Tenant pattern.
+
+**Change:** Removed `static create(email, passwordHash, tenantName?)` and replaced with `constructor(email, passwordHash, tenantName?)`. The constructor runs the same init logic and stores the auto-created `Tenant` as a transient property `user.tenant`.
+
+**Transient property approach:** Since a constructor can't return `{ user, tenant }`, the auto-created Tenant is stored on `user.tenant` (not an ORM column). Callers read `user.tenant!` after construction for persistence. Added `{ entity: () => Tenant, persist: false, nullable: true }` to `User.schema.ts` to satisfy MikroORM's `EntitySchema` type requirement that all class properties be declared.
+
+**Test fixture update:** `makeUser()` was using `new User()` (no args), which now crashes because the constructor calls `email.toLowerCase()`. Updated to use the same `Object.create(User.prototype)` pattern as `makeTenant()`.
+
+**Status:** ✅ Complete — `npx tsc --noEmit` clean, all 381 tests pass.
+
+### User.memberships Collection (2025)
+
+**Task:** Add a `memberships` collection to the `User` entity so a user can navigate to all tenants they belong to via the ORM.
+
+**Changes:**
+1. **User.ts** — imported `Collection` from `@mikro-orm/core` and added `memberships = new Collection<TenantMembership>(this);` property. Used type-only import for `TenantMembership` to avoid potential circular dependency issues.
+2. **User.schema.ts** — added inverse relationship mapping:
+   ```typescript
+   memberships: { kind: '1:m', entity: () => TenantMembership, mappedBy: 'user', eager: false }
+   ```
+   The `mappedBy: 'user'` tells MikroORM this is the inverse side of the relationship, pointing at the `user` property on `TenantMembership`.
+
+**Why no migration needed:** This is a purely in-ORM inverse relationship. The owning side (`TenantMembership.user`) already has the `user_id` foreign key column. MikroORM now enables bi-directional navigation without any database schema changes.
+
+**Constructor vs hydration:** MikroORM hydration bypasses the constructor, so the `new Collection<TenantMembership>(this)` initializer in the entity is only for manual construction scenarios. The ORM replaces it during hydration with the actual collection.
+
+**Status:** ✅ Complete — all 381 tests pass.
+
+### 2026-02-25: User/Tenant Construction Inversion
+
+**Context:** Previously, the `User` constructor created a `Tenant` internally and leaked it as a transient `user.tenant` property. This violated separation of concerns — domain entities shouldn't orchestrate multi-entity creation.
+
+**Refactoring:**
+- Removed `tenant?: Tenant` property and all tenant construction logic from `User` entity
+- Removed `tenant` from `User.schema.ts` (was `persist: false`, never a DB column)
+- Simplified `User` constructor to `constructor(email: string, passwordHash: string)` — just sets id, email, passwordHash, createdAt, lastLogin
+- Extracted `createUserWithTenant()` private helper in `UserManagementService` that constructs both User and Tenant, calls `tenant.createAgent('Default')`, and returns both
+- Updated `registerUser` to use `createUserWithTenant()`
+- Updated `acceptInvite` (new user branch) to use `createUserWithTenant()` and explicitly persist both user and personalTenant
+
+**Key Insight:** The "every user has a personal tenant" rule is a service-layer concern, not a domain invariant. The User entity should be a simple data holder; the service orchestrates multi-entity creation.
+
+**Status:** ✅ Complete — all 381 tests pass. No test changes needed (fixture uses `Object.assign()`, not constructor).

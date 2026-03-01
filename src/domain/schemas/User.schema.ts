@@ -1,6 +1,6 @@
 import { EntitySchema } from '@mikro-orm/core';
 import { User } from '../entities/User.js';
-import { Tenant } from '../entities/Tenant.js';
+import { TenantMembership } from '../entities/TenantMembership.js';
 
 export const UserSchema = new EntitySchema<User>({
   class: User,
@@ -11,6 +11,6 @@ export const UserSchema = new EntitySchema<User>({
     passwordHash: { type: 'string', columnType: 'varchar(255)', fieldName: 'password_hash' },
     createdAt: { type: 'Date', fieldName: 'created_at', onCreate: () => new Date() },
     lastLogin: { type: 'Date', fieldName: 'last_login', nullable: true },
-    tenant: { entity: () => Tenant, persist: false, nullable: true },
+    memberships: { kind: '1:m', entity: () => TenantMembership, mappedBy: 'user', eager: false },
   },
 });
