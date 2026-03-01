@@ -98,9 +98,11 @@ describe('Tenant', () => {
 
   describe('createSubtenant', () => {
     it('creates child with parentId set to parent id and status active', () => {
-      const child = tenant.createSubtenant('Child Tenant');
+      const owner = { id: 'user-1' } as User;
+      const parent = new Tenant(owner, 'Parent Tenant');
+      const child = parent.createSubtenant('Child Tenant');
       expect(child.name).toBe('Child Tenant');
-      expect(child.parentId).toBe(tenant.id);
+      expect(child.parentId).toBe(parent.id);
       expect(child.status).toBe('active');
     });
   });

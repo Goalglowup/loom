@@ -58,25 +58,14 @@ export class Tenant {
   }
 
   createSubtenant(name: string): Tenant {
-    const child = Object.assign(Object.create(Tenant.prototype) as Tenant, {
-      id: randomUUID(),
-      name,
-      parentId: this.id,
-      providerConfig: null,
-      systemPrompt: null,
-      skills: null,
-      mcpEndpoints: null,
-      status: 'active',
-      availableModels: null,
-      updatedAt: null,
-      createdAt: new Date(),
-      agents: [],
-      members: [],
-      invites: [],
-    });
-    // Inherit parent member list
+    const ownerMembership = this.members.find(m => m.role === 'owner');
+    if (!ownerMembership) throw new Error('Cannot create subtenant: parent tenant has no owner member');
+    const child = new Tenant(ownerMembership.user, name);
+    child.parentId = this.id;
     for (const m of this.members) {
-      child.addMembership(m.user, m.role);
+      if (m.user !== ownerMembership.user) {
+        child.addMembership(m.user, m.role);
+      }
     }
     return child;
   }
