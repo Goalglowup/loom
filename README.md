@@ -82,6 +82,13 @@ Admin operations:
 
 For the full architecture reference — component diagrams, data flows, multi-tenancy model, encryption design, and more — see **[docs/architecture.md](docs/architecture.md)**.
 
+## Loom CLI
+
+Developers can use the `loom` CLI to define Agent and KnowledgeBase artifacts as YAML specs, weave them into signed bundles, push to the registry, and deploy to tenants.
+
+- **[docs/cli.md](docs/cli.md)** — CLI command reference and end-to-end example
+- **[docs/cli-overview.md](docs/cli-overview.md)** — System overview: how the artifact model, weave pipeline, registry, and deployment flow fit together
+
 **Stack:** Fastify, undici, PostgreSQL, MikroORM, AES-256-GCM encryption, JWT + API key auth
 
 **Key Components:**

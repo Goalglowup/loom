@@ -1,0 +1,361 @@
+# Loom CLI Reference
+
+The `loom` CLI client connects to a Loom Gateway (self-hosted or remote) to define, package, and deploy AI Agent and KnowledgeBase artifacts.
+
+## Installation
+
+```bash
+npm install -g @loom/cli
+```
+
+Verify the installation:
+
+```bash
+loom --version
+```
+
+## Quick Start: End-to-End Example
+
+This walkthrough creates a support agent backed by a KnowledgeBase of documentation files, packages them as versioned artifacts, and deploys them to a tenant.
+
+### Step 1: Authenticate
+
+```bash
+loom login https://your-loom-gateway.com
+# Prompts for email and password
+# ✓ Logged in as alice@acme.com (tenant: acme)
+```
+
+Your credentials are stored in `~/.loom/config.json`.
+
+### Step 2: Define a KnowledgeBase
+
+Create `support-kb.yaml`:
+
+```yaml
+apiVersion: loom.ai/v0
+kind: KnowledgeBase
+metadata:
+  name: support-kb
+spec:
+  docsPath: ./docs        # directory, single file, or .zip
+  embedder:               # optional — defaults to openai/text-embedding-3-small
+    provider: openai
+    model: text-embedding-3-small
+  chunking:
+    tokenSize: 650
+    overlap: 120
+  retrieval:
+    topK: 8
+    citations: true
+```
+
+### Step 3: Define an Agent
+
+Create `support-agent.yaml`:
+
+```yaml
+apiVersion: loom.ai/v0
+kind: Agent
+metadata:
+  name: support-agent
+spec:
+  model: gpt-4.1-mini
+  systemPrompt: |
+    You are SupportAgent. Use the knowledge base to answer questions.
+    If the answer isn't in the knowledge base, say you don't know.
+  knowledgeBaseRef: support-kb
+```
+
+### Step 4: Weave both specs into bundles
+
+```bash
+loom weave support-kb.yaml
+# Uploading spec and docs to gateway...
+# Chunking 47 documents (3,821 chunks)...
+# Generating embeddings...
+# ✓ Bundle saved to dist/support-kb.bundle.tgz
+#   sha256: a3f8c2d1...
+#   VectorSpace: vs_openai_text-embedding-3-small_1536
+
+loom weave support-agent.yaml
+# ✓ Bundle saved to dist/support-agent.bundle.tgz
+#   sha256: b7e4a9f2...
+```
+
+### Step 5: Push bundles to the registry
+
+```bash
+loom push dist/support-kb.bundle.tgz --tag 0.1.0
+# ✓ acme/support-kb:0.1.0
+
+loom push dist/support-agent.bundle.tgz --tag 0.1.0
+# ✓ acme/support-agent:0.1.0
+```
+
+### Step 6: Deploy the agent to a tenant
+
+```bash
+loom deploy acme/support-agent:0.1.0 --tenant acme --env prod
+# Resolving artifact...
+# Validating VectorSpace...
+# Provisioning KB collection...
+# ✓ Deployment READY
+#   Runtime token: loom_rt_...
+```
+
+The agent is now available for inference via any API key scoped to the `support-agent` agent on the `acme` tenant.
+
+---
+
+## Commands
+
+### `loom login [gateway-url]`
+
+Authenticate against a Loom Gateway and store credentials locally.
+
+```bash
+loom login https://your-loom-gateway.com
+loom login                                  # prompts for gateway URL
+```
+
+**Options:**
+
+| Flag | Description |
+|------|-------------|
+| `--email <email>` | Email address (prompted if omitted) |
+| `--password <password>` | Password (prompted securely if omitted) |
+
+**Config file:** `~/.loom/config.json`
+
+```json
+{
+  "gatewayUrl": "https://your-loom-gateway.com",
+  "token": "eyJ...",
+  "email": "alice@acme.com"
+}
+```
+
+---
+
+### `loom weave <spec-file>`
+
+Upload a YAML spec (and its documents) to the Gateway. The Gateway chunks the documents, generates embeddings, and returns a signed bundle.
+
+```bash
+loom weave support-kb.yaml
+loom weave support-agent.yaml
+loom weave ./specs/support-kb.yaml --out ./artifacts/
+```
+
+**Options:**
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--out <dir>` | `dist/` | Output directory for the bundle |
+| `--gateway <url>` | from config | Override the gateway URL |
+
+**How it works:**
+
+1. Reads the YAML spec file
+2. Resolves `spec.docsPath` relative to the spec file:
+   - **Directory** → all files recursively
+   - **Single file** → just that file
+   - **.zip file** → extracted in-memory; all contained files processed
+3. Uploads spec + docs to `POST /v1/registry/weave`
+4. Gateway chunks docs, embeds, packages, signs
+5. Returns bundle → saved to `dist/<name>.bundle.tgz`
+
+**Output:**
+```
+dist/
+  support-kb.bundle.tgz
+  support-agent.bundle.tgz
+```
+
+---
+
+### `loom push <bundle-file>`
+
+Push a bundle file to the Gateway registry and tag it.
+
+```bash
+loom push dist/support-kb.bundle.tgz --tag 0.1.0
+loom push dist/support-agent.bundle.tgz --tag 0.1.0
+loom push dist/support-agent.bundle.tgz              # defaults to tag: latest
+```
+
+**Options:**
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--tag <tag>` | `latest` | Version tag for the artifact |
+| `--gateway <url>` | from config | Override the gateway URL |
+
+**Output:**
+```
+✓ acme/support-kb:0.1.0
+✓ acme/support-agent:0.1.0
+```
+
+The org prefix is derived from your authenticated tenant's slug.
+
+**Immutability:** Pushing a bundle with the same SHA-256 as an existing artifact is a no-op — the existing artifact is reused and the tag is updated.
+
+---
+
+### `loom deploy <artifact:tag>`
+
+Deploy an artifact from the registry to a tenant environment.
+
+```bash
+loom deploy acme/support-agent:0.1.0 --tenant acme --env prod
+loom deploy acme/support-agent:0.1.0 --tenant staging-tenant --env staging
+```
+
+**Options:**
+
+| Flag | Required | Description |
+|------|----------|-------------|
+| `--tenant <name>` | yes | Target tenant slug |
+| `--env <env>` | no (default: `prod`) | Deployment environment |
+| `--gateway <url>` | no | Override the gateway URL |
+
+**What happens:**
+
+1. Resolves the artifact from the registry
+2. Validates your permissions on the target tenant
+3. Verifies VectorSpace contract — refuses if the KB embedder has changed
+4. Provisions a pgvector index for the KB chunks (scoped to this tenant)
+5. Attaches the agent's model config to the tenant
+6. Mints a scoped runtime JWT (limited to inference + KB read)
+7. Records the deployment as READY
+
+**Output:**
+```
+Resolving artifact acme/support-agent:0.1.0...
+Validating VectorSpace: vs_openai_text-embedding-3-small_1536 ✓
+Provisioning KB collection for support-kb...
+✓ Deployment READY
+  Runtime token: loom_rt_eyJ...
+  Environment: prod
+  Deployed at: 2025-03-01T12:00:00Z
+```
+
+---
+
+## YAML Spec Reference
+
+### KnowledgeBase
+
+```yaml
+apiVersion: loom.ai/v0
+kind: KnowledgeBase
+metadata:
+  name: <string>              # artifact name, used as knowledgeBaseRef in Agent specs
+spec:
+  docsPath: <path>            # REQUIRED: directory | single file | .zip file
+  embedder:                   # OPTIONAL — defaults to openai/text-embedding-3-small
+    provider: <string>        # any tenant-configured provider (e.g., openai, azure)
+    model: <string>           # embedding model name
+  chunking:
+    tokenSize: <int>          # tokens per chunk (default: 650)
+    overlap: <int>            # token overlap between chunks (default: 120)
+  retrieval:
+    topK: <int>               # chunks returned per similarity query (default: 8)
+    citations: <bool>         # include source references in responses (default: true)
+```
+
+### Agent
+
+```yaml
+apiVersion: loom.ai/v0
+kind: Agent
+metadata:
+  name: <string>              # artifact name
+spec:
+  model: <string>             # REQUIRED: model identifier (e.g., gpt-4.1-mini)
+  systemPrompt: <string>      # OPTIONAL: system prompt text
+  knowledgeBaseRef: <string>  # OPTIONAL: name of a KnowledgeBase artifact
+```
+
+---
+
+## VectorSpace Determinism
+
+Loom guarantees that deploying the same bundle always produces identical embeddings.
+
+Each KnowledgeBase bundle records a **VectorSpace contract**:
+
+```json
+{
+  "embedderProvider": "openai",
+  "embedderModel": "text-embedding-3-small",
+  "dimensions": 1536,
+  "preprocessing": { "tokenSize": 650, "overlap": 120 },
+  "vectorSpaceId": "vs_sha256_..."
+}
+```
+
+The `vectorSpaceId` is the SHA-256 of the embedder config. Loom uses this to:
+
+- Ensure retrieval queries use the same embedding space as the stored vectors
+- Refuse deployments where the KnowledgeBase and runtime embedder don't match
+- Detect when a KnowledgeBase needs to be re-woven (embedder model upgrade)
+
+**What Loom does NOT guarantee:** If you change the embedder model and re-run `loom weave`, the new bundle will have a different `vectorSpaceId`. The old deployment and the new bundle are incompatible — you must deploy the new bundle to create a new deployment.
+
+---
+
+## Portal Integration
+
+You don't need the CLI to use the artifact system. The Loom portal provides equivalent functionality:
+
+| CLI Command | Portal Equivalent |
+|-------------|-------------------|
+| `loom weave <kb.yaml>` | Knowledge Bases → Upload (file/zip) |
+| `loom push <bundle.tgz>` | Knowledge Bases → Upload (auto-pushed after weave) |
+| `loom deploy <artifact:tag>` | Deployments → Provision |
+| _(portal only)_ | Agents → Export as YAML |
+
+The **Export as YAML** feature in the Agent Editor generates a pre-filled YAML spec from an existing portal-configured agent. Useful for moving to a CLI-based workflow.
+
+---
+
+## Configuration
+
+Config file: `~/.loom/config.json`
+
+| Field | Description |
+|-------|-------------|
+| `gatewayUrl` | Gateway base URL |
+| `token` | Portal JWT (stored after `loom login`) |
+| `email` | Authenticated user's email (informational) |
+
+Override the gateway URL for a single command:
+
+```bash
+loom weave support-kb.yaml --gateway https://staging-gateway.example.com
+```
+
+---
+
+## Troubleshooting
+
+**`Error: Not authenticated`**  
+Run `loom login <gateway-url>` to authenticate.
+
+**`Error: Token expired`**  
+Your JWT has expired. Run `loom login` again to refresh.
+
+**`Error: Insufficient scope (required: weave:write)`**  
+Your account doesn't have the required permissions. You need the `owner` role on a tenant to use registry operations. Contact your Loom administrator.
+
+**`Error: VectorSpace mismatch`**  
+The deployed KnowledgeBase was embedded with a different model than the one specified in your Agent spec. Re-weave the KnowledgeBase with the matching embedder, push it, and re-deploy.
+
+**`Error: docsPath not found`**  
+The path in `spec.docsPath` doesn't exist relative to the spec file. Check that the path is correct and the files are present before running `loom weave`.
+
+**Weave takes too long**  
+Large document sets will take longer. The Gateway streams progress to the CLI. For very large sets, consider splitting your KnowledgeBase into multiple smaller specs.
