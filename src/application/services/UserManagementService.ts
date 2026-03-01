@@ -1,12 +1,11 @@
 import { promisify } from 'node:util';
-import { scrypt, randomBytes, timingSafeEqual, randomUUID } from 'node:crypto';
+import { scrypt, randomBytes, timingSafeEqual } from 'node:crypto';
 import { createSigner } from 'fast-jwt';
 import type { EntityManager } from '@mikro-orm/core';
 import { User } from '../../domain/entities/User.js';
 import { Tenant } from '../../domain/entities/Tenant.js';
 import { TenantMembership } from '../../domain/entities/TenantMembership.js';
 import { Invite } from '../../domain/entities/Invite.js';
-import { Agent } from '../../domain/entities/Agent.js';
 import type { CreateUserDto, LoginDto, AcceptInviteDto, AuthResult } from '../dtos/index.js';
 
 const scryptAsync = promisify(scrypt);
@@ -47,12 +46,10 @@ export class UserManagementService {
     const normalizedEmail = dto.email.toLowerCase();
     const tenantName = dto.tenantName?.trim() || undefined;
 
-    const { user, tenant, membership, defaultAgent } = User.create(normalizedEmail, passwordHash, tenantName);
+    const { user, tenant } = User.create(normalizedEmail, passwordHash, tenantName);
 
     this.em.persist(user);
     this.em.persist(tenant);
-    this.em.persist(membership);
-    this.em.persist(defaultAgent);
     await this.em.flush();
 
     const token = signToken({ sub: user.id, tenantId: tenant.id, role: 'owner' });
@@ -136,14 +133,12 @@ export class UserManagementService {
     if (!user) {
       const passwordHash = await hashPassword(dto.password);
       const normalizedEmail = dto.email.toLowerCase();
-      const { user: newUser, tenant: personalTenant, membership: personalMembership, defaultAgent: personalAgent } = 
+      const { user: newUser, tenant: personalTenant } = 
         User.create(normalizedEmail, passwordHash);
       
       user = newUser;
       this.em.persist(user);
       this.em.persist(personalTenant);
-      this.em.persist(personalMembership);
-      this.em.persist(personalAgent);
     }
 
     // Check for existing membership
@@ -156,13 +151,7 @@ export class UserManagementService {
       throw Object.assign(new Error('Already a member of this tenant'), { status: 409 });
     }
 
-    const membership = new TenantMembership();
-    membership.id = randomUUID();
-    membership.user = user;
-    membership.tenant = tenant;
-    membership.role = role;
-    membership.joinedAt = new Date();
-    this.em.persist(membership);
+    tenant.addMembership(user, role);
 
     invite.useCount += 1;
     await this.em.flush();

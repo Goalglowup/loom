@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto';
 import type { EntityManager } from '@mikro-orm/core';
 import { Tenant } from '../../domain/entities/Tenant.js';
 import { Agent } from '../../domain/entities/Agent.js';
@@ -145,19 +144,13 @@ export class TenantManagementService {
   }
 
   async createSubtenant(parentTenantId: string, dto: CreateSubtenantDto): Promise<TenantViewModel> {
-    const parent = await this.em.findOneOrFail(Tenant, { id: parentTenantId });
+    const parent = await this.em.findOneOrFail(
+      Tenant,
+      { id: parentTenantId },
+      { populate: ['members', 'members.user'] },
+    );
     const child = parent.createSubtenant(dto.name);
     this.em.persist(child);
-    
-    // Create owner membership for the creator
-    const membership = new TenantMembership();
-    membership.id = randomUUID();
-    membership.user = await this.em.findOneOrFail(User, { id: dto.createdByUserId });
-    membership.tenant = child;
-    membership.role = 'owner';
-    membership.joinedAt = new Date();
-    this.em.persist(membership);
-    
     await this.em.flush();
     return toTenantViewModel(child);
   }

@@ -1132,3 +1132,92 @@ await em.flush();
 ```
 
 **Status:** ✅ Complete — User creation invariant now enforced at domain level.
+
+---
+
+### 2026-02-27: Tenant Aggregate — Enforcing Membership Boundaries
+
+**Task:** Refactor domain model to enforce proper aggregate boundaries:
+1. Tenant has constructor that takes owner User (and name)
+2. Memberships ONLY created through `tenant.addMembership(user, role)`
+3. `tenant.createSubtenant(name)` inherits parent's member list
+4. All service and entity code updated accordingly
+
+**Implementation:**
+
+**1. `src/domain/entities/Tenant.ts`:**
+- Added optional constructor `constructor(owner?: User, name?: string)` (optional params for MikroORM hydration)
+- Constructor initializes all fields and calls `this.addMembership(owner, 'owner')` when params provided
+- Renamed `addMember` → `addMembership` (clearer intent)
+- Updated `createSubtenant(name)` to inherit parent's member list via loop: `for (const m of this.members) child.addMembership(m.user, m.role);`
+
+**2. `src/domain/schemas/Tenant.schema.ts`:**
+- Added `cascade: [Cascade.PERSIST]` to `members`, `agents`, and `invites` collections
+- When you `em.persist(tenant)`, its collections auto-cascade without explicit persist calls
+
+**3. `src/domain/entities/User.ts`:**
+- Refactored `User.create()` factory to use `new Tenant(user, tenantName ?? ...)` instead of manual construction
+- Used `tenant.createAgent('Default')` instead of manual Agent construction
+- Return type changed from `{ user, tenant, membership, defaultAgent }` → `{ user, tenant }` (membership/agent now inside tenant collections)
+- Removed `TenantMembership` import (no longer directly instantiated)
+
+**4. `src/application/services/UserManagementService.ts`:**
+- In `createUser`: changed from `em.persist(user); em.persist(tenant); em.persist(membership); em.persist(defaultAgent);` → `em.persist(user); em.persist(tenant);` (cascade handles the rest)
+- In `acceptInvite`: replaced manual `new TenantMembership()` → `tenant.addMembership(user, role)`
+- Removed `randomUUID` and `Agent` imports (no longer needed)
+
+**5. `src/application/services/TenantManagementService.ts`:**
+- In `createSubtenant`: load parent with `{ populate: ['members', 'members.user'] }` so inheritance works
+- Removed manual membership creation for creator — `createSubtenant` now inherits all parent members
+- Removed `randomUUID` import
+
+**6. Tests:**
+- `tests/domain-entities.test.ts`: renamed `addMember` → `addMembership` in test names
+- `tests/application-services.test.ts`:
+  - Updated persist count checks: 4 → 2 (cascade handles membership/agent)
+  - Fixed default tenant name assertion: `user@example.com` → `user` (now uses `${email.split('@')[0]}'s Workspace`)
+  - Updated "creates a default agent" test to check `tenant.agents` collection instead of explicit persist call
+  - Updated `createSubtenant` test to populate parent with members and verify child inherits them
+
+**Learnings:**
+- **Aggregate Root Pattern**: Tenant is the aggregate root; TenantMembership is ONLY created through Tenant methods, never directly in service layer
+- **Constructor with Optional Params for MikroORM**: `constructor(owner?: User, name?: string)` allows `new Tenant()` (for ORM hydration) AND `new Tenant(user, name)` (for domain logic)
+- **Cascade.PERSIST reduces boilerplate**: Service layer no longer needs explicit `em.persist(membership)` — persisting the aggregate root is enough
+- **Subtenant Inheritance**: Copying parent members at creation time (not via DB constraints) gives flexibility for future role overrides
+- **Factory Pattern Evolution**: `User.create()` now returns `{ user, tenant }` — membership and agent are hidden inside tenant collections
+- **Production vs Test Code**: Production code NEVER calls `new TenantMembership()` directly; tests can still construct mocks directly for fixtures
+
+**Verification:**
+- ✅ TypeScript: `npx tsc --noEmit` — passes
+- ✅ Tests: `npm test` — all 381 tests pass
+- New users get personal tenant with owner membership (via constructor)
+- Invited users join tenant via `addMembership` (no manual membership construction)
+- Subtenants inherit full parent member list at creation time
+
+**Key Pattern:**
+```typescript
+// Domain: Tenant controls its aggregate
+constructor(owner?: User, name?: string) {
+  if (owner !== undefined && name !== undefined) {
+    this.id = randomUUID();
+    // ... initialize fields ...
+    this.addMembership(owner, 'owner'); // Invariant: constructor creates owner membership
+  }
+}
+
+createSubtenant(name: string): Tenant {
+  const child = new Tenant();
+  // ... initialize child fields ...
+  for (const m of this.members) {
+    child.addMembership(m.user, m.role); // Inherit parent members
+  }
+  return child;
+}
+
+// Service: use aggregate methods, never direct TenantMembership construction
+const tenant = new Tenant(user, name); // membership created inside
+em.persist(tenant); // cascade handles membership persistence
+```
+
+**Status:** ✅ Complete — Tenant aggregate boundaries enforced; memberships only via `addMembership()`.
+

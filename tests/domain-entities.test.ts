@@ -78,18 +78,18 @@ describe('Tenant', () => {
     });
   });
 
-  describe('addMember', () => {
+  describe('addMembership', () => {
     const user = { id: 'user-1' } as User;
 
     it('creates TenantMembership with correct role', () => {
-      const membership = tenant.addMember(user, 'admin');
+      const membership = tenant.addMembership(user, 'admin');
       expect(membership.role).toBe('admin');
       expect(membership.user).toBe(user);
     });
 
     it('pushes to tenant.members collection', () => {
       expect(tenant.members).toHaveLength(0);
-      const membership = tenant.addMember(user, 'member');
+      const membership = tenant.addMembership(user, 'member');
       expect(tenant.members).toHaveLength(1);
       expect(tenant.members[0]).toBe(membership);
     });

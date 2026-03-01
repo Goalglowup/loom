@@ -22,6 +22,26 @@ export class Tenant {
   members: TenantMembership[] = [];
   invites: Invite[] = [];
 
+  constructor(owner?: User, name?: string) {
+    if (owner !== undefined && name !== undefined) {
+      this.id = randomUUID();
+      this.name = name;
+      this.parentId = null;
+      this.providerConfig = null;
+      this.systemPrompt = null;
+      this.skills = null;
+      this.mcpEndpoints = null;
+      this.status = 'active';
+      this.availableModels = null;
+      this.updatedAt = null;
+      this.createdAt = new Date();
+      this.agents = [];
+      this.members = [];
+      this.invites = [];
+      this.addMembership(owner, 'owner');
+    }
+  }
+
   createAgent(name: string, config?: Partial<Agent>): Agent {
     const agent = new Agent();
     agent.id = randomUUID();
@@ -62,7 +82,7 @@ export class Tenant {
     return invite;
   }
 
-  addMember(user: User, role: string): TenantMembership {
+  addMembership(user: User, role: string): TenantMembership {
     const membership = new TenantMembership();
     membership.id = randomUUID();
     membership.tenant = this;
@@ -89,6 +109,10 @@ export class Tenant {
     child.agents = [];
     child.members = [];
     child.invites = [];
+    // Inherit parent member list
+    for (const m of this.members) {
+      child.addMembership(m.user, m.role);
+    }
     return child;
   }
 }

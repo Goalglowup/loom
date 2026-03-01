@@ -94,8 +94,8 @@ describe('UserManagementService', () => {
       expect(result.email).toBe('alice@example.com');
       expect(result.userId).toBeTruthy();
       expect(result.tenantId).toBeTruthy();
-      // persist called 4 times: user, tenant, membership, agent
-      expect((em.persist as any).mock.calls.length).toBe(4);
+      // persist called 2 times: user, tenant (cascade handles membership and agent)
+      expect((em.persist as any).mock.calls.length).toBe(2);
       expect((em.flush as any)).toHaveBeenCalled();
     });
 
@@ -133,7 +133,7 @@ describe('UserManagementService', () => {
       const em = buildMockEm();
       const svc = new UserManagementService(em);
       const result = await svc.createUser({ email: 'user@example.com', password: 'password123' });
-      expect(result.tenantName).toContain('user@example.com');
+      expect(result.tenantName).toContain('user');
     });
 
     it('throws 409 if email already exists', async () => {
@@ -160,10 +160,11 @@ describe('UserManagementService', () => {
       const svc = new UserManagementService(em);
       await svc.createUser({ email: 'user@example.com', password: 'password123' });
       const persistCalls = (em.persist as any).mock.calls;
-      expect(persistCalls.length).toBe(4);
-      const agent = persistCalls[3][0] as Agent;
-      expect(agent).toBeInstanceOf(Agent);
-      expect(agent.name).toBe('Default');
+      expect(persistCalls.length).toBe(2);
+      const tenant = persistCalls[1][0] as Tenant;
+      expect(tenant).toBeInstanceOf(Tenant);
+      expect(tenant.agents).toHaveLength(1);
+      expect(tenant.agents[0].name).toBe('Default');
     });
   });
 
@@ -767,22 +768,29 @@ describe('TenantManagementService', () => {
   });
 
   describe('createSubtenant', () => {
-    it('creates an owner membership for createdByUserId', async () => {
-      const parent = makeTenant({ id: 'parent-1' });
+    it('inherits parent memberships', async () => {
       const user = makeUser({ id: 'user-1' });
+      const parent = makeTenant({ id: 'parent-1' });
+      const membership = new TenantMembership();
+      membership.id = 'mem-1';
+      membership.tenant = parent;
+      membership.user = user;
+      membership.role = 'owner';
+      membership.joinedAt = new Date();
+      parent.members = [membership];
+      
       const em = buildMockEm({
-        findOneOrFail: vi.fn()
-          .mockResolvedValueOnce(parent)
-          .mockResolvedValueOnce(user),
+        findOneOrFail: vi.fn().mockResolvedValueOnce(parent),
       });
       const svc = new TenantManagementService(em);
       await svc.createSubtenant('parent-1', { name: 'Child Tenant', createdByUserId: 'user-1' });
       const persistCalls = (em.persist as any).mock.calls;
-      expect(persistCalls).toHaveLength(2);
-      const membership = persistCalls[1][0] as TenantMembership;
-      expect(membership).toBeInstanceOf(TenantMembership);
-      expect(membership.role).toBe('owner');
-      expect((membership.user as any)?.id).toBe('user-1');
+      expect(persistCalls).toHaveLength(1);
+      const child = persistCalls[0][0] as Tenant;
+      expect(child).toBeInstanceOf(Tenant);
+      expect(child.members).toHaveLength(1);
+      expect(child.members[0].role).toBe('owner');
+      expect((child.members[0].user as any)?.id).toBe('user-1');
     });
   });
 
