@@ -39,8 +39,8 @@ graph TB
         DashAPI[Dashboard Routes<br/>/v1/traces, /v1/analytics/*]
         AdminAPI[Admin Routes<br/>/v1/admin/*]
 
-        PortalAuth[Portal Auth<br/>fast-jwt]
-        AdminAuth[Admin Auth<br/>@fastify/jwt]
+        PortalAuth[Portal Auth<br/>jsonwebtoken]
+        AdminAuth[Admin Auth<br/>jsonwebtoken]
 
         Analytics[Analytics Engine<br/>summary, timeseries, model breakdown]
 
@@ -177,8 +177,8 @@ The domain layer uses MikroORM's `EntitySchema` pattern (separate schema files) 
 
 | File | Prefix | Auth | Endpoints |
 |------|--------|------|-----------|
-| `portal.ts` | `/v1/portal/*` | Portal JWT (`PORTAL_JWT_SECRET`, fast-jwt) | Signup, login, tenant switching, API key CRUD, agent CRUD, subtenant management, conversation/partition CRUD, provider config, analytics, traces |
-| `admin.ts` | `/v1/admin/*` | Admin JWT (`ADMIN_JWT_SECRET`, @fastify/jwt) | Login, tenant CRUD, API key CRUD, provider config, traces, analytics (summary, timeseries, model breakdown) |
+| `portal.ts` | `/v1/portal/*` | Portal JWT (`PORTAL_JWT_SECRET`, jsonwebtoken) | Signup, login, tenant switching, API key CRUD, agent CRUD, subtenant management, conversation/partition CRUD, provider config, analytics, traces |
+| `admin.ts` | `/v1/admin/*` | Admin JWT (`ADMIN_JWT_SECRET`, jsonwebtoken) | Login, tenant CRUD, API key CRUD, provider config, traces, analytics (summary, timeseries, model breakdown) |
 | `dashboard.ts` | `/v1/traces`, `/v1/analytics/*` | Tenant API key (same as gateway) | Paginated traces, analytics summary, timeseries |
 
 **Gateway route:** `POST /v1/chat/completions` is registered directly in `src/index.ts` (not in routes/).
@@ -325,8 +325,15 @@ API keys have `active` / `revoked` status. Revoked keys are removed from the LRU
 | Domain | Mechanism | Secret | Middleware |
 |--------|-----------|--------|------------|
 | **Gateway** | API key (Bearer / x-api-key header) | SHA-256 hashed, stored in `api_keys.key_hash` | `src/auth.ts` → global `preHandler` hook |
-| **Portal** | JWT (fast-jwt) | `PORTAL_JWT_SECRET` env var | `src/middleware/portalAuth.ts` |
-| **Admin** | JWT (@fastify/jwt) | `ADMIN_JWT_SECRET` env var | `src/middleware/adminAuth.ts` |
+| **Portal** | JWT (jsonwebtoken) | `PORTAL_JWT_SECRET` env var | `src/middleware/portalAuth.ts` + `src/middleware/createBearerAuth.ts` |
+| **Admin** | JWT (jsonwebtoken) | `ADMIN_JWT_SECRET` env var | `src/middleware/adminAuth.ts` + `src/middleware/createBearerAuth.ts` |
+
+### JWT Implementation
+
+Admin and Portal JWT auth are unified via shared utilities:
+- `src/auth/jwtUtils.ts` — Core JWT operations (`signJwt`, `verifyJwt`) using `jsonwebtoken` library
+- `src/middleware/createBearerAuth.ts` — Shared preHandler factory that handles Bearer token extraction, verification, claims extraction, and standardized 401 responses
+- `adminAuth.ts` and `portalAuth.ts` invoke `createBearerAuth()` with their respective secrets
 
 ### Auth Skip List
 
@@ -344,14 +351,15 @@ loom_sk_{prefix}_{random}
 
 ### Portal Auth Flow
 
-1. `POST /v1/portal/auth/signup` → creates user + tenant + default agent + API key → returns JWT
-2. `POST /v1/portal/auth/login` → validates email/password (scrypt) → returns JWT + tenant list
-3. `POST /v1/portal/auth/switch-tenant` → validates membership → returns new JWT with different `tenantId`
+1. `POST /v1/portal/auth/signup` → creates user + tenant + default agent + API key → signs JWT via `signJwt()` → returns JWT
+2. `POST /v1/portal/auth/login` → validates email/password (scrypt) → signs JWT via `signJwt()` → returns JWT + tenant list
+3. `POST /v1/portal/auth/switch-tenant` → validates membership → signs new JWT with different `tenantId`
+4. All other `/v1/portal/*` routes verify Bearer token via `createBearerAuth(PORTAL_JWT_SECRET)`
 
 ### Admin Auth Flow
 
-1. `POST /v1/admin/auth/login` → validates username/password (scrypt) → returns JWT (8h expiry)
-2. All other `/v1/admin/*` routes require `Authorization: Bearer <admin-jwt>`
+1. `POST /v1/admin/auth/login` → validates username/password (scrypt) → signs JWT via `signJwt()` (8h expiry) → returns JWT
+2. All other `/v1/admin/*` routes verify Bearer token via `createBearerAuth(ADMIN_JWT_SECRET)`
 
 ---
 
