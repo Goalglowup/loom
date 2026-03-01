@@ -1290,3 +1290,12 @@ const t = Object.assign(Object.create(Tenant.prototype) as Tenant, {
 **Key Insight:** The "every user has a personal tenant" rule is a service-layer concern, not a domain invariant. The User entity should be a simple data holder; the service orchestrates multi-entity creation.
 
 **Status:** ✅ Complete — all 381 tests pass. No test changes needed (fixture uses `Object.assign()`, not constructor).
+
+## Learnings
+
+### 2026-xx-xx: Entity Constructor Refactor (Wave 4 DDD)
+
+- **Required-param constructors are safe with MikroORM**: MikroORM uses `Object.create(Entity.prototype)` for hydration and never calls constructors, so adding required-parameter constructors to entities is safe for ORM use.
+- **`readonly rawKey` pattern for transient crypto material**: `ApiKey` exposes `rawKey` as a `readonly` non-persistent property set in the constructor. This keeps raw secret material available immediately post-construction without ever storing it in the DB, and TypeScript's `readonly` signals it's one-time use.
+- **Test fixtures use `Object.assign(Object.create(Entity.prototype), {...})`**: This mirrors MikroORM's own hydration pattern. It gives full instanceof checks, prototype method access, and bypasses required-param constructors for test fixture objects — same pattern already established for `User` and `Tenant`.
+- **Thin factory wrappers on aggregates**: `Tenant.createAgent`, `createInvite`, `addMembership` are now 3-line wrappers — construct entity, push to collection, return. All initialization logic lives in entity constructors. This keeps the aggregate root's role as an orchestrator, not an initializer.

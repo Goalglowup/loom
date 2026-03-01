@@ -49,22 +49,23 @@ function makeTenant(overrides: Partial<Tenant> = {}): Tenant {
 }
 
 function makeAgent(tenant: Tenant, overrides: Partial<Agent> = {}): Agent {
-  const a = new Agent();
-  a.id = 'agent-1';
-  a.tenant = tenant;
-  a.name = 'Test Agent';
-  a.providerConfig = null;
-  a.systemPrompt = null;
-  a.skills = null;
-  a.mcpEndpoints = null;
-  a.mergePolicies = { system_prompt: 'prepend', skills: 'merge' };
-  a.availableModels = null;
-  a.conversationsEnabled = false;
-  a.conversationTokenLimit = 4000;
-  a.conversationSummaryModel = null;
-  a.createdAt = new Date();
-  a.updatedAt = null;
-  a.apiKeys = [];
+  const a = Object.assign(Object.create(Agent.prototype) as Agent, {
+    id: 'agent-1',
+    tenant,
+    name: 'Test Agent',
+    providerConfig: null,
+    systemPrompt: null,
+    skills: null,
+    mcpEndpoints: null,
+    mergePolicies: { system_prompt: 'prepend', skills: 'merge' },
+    availableModels: null,
+    conversationsEnabled: false,
+    conversationTokenLimit: 4000,
+    conversationSummaryModel: null,
+    createdAt: new Date(),
+    updatedAt: null,
+    apiKeys: [],
+  });
   Object.assign(a, overrides);
   return a;
 }
@@ -283,16 +284,16 @@ describe('UserManagementService', () => {
 
   describe('acceptInvite', () => {
     function makeValidInvite(tenantOverrides: Partial<Tenant> = {}): Invite {
-      const invite = new Invite();
-      invite.id = 'invite-1';
-      invite.token = 'valid-token';
-      invite.tenant = makeTenant(tenantOverrides);
-      invite.maxUses = null;
-      invite.useCount = 0;
-      invite.expiresAt = new Date(Date.now() + 86_400_000);
-      invite.revokedAt = null;
-      invite.createdAt = new Date();
-      return invite;
+      return Object.assign(Object.create(Invite.prototype) as Invite, {
+        id: 'invite-1',
+        token: 'valid-token',
+        tenant: makeTenant(tenantOverrides),
+        maxUses: null,
+        useCount: 0,
+        expiresAt: new Date(Date.now() + 86_400_000),
+        revokedAt: null,
+        createdAt: new Date(),
+      });
     }
 
     it('creates a new user and membership for a new email', async () => {
@@ -379,12 +380,13 @@ describe('UserManagementService', () => {
     it('throws 409 if user is already a member', async () => {
       const invite = makeValidInvite();
       const existingUser = makeUser();
-      const existingMembership = new TenantMembership();
-      existingMembership.id = 'm-1';
-      existingMembership.user = existingUser;
-      existingMembership.tenant = invite.tenant as Tenant;
-      existingMembership.role = 'member';
-      existingMembership.joinedAt = new Date();
+      const existingMembership = Object.assign(Object.create(TenantMembership.prototype) as TenantMembership, {
+        id: 'm-1',
+        user: existingUser,
+        tenant: invite.tenant as Tenant,
+        role: 'member',
+        joinedAt: new Date(),
+      });
       
       const em = buildMockEm({
         findOne: vi.fn()
@@ -414,12 +416,13 @@ describe('UserManagementService', () => {
     it('throws 400 if target tenant is inactive', async () => {
       const user = makeUser({ id: 'user-1' });
       const tenant = makeTenant({ id: 'tenant-2', status: 'suspended' });
-      const membership = new TenantMembership();
-      membership.id = 'm-1';
-      membership.user = user;
-      membership.tenant = tenant;
-      membership.role = 'member';
-      membership.joinedAt = new Date();
+      const membership = Object.assign(Object.create(TenantMembership.prototype) as TenantMembership, {
+        id: 'm-1',
+        user,
+        tenant,
+        role: 'member',
+        joinedAt: new Date(),
+      });
 
       const em = buildMockEm({
         findOneOrFail: vi.fn().mockResolvedValue(user),
@@ -434,12 +437,13 @@ describe('UserManagementService', () => {
     it('returns AuthResult with a new JWT on success', async () => {
       const user = makeUser({ id: 'user-1', email: 'user@example.com' });
       const tenant = makeTenant({ id: 'tenant-2', name: 'New Tenant', status: 'active' });
-      const membership = new TenantMembership();
-      membership.id = 'm-1';
-      membership.user = user;
-      membership.tenant = tenant;
-      membership.role = 'member';
-      membership.joinedAt = new Date();
+      const membership = Object.assign(Object.create(TenantMembership.prototype) as TenantMembership, {
+        id: 'm-1',
+        user,
+        tenant,
+        role: 'member',
+        joinedAt: new Date(),
+      });
 
       const em = buildMockEm({
         findOneOrFail: vi.fn().mockResolvedValue(user),
@@ -466,12 +470,13 @@ describe('UserManagementService', () => {
     it('throws 400 if user is the last owner', async () => {
       const user = makeUser({ id: 'user-1' });
       const tenant = makeTenant({ id: 'tenant-1' });
-      const membership = new TenantMembership();
-      membership.id = 'm-1';
-      membership.user = user;
-      membership.tenant = tenant;
-      membership.role = 'owner';
-      membership.joinedAt = new Date();
+      const membership = Object.assign(Object.create(TenantMembership.prototype) as TenantMembership, {
+        id: 'm-1',
+        user,
+        tenant,
+        role: 'owner',
+        joinedAt: new Date(),
+      });
 
       const em = buildMockEm({
         findOne: vi.fn().mockResolvedValue(membership),
@@ -485,12 +490,13 @@ describe('UserManagementService', () => {
     it('removes membership on success', async () => {
       const user = makeUser({ id: 'user-1' });
       const tenant = makeTenant({ id: 'tenant-1' });
-      const membership = new TenantMembership();
-      membership.id = 'm-1';
-      membership.user = user;
-      membership.tenant = tenant;
-      membership.role = 'member';
-      membership.joinedAt = new Date();
+      const membership = Object.assign(Object.create(TenantMembership.prototype) as TenantMembership, {
+        id: 'm-1',
+        user,
+        tenant,
+        role: 'member',
+        joinedAt: new Date(),
+      });
 
       const em = buildMockEm({
         findOne: vi.fn().mockResolvedValue(membership),
@@ -589,12 +595,13 @@ describe('TenantManagementService', () => {
     it('returns MemberViewModel array from memberships', async () => {
       const user = makeUser();
       const tenant = makeTenant();
-      const membership = new TenantMembership();
-      membership.id = 'm-1';
-      membership.user = user;
-      membership.tenant = tenant;
-      membership.role = 'owner';
-      membership.joinedAt = new Date();
+      const membership = Object.assign(Object.create(TenantMembership.prototype) as TenantMembership, {
+        id: 'm-1',
+        user,
+        tenant,
+        role: 'owner',
+        joinedAt: new Date(),
+      });
 
       const em = buildMockEm({ find: vi.fn().mockResolvedValue([membership]) });
       const svc = new TenantManagementService(em);
@@ -694,14 +701,15 @@ describe('TenantManagementService', () => {
 
   describe('revokeApiKey', () => {
     it('sets status to revoked and revokedAt', async () => {
-      const apiKey = new ApiKey();
-      apiKey.id = 'key-1';
-      apiKey.status = 'active';
-      apiKey.revokedAt = null;
-      apiKey.name = 'test';
-      apiKey.keyPrefix = 'loom_sk_test';
-      apiKey.keyHash = 'hash';
-      apiKey.createdAt = new Date();
+      const apiKey = Object.assign(Object.create(ApiKey.prototype) as ApiKey, {
+        id: 'key-1',
+        status: 'active',
+        revokedAt: null,
+        name: 'test',
+        keyPrefix: 'loom_sk_test',
+        keyHash: 'hash',
+        createdAt: new Date(),
+      });
 
       const em = buildMockEm({ findOneOrFail: vi.fn().mockResolvedValue(apiKey) });
       const svc = new TenantManagementService(em);
@@ -711,14 +719,15 @@ describe('TenantManagementService', () => {
     });
 
     it('flushes the change', async () => {
-      const apiKey = new ApiKey();
-      apiKey.id = 'key-1';
-      apiKey.status = 'active';
-      apiKey.revokedAt = null;
-      apiKey.name = 'test';
-      apiKey.keyPrefix = 'loom_sk_test';
-      apiKey.keyHash = 'hash';
-      apiKey.createdAt = new Date();
+      const apiKey = Object.assign(Object.create(ApiKey.prototype) as ApiKey, {
+        id: 'key-1',
+        status: 'active',
+        revokedAt: null,
+        name: 'test',
+        keyPrefix: 'loom_sk_test',
+        keyHash: 'hash',
+        createdAt: new Date(),
+      });
 
       const em = buildMockEm({ findOneOrFail: vi.fn().mockResolvedValue(apiKey) });
       const svc = new TenantManagementService(em);
@@ -727,14 +736,15 @@ describe('TenantManagementService', () => {
     });
 
     it('returns keyHash that can be used for cache invalidation', async () => {
-      const apiKey = new ApiKey();
-      apiKey.id = 'key-1';
-      apiKey.status = 'active';
-      apiKey.revokedAt = null;
-      apiKey.name = 'test';
-      apiKey.keyPrefix = 'loom_sk_test';
-      apiKey.keyHash = 'expected-hash-123';
-      apiKey.createdAt = new Date();
+      const apiKey = Object.assign(Object.create(ApiKey.prototype) as ApiKey, {
+        id: 'key-1',
+        status: 'active',
+        revokedAt: null,
+        name: 'test',
+        keyPrefix: 'loom_sk_test',
+        keyHash: 'expected-hash-123',
+        createdAt: new Date(),
+      });
 
       const em = buildMockEm({ findOneOrFail: vi.fn().mockResolvedValue(apiKey) });
       const svc = new TenantManagementService(em);
@@ -747,16 +757,17 @@ describe('TenantManagementService', () => {
     it('returns ApiKeyViewModel array', async () => {
       const tenant = makeTenant();
       const agent = makeAgent(tenant);
-      const apiKey = new ApiKey();
-      apiKey.id = 'key-1';
-      apiKey.agent = agent;
-      apiKey.tenant = tenant;
-      apiKey.name = 'My Key';
-      apiKey.keyPrefix = 'loom_sk_test';
-      apiKey.keyHash = 'hash';
-      apiKey.status = 'active';
-      apiKey.revokedAt = null;
-      apiKey.createdAt = new Date();
+      const apiKey = Object.assign(Object.create(ApiKey.prototype) as ApiKey, {
+        id: 'key-1',
+        agent,
+        tenant,
+        name: 'My Key',
+        keyPrefix: 'loom_sk_test',
+        keyHash: 'hash',
+        status: 'active',
+        revokedAt: null,
+        createdAt: new Date(),
+      });
 
       const em = buildMockEm({ find: vi.fn().mockResolvedValue([apiKey]) });
       const svc = new TenantManagementService(em);
@@ -772,12 +783,13 @@ describe('TenantManagementService', () => {
     it('inherits parent memberships', async () => {
       const user = makeUser({ id: 'user-1' });
       const parent = makeTenant({ id: 'parent-1' });
-      const membership = new TenantMembership();
-      membership.id = 'mem-1';
-      membership.tenant = parent;
-      membership.user = user;
-      membership.role = 'owner';
-      membership.joinedAt = new Date();
+      const membership = Object.assign(Object.create(TenantMembership.prototype) as TenantMembership, {
+        id: 'mem-1',
+        tenant: parent,
+        user,
+        role: 'owner',
+        joinedAt: new Date(),
+      });
       parent.members = [membership];
       
       const em = buildMockEm({
@@ -804,15 +816,16 @@ describe('TenantManagementService', () => {
     });
 
     it('sets revokedAt on the invite', async () => {
-      const invite = new Invite();
-      invite.id = 'invite-1';
-      invite.token = 'token-123';
-      invite.tenant = makeTenant();
-      invite.maxUses = null;
-      invite.useCount = 0;
-      invite.expiresAt = new Date(Date.now() + 86_400_000);
-      invite.revokedAt = null;
-      invite.createdAt = new Date();
+      const invite = Object.assign(Object.create(Invite.prototype) as Invite, {
+        id: 'invite-1',
+        token: 'token-123',
+        tenant: makeTenant(),
+        maxUses: null,
+        useCount: 0,
+        expiresAt: new Date(Date.now() + 86_400_000),
+        revokedAt: null,
+        createdAt: new Date(),
+      });
 
       const em = buildMockEm({ findOne: vi.fn().mockResolvedValue(invite) });
       const svc = new TenantManagementService(em);
@@ -824,15 +837,16 @@ describe('TenantManagementService', () => {
 
   describe('listInvites', () => {
     it('returns invites for the tenant', async () => {
-      const invite = new Invite();
-      invite.id = 'invite-1';
-      invite.token = 'token-123';
-      invite.tenant = makeTenant({ id: 'tenant-1' });
-      invite.maxUses = 5;
-      invite.useCount = 2;
-      invite.expiresAt = new Date();
-      invite.revokedAt = null;
-      invite.createdAt = new Date();
+      const invite = Object.assign(Object.create(Invite.prototype) as Invite, {
+        id: 'invite-1',
+        token: 'token-123',
+        tenant: makeTenant({ id: 'tenant-1' }),
+        maxUses: 5,
+        useCount: 2,
+        expiresAt: new Date(),
+        revokedAt: null,
+        createdAt: new Date(),
+      });
 
       const em = buildMockEm({ find: vi.fn().mockResolvedValue([invite]) });
       const svc = new TenantManagementService(em);
@@ -846,12 +860,13 @@ describe('TenantManagementService', () => {
 
   describe('updateMemberRole', () => {
     it('throws 400 "Cannot demote the last owner" when demoting the only owner', async () => {
-      const membership = new TenantMembership();
-      membership.id = 'm-1';
-      membership.role = 'owner';
-      membership.user = makeUser();
-      membership.tenant = makeTenant();
-      membership.joinedAt = new Date();
+      const membership = Object.assign(Object.create(TenantMembership.prototype) as TenantMembership, {
+        id: 'm-1',
+        role: 'owner',
+        user: makeUser(),
+        tenant: makeTenant(),
+        joinedAt: new Date(),
+      });
 
       const em = buildMockEm({
         findOneOrFail: vi.fn().mockResolvedValue(membership),
@@ -863,12 +878,13 @@ describe('TenantManagementService', () => {
     });
 
     it('updates role successfully when >1 owner', async () => {
-      const membership = new TenantMembership();
-      membership.id = 'm-1';
-      membership.role = 'owner';
-      membership.user = makeUser();
-      membership.tenant = makeTenant();
-      membership.joinedAt = new Date();
+      const membership = Object.assign(Object.create(TenantMembership.prototype) as TenantMembership, {
+        id: 'm-1',
+        role: 'owner',
+        user: makeUser(),
+        tenant: makeTenant(),
+        joinedAt: new Date(),
+      });
 
       const em = buildMockEm({
         findOneOrFail: vi.fn().mockResolvedValue(membership),
@@ -897,12 +913,13 @@ describe('TenantManagementService', () => {
     });
 
     it('throws 400 if trying to remove the last owner', async () => {
-      const membership = new TenantMembership();
-      membership.id = 'm-1';
-      membership.role = 'owner';
-      membership.user = makeUser({ id: 'user-2' });
-      membership.tenant = makeTenant();
-      membership.joinedAt = new Date();
+      const membership = Object.assign(Object.create(TenantMembership.prototype) as TenantMembership, {
+        id: 'm-1',
+        role: 'owner',
+        user: makeUser({ id: 'user-2' }),
+        tenant: makeTenant(),
+        joinedAt: new Date(),
+      });
 
       const em = buildMockEm({
         findOne: vi.fn().mockResolvedValue(membership),
@@ -914,12 +931,13 @@ describe('TenantManagementService', () => {
     });
 
     it('removes membership on success', async () => {
-      const membership = new TenantMembership();
-      membership.id = 'm-1';
-      membership.role = 'member';
-      membership.user = makeUser({ id: 'user-2' });
-      membership.tenant = makeTenant();
-      membership.joinedAt = new Date();
+      const membership = Object.assign(Object.create(TenantMembership.prototype) as TenantMembership, {
+        id: 'm-1',
+        role: 'member',
+        user: makeUser({ id: 'user-2' }),
+        tenant: makeTenant(),
+        joinedAt: new Date(),
+      });
 
       const em = buildMockEm({
         findOne: vi.fn().mockResolvedValue(membership),
@@ -936,17 +954,17 @@ describe('TenantManagementService', () => {
 describe('TenantService', () => {
   describe('loadByApiKey', () => {
     function makeApiKeyRecord(tenant: Tenant, agent: Agent): ApiKey {
-      const key = new ApiKey();
-      key.id = 'key-1';
-      key.tenant = tenant;
-      key.agent = agent;
-      key.keyHash = 'will-be-overridden';
-      key.keyPrefix = 'loom_sk_test';
-      key.name = 'Test Key';
-      key.status = 'active';
-      key.revokedAt = null;
-      key.createdAt = new Date();
-      return key;
+      return Object.assign(Object.create(ApiKey.prototype) as ApiKey, {
+        id: 'key-1',
+        tenant,
+        agent,
+        keyHash: 'will-be-overridden',
+        keyPrefix: 'loom_sk_test',
+        name: 'Test Key',
+        status: 'active',
+        revokedAt: null,
+        createdAt: new Date(),
+      });
     }
 
     it('hashes the key and looks it up', async () => {

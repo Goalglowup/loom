@@ -1,5 +1,4 @@
 import { randomUUID } from 'node:crypto';
-import { createHash, randomBytes } from 'node:crypto';
 import type { Tenant } from './Tenant.js';
 import { ApiKey } from './ApiKey.js';
 
@@ -21,24 +20,32 @@ export class Agent {
 
   apiKeys: ApiKey[] = [];
 
+  constructor(tenant: Tenant, name: string, config?: Partial<Agent>) {
+    this.id = randomUUID();
+    this.tenant = tenant;
+    this.name = name;
+    this.providerConfig = config?.providerConfig ?? null;
+    this.systemPrompt = config?.systemPrompt ?? null;
+    this.skills = config?.skills ?? null;
+    this.mcpEndpoints = config?.mcpEndpoints ?? null;
+    this.mergePolicies = config?.mergePolicies ?? {
+      system_prompt: 'prepend',
+      skills: 'merge',
+      mcp_endpoints: 'merge',
+    };
+    this.availableModels = config?.availableModels ?? null;
+    this.conversationsEnabled = config?.conversationsEnabled ?? false;
+    this.conversationTokenLimit = config?.conversationTokenLimit ?? 4000;
+    this.conversationSummaryModel = config?.conversationSummaryModel ?? null;
+    this.createdAt = new Date();
+    this.updatedAt = null;
+    this.apiKeys = [];
+  }
+
   createApiKey(name: string): { entity: ApiKey; rawKey: string } {
-    const rawKey = 'loom_sk_' + randomBytes(24).toString('base64url');
-    const keyHash = createHash('sha256').update(rawKey).digest('hex');
-    const keyPrefix = rawKey.slice(0, 12);
-
-    const apiKey = new ApiKey();
-    apiKey.id = randomUUID();
-    apiKey.tenant = this.tenant;
-    apiKey.agent = this;
-    apiKey.keyHash = keyHash;
-    apiKey.keyPrefix = keyPrefix;
-    apiKey.name = name;
-    apiKey.status = 'active';
-    apiKey.revokedAt = null;
-    apiKey.createdAt = new Date();
-
+    const apiKey = new ApiKey(this, name);
     this.apiKeys.push(apiKey);
-    return { entity: apiKey, rawKey };
+    return { entity: apiKey, rawKey: apiKey.rawKey };
   }
 
   enableConversations(tokenLimit: number, summaryModel?: string): void {

@@ -1,5 +1,4 @@
 import { randomUUID } from 'node:crypto';
-import { randomBytes } from 'node:crypto';
 import { Agent } from './Agent.js';
 import { TenantMembership } from './TenantMembership.js';
 import { Invite } from './Invite.js';
@@ -41,52 +40,19 @@ export class Tenant {
   }
 
   createAgent(name: string, config?: Partial<Agent>): Agent {
-    const agent = new Agent();
-    agent.id = randomUUID();
-    agent.tenant = this;
-    agent.name = name;
-    agent.providerConfig = config?.providerConfig ?? null;
-    agent.systemPrompt = config?.systemPrompt ?? null;
-    agent.skills = config?.skills ?? null;
-    agent.mcpEndpoints = config?.mcpEndpoints ?? null;
-    agent.mergePolicies = config?.mergePolicies ?? {
-      system_prompt: 'prepend',
-      skills: 'merge',
-      mcp_endpoints: 'merge',
-    };
-    agent.availableModels = config?.availableModels ?? null;
-    agent.conversationsEnabled = config?.conversationsEnabled ?? false;
-    agent.conversationTokenLimit = config?.conversationTokenLimit ?? 4000;
-    agent.conversationSummaryModel = config?.conversationSummaryModel ?? null;
-    agent.createdAt = new Date();
-    agent.updatedAt = null;
-    agent.apiKeys = [];
+    const agent = new Agent(this, name, config);
     this.agents.push(agent);
     return agent;
   }
 
   createInvite(createdBy: User, maxUses?: number, expiresInDays = 7): Invite {
-    const invite = new Invite();
-    invite.id = randomUUID();
-    invite.tenant = this;
-    invite.token = randomBytes(32).toString('base64url');
-    invite.createdByUser = createdBy;
-    invite.maxUses = maxUses ?? null;
-    invite.useCount = 0;
-    invite.expiresAt = new Date(Date.now() + expiresInDays * 86_400_000);
-    invite.revokedAt = null;
-    invite.createdAt = new Date();
+    const invite = new Invite(this, createdBy, maxUses ?? null, expiresInDays);
     this.invites.push(invite);
     return invite;
   }
 
   addMembership(user: User, role: string): TenantMembership {
-    const membership = new TenantMembership();
-    membership.id = randomUUID();
-    membership.tenant = this;
-    membership.user = user;
-    membership.role = role;
-    membership.joinedAt = new Date();
+    const membership = new TenantMembership(this, user, role);
     this.members.push(membership);
     return membership;
   }

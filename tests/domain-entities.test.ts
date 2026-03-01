@@ -118,14 +118,15 @@ describe('Agent', () => {
       name: 'Test Tenant',
     });
 
-    agent = new Agent();
-    agent.id = 'agent-1';
-    agent.tenant = tenant;
-    agent.name = 'Test Agent';
-    agent.conversationsEnabled = false;
-    agent.conversationTokenLimit = 4000;
-    agent.conversationSummaryModel = null;
-    agent.apiKeys = [];
+    agent = Object.assign(Object.create(Agent.prototype) as Agent, {
+      id: 'agent-1',
+      tenant,
+      name: 'Test Agent',
+      conversationsEnabled: false,
+      conversationTokenLimit: 4000,
+      conversationSummaryModel: null,
+      apiKeys: [],
+    });
   });
 
   describe('enableConversations', () => {
