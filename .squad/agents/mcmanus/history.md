@@ -949,3 +949,69 @@ Used `adminMode?: boolean` prop pattern instead of passing full URLs/header fact
 - KB selector only shown when at least one KB exists (avoids empty-state confusion)
 - Export YAML generates a client-side blob download — no new API endpoint needed
 - Deployments page re-uses existing `authRequired` pattern; optimistic delete with rollback on error
+
+## Learnings (2026-03-02 beta launch sprint)
+
+### Files modified
+- `portal/src/pages/LandingPage.tsx` — rewrote hero copy, updated badge, 4-feature grid, added inline beta signup form with idle/loading/success/error states, updated footer to "© 2026 Synaptic Weave, Inc."
+- `portal/src/App.tsx` — added imports + routes for PrivacyPage (`/privacy`) and AboutPage (`/about`)
+
+### Files created
+- `portal/src/pages/PrivacyPage.tsx` — static privacy policy page for beta
+- `portal/src/pages/AboutPage.tsx` — about page with Arachne myth + product story
+- `portal/.env.example` — documents `VITE_API_BASE_URL=` env var
+- `cli/src/commands/init.ts` — `arachne init` interactive setup (gateway URL + masked token)
+- `cli/README.md` — npm package readme with install, quick start, command table
+
+### Patterns used
+- Beta signup form: local `useState` for `idle|loading|success|error`, direct `fetch` using `import.meta.env.VITE_API_BASE_URL` prefix, `<section id="beta-signup">` for anchor scroll
+- `VITE_API_BASE_URL` was already in `portal/src/lib/api.ts` — no API calls needed updating
+- CLI `init` command follows same pattern as `login.ts` (promptPassword, writeConfig)
+- Issue #72 (default gateway URL) was already `https://api.arachne-ai.com` in `cli/src/config.ts` — closed as already done
+
+### Issue #76: Portal signups_disabled handling
+
+**Implemented:**
+- Added `signupsDisabled` state to `portal/src/pages/SignupPage.tsx`
+- Changed the `signups_disabled` catch branch: instead of navigating away (`navigate('/')`), sets `signupsDisabled = true`
+- Renders an amber warning banner with the message "Signups are currently closed." and an `<a href="/#beta-signup">Join the beta waitlist →</a>` link
+- The form remains visible beneath the banner so users can still act if signups later re-open
+- Added test: "shows signups-disabled CTA with waitlist link when backend returns signups_disabled" in `portal/src/pages/__tests__/SignupPage.test.tsx`
+- All 11 SignupPage tests pass
+
+**Key Files:**
+- `portal/src/pages/SignupPage.tsx` — state + catch branch + amber CTA banner
+- `portal/src/pages/__tests__/SignupPage.test.tsx` — new test case
+
+---
+
+### Beta Launch Sprint — Epic #70 Completion
+
+**Wave 1 Frontend — Issues #71, #72, #74, #77, #78, #80, #81, #82, #83 (COMPLETED)**
+- **#77 Landing page rewrite:** Rebuilt with Synaptic Weave branding, hero section, signup flow
+- **#78 Beta signup form:** Integrated direct fetch to `POST /v1/beta/signup` in LandingPage (no api module, no auth)
+- **#80 VITE_API_BASE_URL:** Verified already wired in `portal/src/lib/api.ts`; created `.env.example` docs
+- **#81 Footer branding:** Added Synaptic Weave copyright/links footer to public pages (LandingPage, PrivacyPage, AboutPage)
+- **#82 Privacy page:** Implemented dedicated privacy policy page
+- **#83 About page:** Implemented dedicated about page
+- **#71 CLI init command:** Implemented `arachne init` with full config save (gatewayUrl + token)
+- **#72 CLI default URLs:** Verified already defaulted to `https://api.arachne-ai.com`; docs-only
+- **#74 CLI README:** Updated with new command structure and examples
+
+**Wave 2 Portal — Issue #76 (COMPLETED)**
+- **#76 Portal redirect:** Added client-side check for 503 response, redirect to waitlist CTA when signups disabled
+
+**Cross-team coordination:**
+- Landing page signup form calls backend's public `/v1/beta/signup` endpoint
+- Portal redirect coordinates with backend's 503 status code
+- CLI init consistent with login flow (saves full config object)
+- All base URLs via environment variables (Vite + dotenv)
+
+**Key decisions captured:**
+- Beta signup form uses direct fetch (not api module) due to public/no-auth pattern mismatch
+- Footer only on public pages (not AppLayout, which has sign-out button)
+- CLI init saves full config (gatewayUrl + token) for consistency
+- VITE_API_BASE_URL + CLI defaults already wired (docs-only updates)
+
+**Impact:** Full beta UX ready. Landing page funnels users to beta signup. Portal gracefully handles signups-disabled state. CLI configured for beta API endpoint.
+

@@ -1641,3 +1641,54 @@ const t = Object.assign(Object.create(Tenant.prototype) as Tenant, {
 
 ## Learnings
 
+
+---
+
+### Beta Launch Backend — Issues #75, #79, #84
+
+**#75 — SIGNUPS_ENABLED feature flag**
+- Created `src/config.ts` exporting `isSignupsEnabled(): boolean` — returns `true` unless `SIGNUPS_ENABLED === "false"` (any other value including unset = enabled)
+- Updated `src/routes/portal.ts` to import `isSignupsEnabled` and return HTTP 503 with `{ error: "signups_disabled", message: "Signups are currently closed. Join the beta waitlist." }` when disabled (was 401 with wrong body)
+- Documented in `.env.example`
+
+**#79 — POST /v1/beta/signup + migration**
+- Migration: `migrations/1000000000017_beta_signups.cjs` — `beta_signups` table (id UUID PK, email TEXT UNIQUE NOT NULL, name TEXT, created_at TIMESTAMPTZ)
+- Route file: `src/routes/beta.ts` — `registerBetaRoutes()` pattern matching existing route files
+- Handles duplicate email (pg error code 23505) → 200 `{ status: "already_registered" }`
+- Success → 201 `{ status: "registered", message: "You're on the list! We'll be in touch." }`
+- No auth required; uses `query()` from `src/db.ts` for raw SQL
+- Registered in `src/index.ts` alongside other route groups
+
+**#84 — ALLOWED_ORIGINS CORS**
+- Already implemented in `src/index.ts` (`allowedOrigins.split(',').map(o => o.trim())`)
+- Added `ALLOWED_ORIGINS=*` documentation to `.env.example`
+
+**Key patterns used:**
+- `src/db.ts` `query()` helper for raw SQL in route files (no direct knex/pool)
+- pg error code `23505` for unique constraint violations
+- Route files export a `register*Routes(fastify)` function, registered in `index.ts` via `fastify.register()`
+- Config helpers exported from `src/config.ts` (new file)
+
+---
+
+### Beta Launch Sprint — Epic #70 Completion
+
+**Wave 1 Backend — Issues #75, #79, #84 (COMPLETED)**
+- **#75 SIGNUPS_ENABLED:** Implemented semantic check (any non-`"false"` = enabled) in `src/config.ts`
+- **#79 /beta/signup:** Public endpoint returns 503 when disabled, 200 for duplicate emails (not 409), 201 for success
+- **#84 CORS:** Verified already implemented; docs-only update to `.env.example`
+
+**Cross-team coordination:**
+- Frontend (McManus) calls `POST /v1/beta/signup` directly via fetch (no api module) from LandingPage
+- Portal redirect (#76) checks 503 response and shows waitlist CTA
+- DevOps (Kujan) hardcodes `SIGNUPS_ENABLED=false` in Terraform for invite-only beta
+- Public endpoint means no auth layer; rate limiting deferred to nginx/LB
+
+**Key decisions captured:**
+- SIGNUPS_ENABLED semantics (non-`"false"` = safer default)
+- 503 > 401 (intentional unavailability, not auth failure)
+- 200 > 409 for duplicates (user perspective: already registered = success)
+- Direct fetch pattern (not api module) for public endpoints
+
+**Impact:** Backend ready for beta launch with clear invite-only enforcement and UX-friendly signup flow.
+

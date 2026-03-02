@@ -133,3 +133,62 @@ Stories are not done until:
 - Added "Further Reading" section to `docs/architecture.md` linking to developer reference docs
 - Positioning follows triple identity: runtime (gateway/observability) + toolchain (CLI/registry/weaving) + spec (portable artifacts)
 
+### Beta Launch: License & Brand Documentation (2026-02-27)
+
+**Completed for GitHub issues #90 and #91:**
+
+1. **LICENSE file** — MIT license text with copyright holder "Synaptic Weave, Inc." (2026) now in repo root
+2. **README.md "Why Arachne?" section** — Added brand narrative between opening tagline and capabilities section
+   - Explains the mythological connection (Arachne the weaver challenging Athena)
+   - Positions platform as the loom holding AI application threads: providers, models, contexts, conversations, retrieval chains
+   - Emphasizes visibility, control, and auditability as core brand values
+   - 4-sentence format matches existing README tone and structure
+
+**Files created/modified:**
+- `/LICENSE` — Created with MIT text, Synaptic Weave, Inc. copyright, year 2026
+- `README.md` — Added "## Why Arachne?" section (5 sentences) after product tagline
+
+### npm Publish Workflow for @arachne/cli (2026-02-27)
+
+**Created GitHub Actions workflow for automated npm publishing:**
+
+1. **`.github/workflows/publish-cli.yml`** — Automated npm package publish workflow
+   - Trigger: push to main with changes in `cli/` directory
+   - Job: checkout, setup Node 20, install deps, build TypeScript, publish with public access
+   - Uses `NPM_TOKEN` secret for authentication
+   - Includes comment header documenting required GitHub secret
+
+2. **`cli/package.json` updates:**
+   - Verified package name is `@arachne/cli` (✓)
+   - Added `publishConfig.access: public` for npm registry visibility
+   - Added `files` field: `["dist/", "README.md"]` to specify published artifacts
+   - Build script already exists: `"build": "tsc"`
+
+**Documentation and decisions:**
+- Workflow uses standard GitHub Actions patterns: checkout@v4, setup-node@v4
+- Node registry URL set to official npm registry
+- `npm ci` ensures reproducible installs in CI
+- Public access flag allows anyone to install from npm
+- Workflow only publishes when CLI code changes (prevents unnecessary publishes)
+
+
+---
+
+### Beta Launch Sprint — Epic #70 Completion
+
+**Wave 1 Legal/Publishing — Issues #90, #73 (COMPLETED)**
+- **#90 MIT LICENSE:** Added LICENSE file with MIT terms and copyright notice
+- **#73 npm publish workflow:** Implemented `.github/workflows/npm-publish.yml` triggered on tagged releases, publishes @arachne-ai scoped packages to npm
+
+**Cross-team coordination:**
+- CI workflow (#85) tests before publish
+- npm workflow triggers on `push refs/tags/v*` (semantic versioning)
+- Legal groundwork (MIT) in place for open-source release readiness
+
+**Key decisions captured:**
+- npm publish workflow standard: checkout, setup-node with cache, npm publish
+- Triggered on tags for release coordination
+- Publishes to npm registry (public packages)
+
+**Impact:** Legal compliance and npm release automation ready. Project positioned for open-source ecosystem participation post-beta.
+

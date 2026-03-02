@@ -1,4 +1,98 @@
 # Team Decisions
+
+## 2026-03-02: CI and GHCR Publish Workflows
+
+**By:** Kujan (DevOps)  
+**Issues:** #85, #86  
+
+### CI Workflow (`.github/workflows/ci.yml`)
+- Triggers on PR to `main` and `dev`
+- Two parallel jobs: `test` and `lint`
+- `test` installs root + `cli/` deps, runs `vitest run`, builds root and cli
+- `lint` installs root deps, runs `npm run lint --if-present` (graceful no-op if script absent)
+- Uses `actions/checkout@v4`, `actions/setup-node@v4` with npm cache, Node 20
+
+### Publish Workflow (`.github/workflows/publish.yml`)
+- Triggers on push to `main` only (not dev — images only from stable branch)
+- Single `publish` job with `packages: write` permission for GHCR auth
+- Builds and pushes two images: `arachne-gateway` and `arachne-portal`
+- Tags: `:latest` and `:<full-sha>` for traceability
+- Package visibility must be set to public manually in GitHub Settings → Packages after first push
+
+### Key Decisions
+- **No build matrix** — single Node 20 target; matrix can be added later if needed
+- **GITHUB_TOKEN for GHCR** — no external secrets required; token has `packages: write` via job permission
+- **SHA tag** — full commit SHA used (not short) for precision; matches GitHub's `github.sha` context
+- **Portal image** — uses `context: .` (repo root) because Dockerfile.portal likely references portal/ subdirectory
+
+## 2026-03-02: Terraform Azure Infra + Deploy Workflow
+
+**By:** Kujan (DevOps)  
+**Issues:** #87, #88  
+
+### Key Decisions
+- **`workflow_run` trigger:** Deploy waits for publish workflow completion to ensure GHCR images exist (avoids race conditions)
+- **Secrets as Terraform variables (v1):** DATABASE_URL, MASTER_KEY, JWT_SECRET, ADMIN_JWT_SECRET passed as sensitive `TF_VAR_*` env vars; Key Vault deferred to v2
+- **Database NOT in Terraform (v1):** PostgreSQL provisioned manually to prevent accidental `terraform destroy` wiping production data; will import in v2
+- **Image override variables:** `gateway_image` and `portal_image` default to empty string; fall back to `:latest` when empty (allows local `terraform plan/apply` without real SHA)
+- **SIGNUPS_ENABLED=false hardcoded:** Static env var, visible in plan, clearly documents invite-only beta decision
+- **Resource asymmetry:** Gateway (0.5 CPU / 1 GiB) for AI proxy compute; Portal (0.25 CPU / 0.5 GiB) for static React bundle
+
+## 2026-03-02: Beta Launch Backend — Signups & CORS
+
+**By:** Fenster (Backend)  
+**Issues:** #75, #79, #84  
+
+### SIGNUPS_ENABLED Semantics
+**Decision:** Treat any value other than `"false"` as signups-enabled (not `=== "true"` check).  
+**Rationale:** Safer default — if the env var is accidentally unset or misspelled, signups remain open rather than silently locking out users.
+
+### Config Module
+**Decision:** Created dedicated `src/config.ts` module for app-wide config helpers rather than inlining checks.  
+**Rationale:** Single source of truth; reusable across modules (e.g., future admin overrides); consistent with team preference for explicit module boundaries.
+
+### HTTP Status for Disabled Signups
+**Decision:** Return HTTP 503 (Service Unavailable) when signups are disabled, not 401 (Unauthorized).  
+**Rationale:** 401 implies authentication failure; 503 correctly signals the service is intentionally unavailable. Portal UI can display waitlist CTA on 503.
+
+### Beta Signups — No Auth
+**Decision:** `POST /v1/beta/signup` is a fully public endpoint with no authentication.  
+**Rationale:** Pre-signup users have no credentials; rate limiting can be added later at the nginx/load-balancer layer if needed.
+
+### Duplicate Email Response
+**Decision:** Return HTTP 200 `{ status: "already_registered" }` for duplicate beta signups rather than 409.  
+**Rationale:** From the user's perspective, their email is already on the list — this is a successful outcome. 409 would surface as an error in the UI unnecessarily.
+
+### CORS Already Implemented
+**Decision:** No code change needed for #84; `src/index.ts` already had the correct ALLOWED_ORIGINS parsing.  
+**Rationale:** Verified existing code correctly splits comma-separated origins and falls back to `true` (permissive) when unset. Only .env.example documentation was missing.
+
+## 2026-03-02: Beta Launch Frontend Sprint
+
+**By:** McManus (Frontend Dev)  
+**Issues:** #71, #72, #74, #76, #77, #78, #80, #81, #82, #83  
+
+### Beta Signup Form — Direct Fetch
+**Decision:** Beta signup form uses direct `fetch`, not the `api` module.  
+**Rationale:** `/v1/beta/signup` is unauthenticated and doesn't fit the existing `api.ts` request helper pattern (no token, different error shape). Inline fetch directly in `LandingPage.tsx` using `import.meta.env.VITE_API_BASE_URL` as base.
+
+### VITE_API_BASE_URL Already Wired
+**Decision:** No migration needed; `portal/src/lib/api.ts` already declared `const API_BASE = import.meta.env.VITE_API_BASE_URL ?? ''`.  
+**Rationale:** No hardcoded gateway URLs existed in portal source. Only change was creating `portal/.env.example` to document the variable.
+
+### CLI Default URL Already Set
+**Decision:** Closed #72 without code changes; `cli/src/config.ts` already defaulted to `https://api.arachne-ai.com`.  
+**Rationale:** Feature already shipped; docs only update needed.
+
+### CLI Init Config Fullness
+**Decision:** `arachne init` saves full config (gatewayUrl + token), not just one field.  
+**Rationale:** Consistent with `login.ts` which also calls `writeConfig({ gatewayUrl, token })`. Existing config read first so defaults are pre-filled.
+
+### Footer Placement
+**Decision:** Footer is on public pages only (LandingPage, PrivacyPage, AboutPage), not AppLayout.  
+**Rationale:** AppLayout sidebar footer is a "sign out" button for authenticated users. Public-facing Synaptic Weave copyright/links footer lives as inline footers on relevant pages. Kept minimal—no separate Footer component created.
+
+# Team Decisions
 ## 2026-02-27: Subtenant Hierarchy with Self-Foreign Key
 
 **By:** Fenster (Backend)  

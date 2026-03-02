@@ -28,3 +28,8 @@
 | Internal architecture docs, API reference | Edie | Technical Writer maintains internal documentation |
 | Public-facing feature docs, announcements, tutorials | Edie | Technical Writer owns user-facing content |
 | Documentation review, Definition of Done doc gate | Edie | Technical Writer reviews stories for doc completeness |
+| Cloud infrastructure, Terraform, Azure resources | Kujan | DevOps Engineer owns all infrastructure as code |
+| CI/CD pipelines, GitHub Actions workflows | Kujan | DevOps Engineer owns build/deploy automation |
+| Docker image builds, container registry, GHCR | Kujan | DevOps Engineer owns containerization and publishing |
+| Deployment automation, environment config, secrets management | Kujan | DevOps Engineer owns release pipeline |
+| Azure Container Apps, Static Web Apps, PostgreSQL Flexible Server | Kujan | DevOps Engineer owns Azure resource provisioning |
