@@ -17,6 +17,8 @@ import ConversationsPage from './pages/ConversationsPage';
 import KnowledgeBasesPage from './pages/KnowledgeBasesPage';
 import DeploymentsPage from './pages/DeploymentsPage';
 import AuthGuard from './components/AuthGuard';
+import PrivacyPage from './pages/PrivacyPage';
+import AboutPage from './pages/AboutPage';
 
 export default function App() {
   return (
@@ -25,6 +27,8 @@ export default function App() {
         <Route path="/" element={<LandingPage />} />
         <Route path="/login" element={<LoginPage />} />
         <Route path="/signup" element={<SignupPage />} />
+        <Route path="/privacy" element={<PrivacyPage />} />
+        <Route path="/about" element={<AboutPage />} />
         <Route path="/app" element={<AuthGuard><AppLayout /></AuthGuard>}>
           <Route index element={<DashboardHome />} />
           <Route path="settings" element={<SettingsPage />} />
