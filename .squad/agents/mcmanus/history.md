@@ -898,3 +898,21 @@ Used `adminMode?: boolean` prop pattern instead of passing full URLs/header fact
 - Memory state is session-scoped (resets on page reload)
 - Could extend with conversation listing/browser UI in future
 - Deep linking to conversation details would be valuable for debugging
+
+### CLI Scaffold: @arachne/cli package created
+
+**Implemented:**
+- `cli/package.json` — `@arachne/cli` v0.1.0, Commander.js + node-fetch + form-data deps, ESM module, `arachne` bin pointing to `dist/index.js`
+- `cli/tsconfig.json` — extends root tsconfig, `rootDir: src`, `outDir: dist`, declaration files enabled
+- `cli/src/index.ts` — Commander entry point; `arachne` program with name/description/version; command stubs commented ready to wire in
+- `cli/src/commands/login.ts` — `arachne login [url]` stub
+- `cli/src/commands/weave.ts` — `arachne weave <spec>` stub with `--output` option
+- `cli/src/commands/push.ts` — `arachne push <bundle>` stub with `--tag` option
+- `cli/src/commands/deploy.ts` — `arachne deploy <artifact>` stub with `--tenant` (required) and `--env` option
+- `cli/src/config.ts` — `readConfig`/`writeConfig` to `~/.arachne/config.json`; `getGatewayUrl`/`getToken` with env var fallback
+- Root `package.json` — added `"workspaces": ["cli"]`
+
+**Technical Notes:**
+- Config stored at `~/.arachne/config.json`; env vars `ARACHNE_GATEWAY_URL` and `ARACHNE_TOKEN` take priority over stored config
+- ESM-first (`"type": "module"`) consistent with root package
+- All command actions async-ready for future implementation

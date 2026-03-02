@@ -7,6 +7,7 @@ import type { User } from './User.js';
 export class Tenant {
   id!: string;
   name!: string;
+  orgSlug?: string | null;
   parentId!: string | null;
   providerConfig!: any | null;
   systemPrompt!: string | null;

@@ -77,7 +77,7 @@ export default function SignupPage() {
       <div className="min-h-screen bg-gray-950 flex items-center justify-center px-4">
         <div className="w-full max-w-md space-y-4">
           <div className="text-center">
-            <p className="text-2xl font-bold text-white">⧖ Loom</p>
+            <p className="text-2xl font-bold text-white">⧖ Arachne</p>
             <p className="text-gray-400 mt-2 text-sm">Account created — save your API key</p>
           </div>
           <ApiKeyReveal keyData={newKey} onDismiss={() => navigate('/app')} />
@@ -100,7 +100,7 @@ export default function SignupPage() {
     return (
       <div className="min-h-screen bg-gray-950 flex items-center justify-center px-4">
         <div className="w-full max-w-sm text-center space-y-4">
-          <p className="text-2xl font-bold text-white">⧖ Loom</p>
+          <p className="text-2xl font-bold text-white">⧖ Arachne</p>
           <div className="bg-red-950/30 border border-red-800 rounded-xl p-6">
             <p className="text-red-400 font-medium">{inviteError}</p>
             <p className="text-gray-500 text-sm mt-2">
@@ -121,7 +121,7 @@ export default function SignupPage() {
       <div className="w-full max-w-sm space-y-6">
         {/* Logo */}
         <div className="text-center">
-          <Link to="/" className="text-2xl font-bold text-white">⧖ Loom</Link>
+          <Link to="/" className="text-2xl font-bold text-white">⧖ Arachne</Link>
           <p className="text-gray-400 mt-2 text-sm">
             {inviteInfo ? `Join ${inviteInfo.tenantName}` : 'Create your account'}
           </p>

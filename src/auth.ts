@@ -35,6 +35,8 @@ export interface TenantContext {
   agentSkills?: any[];
   /** Raw agent MCP endpoint definitions. */
   agentMcpEndpoints?: any[];
+  /** KB artifact name bound to the agent for RAG retrieval. */
+  knowledgeBaseRef?: string;
   /** Merge policies controlling how agent config is applied to requests. */
   mergePolicies: MergePolicy;
   /** Chain-resolved system prompt (agent → tenant → parent…). */

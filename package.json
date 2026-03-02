@@ -1,5 +1,5 @@
 {
-  "name": "loom",
+  "name": "arachne",
   "version": "0.1.0",
   "description": "AI runtime control plane - provider-agnostic OpenAI-compatible proxy",
   "type": "module",
@@ -48,6 +48,7 @@
   },
   "dependencies": {
     "@fastify/cors": "^11.2.0",
+    "@fastify/multipart": "^9.4.0",
     "@fastify/static": "^9.0.0",
     "@mikro-orm/better-sqlite": "^6.6.7",
     "@mikro-orm/core": "^6.6.7",
@@ -62,5 +63,8 @@
   "engines": {
     "node": ">=25.2.1"
   },
-  "main": "index.js"
+  "main": "index.js",
+  "workspaces": [
+    "cli"
+  ]
 }

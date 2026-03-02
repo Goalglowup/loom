@@ -68,3 +68,29 @@
 
 **Decision Merged:** 2026-03-01  
 Kobayashi's RAG metrics spec merged into `.squad/decisions.md` alongside Redfoot's aggregation strategy. Team now has unified raw/derived signal framework for implementation phasing (P0/P1/P2).
+
+### 2026-03-02: RAG Retrieval at Inference Time
+
+**Context:** Implemented end-to-end RAG pipeline that fires at inference time when an agent has `knowledgeBaseRef` set.
+
+**What Was Built:**
+- `src/rag/retrieval.ts`: `retrieveChunks()` (pgvector cosine similarity via knex.raw) and `buildRagContext()` (numbered context block with citation instruction)
+- `src/agent.ts`: `injectRagContext()` — async export that resolves KB artifact, embeds query, retrieves chunks, and injects context before the system prompt
+- `src/auth.ts`, `src/application/services/TenantService.ts`: `knowledgeBaseRef` threaded through TenantContext from Agent entity
+- `src/domain/entities/Agent.ts` + `Agent.schema.ts`: `knowledgeBaseRef` field added
+- `src/tracing.ts` + `Trace.ts` + `Trace.schema.ts`: 13 RAG analytics fields wired from TraceInput → BatchRow → INSERT SQL
+- `migrations/1000000000016_add-agent-knowledge-base-ref.cjs`: adds `knowledge_base_ref` varchar(255) to agents table
+
+**Key Decisions:**
+- `injectRagContext` is called in `index.ts` BEFORE `applyAgentToRequest` so RAG context appears before agent system prompt (merge policy then prepends/appends agent prompt on top)
+- Fallback-to-no-RAG on any failure (embedding error, DB error, artifact not found): log the error, set `ragStageFailed` + `fallbackToNoRag: true`, continue normally
+- Use system embedder (`embeddingAgentRef: undefined`) by default — EmbeddingAgentService falls back to env vars
+- pgvector query uses knex.raw with `?::vector` cast; vector formatted as `[x,y,z,...]` string
+- topK hardcoded to 5 default (configurable later via KB spec or agent config)
+- Query text extracted from last user message in `messages` array
+
+**What I Learned:**
+- `knex.raw('WHERE col <=> ?::vector', [str])` works correctly — knex maps `?` to `$1` before pg receives it; the `::vector` cast is preserved
+- TenantContext already flows through the entire request path; adding `knowledgeBaseRef` to it was the minimal change to propagate KB config without changing function signatures
+- MikroORM EntitySchema requires all entity fields to have corresponding schema properties — Trace.schema.ts must be kept in sync with Trace.ts even though tracing.ts uses raw SQL
+- RAG injection before system prompt merge is the right ordering: `[rag-context] + [agent-system-prompt]` in final system message

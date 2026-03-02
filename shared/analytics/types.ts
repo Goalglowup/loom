@@ -17,6 +17,13 @@ export interface SummaryData {
   errorRate: number;
   avgOverheadMs: number;
   avgTtfbMs: number;
+  ragMetrics?: {
+    totalRagRequests: number;
+    ragFailureRate: number;
+    avgRetrievalMs: number;
+    avgChunksRetrieved: number;
+    fallbackRate: number;
+  };
 }
 
 export interface TimeseriesData {

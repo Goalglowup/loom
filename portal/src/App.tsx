@@ -14,6 +14,8 @@ import SubtenantsPage from './pages/SubtenantsPage';
 import AgentsPage from './pages/AgentsPage';
 import SandboxPage from './pages/SandboxPage';
 import ConversationsPage from './pages/ConversationsPage';
+import KnowledgeBasesPage from './pages/KnowledgeBasesPage';
+import DeploymentsPage from './pages/DeploymentsPage';
 import AuthGuard from './components/AuthGuard';
 
 export default function App() {
@@ -34,6 +36,8 @@ export default function App() {
           <Route path="agents" element={<AgentsPage />} />
           <Route path="sandbox" element={<SandboxPage />} />
           <Route path="conversations" element={<ConversationsPage />} />
+          <Route path="knowledge-bases" element={<KnowledgeBasesPage />} />
+          <Route path="deployments" element={<DeploymentsPage />} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

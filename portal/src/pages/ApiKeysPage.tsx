@@ -83,7 +83,7 @@ export default function ApiKeysPage() {
         <div>
           <h1 className="text-2xl font-bold text-white">API Keys</h1>
           <p className="text-gray-400 text-sm mt-1">
-            Keys used to authenticate requests through the Loom gateway.
+            Keys used to authenticate requests through the Arachne gateway.
           </p>
         </div>
         <button

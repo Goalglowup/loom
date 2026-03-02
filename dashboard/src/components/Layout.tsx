@@ -12,7 +12,7 @@ function Layout({ children }: LayoutProps) {
     <div className="layout">
       <header className="header">
         <div className="header-content">
-          <h1 className="logo">Loom</h1>
+          <h1 className="logo">Arachne</h1>
           <p className="subtitle">Observability Dashboard</p>
         </div>
       </header>

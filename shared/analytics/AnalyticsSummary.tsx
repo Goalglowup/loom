@@ -41,6 +41,7 @@ interface AnalyticsSummaryProps {
 
 function AnalyticsSummary({ summary, loading, win, onWinChange }: AnalyticsSummaryProps) {
   const hasData = summary !== null && summary.totalRequests > 0;
+  const hasRagData = summary !== null && (summary.ragMetrics?.totalRagRequests ?? 0) > 0;
 
   const cards = hasData
     ? [
@@ -86,6 +87,25 @@ function AnalyticsSummary({ summary, loading, win, onWinChange }: AnalyticsSumma
               ))
             : CARD_LABELS.map(label => <NoDataCard key={label} label={label} />)}
       </div>
+
+      {!loading && hasRagData && (
+        <div className="summary-section">
+          <h4 className="summary-subheading">RAG Performance</h4>
+          <div className="summary-cards" role="list" aria-label="RAG performance metrics">
+            {[
+              { label: 'RAG Requests',      value: (summary!.ragMetrics?.totalRagRequests ?? 0).toLocaleString() },
+              { label: 'Retrieval Latency', value: `${(summary!.ragMetrics?.avgRetrievalMs ?? 0).toFixed(0)}ms` },
+              { label: 'Avg Chunks',        value: (summary!.ragMetrics?.avgChunksRetrieved ?? 0).toFixed(1) },
+              { label: 'RAG Failure Rate',  value: `${((summary!.ragMetrics?.ragFailureRate ?? 0) * 100).toFixed(1)}%` },
+            ].map(card => (
+              <div className="summary-card" key={card.label} role="listitem">
+                <span className="card-label">{card.label}</span>
+                <span className="card-value">{card.value}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

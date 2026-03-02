@@ -77,6 +77,10 @@ export interface TenantContext {
 export class TenantManagementService {
   constructor(private readonly em: EntityManager) {}
 
+  async findByOrgSlug(slug: string): Promise<Tenant | null> {
+    return this.em.findOne(Tenant, { orgSlug: slug });
+  }
+
   async getContext(tenantId: string, userId: string): Promise<TenantContext> {
     const tenant = await this.em.findOneOrFail(Tenant, { id: tenantId });
     const user = await this.em.findOneOrFail(User, { id: userId });
@@ -90,6 +94,7 @@ export class TenantManagementService {
   async updateSettings(tenantId: string, dto: UpdateTenantDto): Promise<TenantViewModel> {
     const tenant = await this.em.findOneOrFail(Tenant, { id: tenantId });
     if (dto.name !== undefined) tenant.name = dto.name;
+    if (dto.orgSlug !== undefined) tenant.orgSlug = dto.orgSlug;
     const providerConfigChanged = dto.providerConfig !== undefined;
     if (dto.providerConfig !== undefined) tenant.providerConfig = dto.providerConfig;
     if (dto.systemPrompt !== undefined) tenant.systemPrompt = dto.systemPrompt;

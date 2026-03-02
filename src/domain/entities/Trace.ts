@@ -21,4 +21,18 @@ export class Trace {
   encryptionKeyVersion!: number;
   statusCode!: number | null;
   createdAt!: Date;
+  // RAG fields
+  knowledgeBaseId!: string | null;
+  embeddingAgentId!: string | null;
+  ragRetrievalLatencyMs!: number | null;
+  embeddingLatencyMs!: number | null;
+  vectorSearchLatencyMs!: number | null;
+  retrievedChunkCount!: number | null;
+  topChunkSimilarity!: number | null;
+  avgChunkSimilarity!: number | null;
+  contextTokensAdded!: number | null;
+  ragOverheadTokens!: number | null;
+  ragCostOverheadUsd!: number | null;
+  ragStageFailed!: string | null;
+  fallbackToNoRag!: boolean | null;
 }

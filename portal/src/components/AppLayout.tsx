@@ -24,7 +24,7 @@ export default function AppLayout() {
       <aside className="w-60 flex flex-col bg-gray-900 border-r border-gray-700">
         {/* Branding + Tenant Switcher */}
         <div className="px-5 py-5 border-b border-gray-700">
-          <span className="text-xl font-bold tracking-tight text-white">⧖ Loom</span>
+          <span className="text-xl font-bold tracking-tight text-white">⧖ Arachne</span>
           <TenantSwitcher />
         </div>
 
@@ -57,6 +57,12 @@ export default function AppLayout() {
           )}
           <NavLink to="/app/agents" className={navLinkClass}>
             🤖 <span>Agents</span>
+          </NavLink>
+          <NavLink to="/app/knowledge-bases" className={navLinkClass}>
+            🗄️ <span>Knowledge Bases</span>
+          </NavLink>
+          <NavLink to="/app/deployments" className={navLinkClass}>
+            🚀 <span>Deployments</span>
           </NavLink>
           <NavLink to="/app/conversations" className={navLinkClass}>
             💬 <span>Conversations</span>

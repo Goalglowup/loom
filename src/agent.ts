@@ -1,5 +1,5 @@
 /**
- * Agent context application and MCP round-trip handling for the Loom gateway.
+ * Agent context application and MCP round-trip handling for the Arachne gateway.
  *
  * Called from the /v1/chat/completions handler to:
  *   1. Inject agent system prompt and skills into the outgoing request body
@@ -10,6 +10,165 @@
 import type { TenantContext } from './auth.js';
 import type { BaseProvider } from './providers/base.js';
 import type { ProxyRequest } from './types/openai.js';
+import type { EntityManager } from '@mikro-orm/core';
+import { Artifact } from './domain/entities/Artifact.js';
+import { retrieveChunks, buildRagContext } from './rag/retrieval.js';
+
+// ---------------------------------------------------------------------------
+// RAG context injection
+// ---------------------------------------------------------------------------
+
+export interface RagInjectionResult {
+  knowledgeBaseId?: string;
+  ragRetrievalLatencyMs?: number;
+  embeddingLatencyMs?: number;
+  vectorSearchLatencyMs?: number;
+  retrievedChunkCount?: number;
+  topChunkSimilarity?: number;
+  avgChunkSimilarity?: number;
+  ragStageFailed?: string;
+  fallbackToNoRag?: boolean;
+}
+
+const RAG_TOP_K = 5;
+
+/**
+ * If the agent has a `knowledgeBaseRef`, embed the user query, retrieve top-K
+ * chunks from the KB, and inject a RAG context block at the start of the
+ * system prompt.  Never throws — RAG failures are logged and the request
+ * continues without RAG context.
+ */
+export async function injectRagContext(
+  body: any,
+  tenant: TenantContext,
+  em: EntityManager,
+): Promise<{ body: any; ragResult: RagInjectionResult }> {
+  if (!tenant.knowledgeBaseRef) {
+    return { body, ragResult: {} };
+  }
+
+  // Resolve KB artifact by name for this tenant
+  let artifact: Artifact | null = null;
+  try {
+    artifact = await em.findOne(Artifact, {
+      name: tenant.knowledgeBaseRef,
+      tenant: tenant.tenantId,
+      kind: 'KnowledgeBase',
+    });
+  } catch (err) {
+    console.error('[rag] failed to resolve KB artifact:', err);
+    return { body, ragResult: { ragStageFailed: 'retrieval', fallbackToNoRag: true } };
+  }
+
+  if (!artifact) {
+    console.warn(`[rag] KB artifact '${tenant.knowledgeBaseRef}' not found for tenant ${tenant.tenantId}`);
+    return { body, ragResult: { ragStageFailed: 'retrieval', fallbackToNoRag: true } };
+  }
+
+  // Extract user query from the last user message
+  const messages: any[] = Array.isArray(body.messages) ? body.messages : [];
+  const lastUserMessage = [...messages].reverse().find((m: any) => m.role === 'user');
+  const queryText: string =
+    typeof lastUserMessage?.content === 'string'
+      ? lastUserMessage.content
+      : JSON.stringify(lastUserMessage?.content ?? '');
+
+  if (!queryText) {
+    return { body, ragResult: { ragStageFailed: 'none', fallbackToNoRag: false } };
+  }
+
+  // Retrieve chunks
+  let retrievalResult;
+  try {
+    retrievalResult = await retrieveChunks(
+      queryText,
+      artifact.id,
+      RAG_TOP_K,
+      tenant.tenantId,
+      undefined, // use system embedder
+      em,
+    );
+  } catch (err) {
+    console.error('[rag] retrieval failed:', err);
+    const stage =
+      String(err).includes('Embedding API') ? 'embedding' : 'retrieval';
+    return {
+      body,
+      ragResult: {
+        knowledgeBaseId: artifact.id,
+        ragStageFailed: stage,
+        fallbackToNoRag: true,
+      },
+    };
+  }
+
+  const { chunks, embeddingLatencyMs, vectorSearchLatencyMs, totalRagLatencyMs } = retrievalResult;
+
+  if (chunks.length === 0) {
+    return {
+      body,
+      ragResult: {
+        knowledgeBaseId: artifact.id,
+        ragRetrievalLatencyMs: totalRagLatencyMs,
+        embeddingLatencyMs,
+        vectorSearchLatencyMs,
+        retrievedChunkCount: 0,
+        ragStageFailed: 'none',
+        fallbackToNoRag: false,
+      },
+    };
+  }
+
+  // Build and inject RAG context
+  let augmentedBody: any;
+  try {
+    const ragContext = buildRagContext(chunks);
+    const msgs: any[] = Array.isArray(body.messages) ? [...body.messages] : [];
+    const systemIdx = msgs.findIndex((m: any) => m.role === 'system');
+    if (systemIdx >= 0) {
+      msgs[systemIdx] = {
+        ...msgs[systemIdx],
+        content: ragContext + '\n\n' + msgs[systemIdx].content,
+      };
+    } else {
+      msgs.unshift({ role: 'system', content: ragContext });
+    }
+    augmentedBody = { ...body, messages: msgs };
+  } catch (err) {
+    console.error('[rag] context injection failed:', err);
+    return {
+      body,
+      ragResult: {
+        knowledgeBaseId: artifact.id,
+        ragRetrievalLatencyMs: totalRagLatencyMs,
+        embeddingLatencyMs,
+        vectorSearchLatencyMs,
+        retrievedChunkCount: chunks.length,
+        ragStageFailed: 'injection',
+        fallbackToNoRag: true,
+      },
+    };
+  }
+
+  const scores = chunks.map((c) => c.similarityScore);
+  const topChunkSimilarity = Math.max(...scores);
+  const avgChunkSimilarity = scores.reduce((a, b) => a + b, 0) / scores.length;
+
+  return {
+    body: augmentedBody,
+    ragResult: {
+      knowledgeBaseId: artifact.id,
+      ragRetrievalLatencyMs: totalRagLatencyMs,
+      embeddingLatencyMs,
+      vectorSearchLatencyMs,
+      retrievedChunkCount: chunks.length,
+      topChunkSimilarity,
+      avgChunkSimilarity,
+      ragStageFailed: 'none',
+      fallbackToNoRag: false,
+    },
+  };
+}
 
 // ---------------------------------------------------------------------------
 // applyAgentToRequest

@@ -11,6 +11,10 @@ import { PortalService } from '../application/services/PortalService.js';
 import { ConversationManagementService } from '../application/services/ConversationManagementService.js';
 import { UserManagementService } from '../application/services/UserManagementService.js';
 import { TenantManagementService } from '../application/services/TenantManagementService.js';
+import { validateOrgSlug } from '../utils/slug.js';
+import { RegistryService } from '../services/RegistryService.js';
+import { ProvisionService } from '../services/ProvisionService.js';
+import { orm } from '../orm.js';
 
 export function registerPortalRoutes(
   fastify: FastifyInstance,
@@ -198,16 +202,33 @@ export function registerPortalRoutes(
   // ── PATCH /v1/portal/settings ─────────────────────────────────────────────
   fastify.patch<{
     Body: {
-      provider: string;
+      provider?: string;
       apiKey?: string;
       baseUrl?: string;
       deployment?: string;
       apiVersion?: string;
       availableModels?: string[] | null;
+      orgSlug?: string;
     };
   }>('/v1/portal/settings', { preHandler: ownerRequired }, async (request, reply) => {
     const { tenantId } = request.portalUser!;
-    const { provider, apiKey, baseUrl, deployment, apiVersion, availableModels } = request.body;
+    const { provider, apiKey, baseUrl, deployment, apiVersion, availableModels, orgSlug } = request.body;
+
+    // Handle orgSlug update
+    if (orgSlug !== undefined) {
+      const validation = validateOrgSlug(orgSlug);
+      if (!validation.valid) {
+        return reply.code(400).send({ error: validation.error });
+      }
+      const existing = await tenantMgmtSvc.findByOrgSlug(orgSlug);
+      if (existing && existing.id !== tenantId) {
+        return reply.code(409).send({ error: 'This slug is already taken' });
+      }
+      await tenantMgmtSvc.updateSettings(tenantId, { orgSlug });
+      if (!provider) {
+        return reply.send({ orgSlug });
+      }
+    }
 
     if (!provider || (provider !== 'openai' && provider !== 'azure' && provider !== 'ollama')) {
       return reply.code(400).send({ error: 'Provider must be "openai" or "azure"' });
@@ -1218,6 +1239,163 @@ export function registerPortalRoutes(
         snapshots: formattedSnapshots,
         messages: formattedMessages,
       });
+    },
+  );
+
+  // ── Knowledge Bases ───────────────────────────────────────────────────────
+
+  const registrySvc = new RegistryService();
+  const provisionSvc = new ProvisionService(registrySvc);
+
+  // ── GET /v1/portal/knowledge-bases ────────────────────────────────────────
+  fastify.get('/v1/portal/knowledge-bases', { preHandler: authRequired }, async (request, reply) => {
+    const { tenantId } = request.portalUser!;
+    const em = orm.em.fork();
+    const artifacts = await em.find(
+      (await import('../domain/entities/Artifact.js')).Artifact,
+      { tenant: tenantId, kind: 'KnowledgeBase' },
+      { populate: ['tags', 'vectorSpace'], orderBy: { createdAt: 'DESC' } },
+    );
+    return reply.send(
+      artifacts.map((a) => ({
+        id: a.id,
+        name: a.name,
+        tags: a.tags.map((t: any) => t.tag),
+        chunkCount: a.chunkCount,
+        createdAt: a.createdAt,
+        vectorSpace: a.vectorSpace
+          ? { provider: (a.vectorSpace as any).provider, model: (a.vectorSpace as any).model, dimensions: (a.vectorSpace as any).dimensions }
+          : null,
+      })),
+    );
+  });
+
+  // ── GET /v1/portal/knowledge-bases/:id ────────────────────────────────────
+  fastify.get<{ Params: { id: string } }>(
+    '/v1/portal/knowledge-bases/:id',
+    { preHandler: authRequired },
+    async (request, reply) => {
+      const { tenantId } = request.portalUser!;
+      const { id } = request.params;
+      const em = orm.em.fork();
+      const { Artifact } = await import('../domain/entities/Artifact.js');
+      const artifact = await em.findOne(
+        Artifact,
+        { id, tenant: tenantId, kind: 'KnowledgeBase' },
+        { populate: ['tags', 'vectorSpace'] },
+      );
+      if (!artifact) return reply.code(404).send({ error: 'Knowledge base not found' });
+      const { KbChunk } = await import('../domain/entities/KbChunk.js');
+      const liveChunkCount = await em.count(KbChunk, { artifact: artifact.id });
+      return reply.send({
+        id: artifact.id,
+        name: artifact.name,
+        org: artifact.org,
+        version: artifact.version,
+        tags: artifact.tags.map((t: any) => t.tag),
+        chunkCount: liveChunkCount,
+        searchReady: liveChunkCount > 0,
+        createdAt: artifact.createdAt,
+        vectorSpace: artifact.vectorSpace
+          ? {
+              provider: (artifact.vectorSpace as any).provider,
+              model: (artifact.vectorSpace as any).model,
+              dimensions: (artifact.vectorSpace as any).dimensions,
+              preprocessingHash: (artifact.vectorSpace as any).preprocessingHash,
+            }
+          : null,
+      });
+    },
+  );
+
+  // ── DELETE /v1/portal/knowledge-bases/:id ─────────────────────────────────
+  fastify.delete<{ Params: { id: string } }>(
+    '/v1/portal/knowledge-bases/:id',
+    { preHandler: authRequired },
+    async (request, reply) => {
+      const { tenantId } = request.portalUser!;
+      const { id } = request.params;
+      const em = orm.em.fork();
+      const { Artifact } = await import('../domain/entities/Artifact.js');
+      const artifact = await em.findOne(Artifact, { id, tenant: tenantId, kind: 'KnowledgeBase' }, { populate: ['tags'] });
+      if (!artifact) return reply.code(404).send({ error: 'Knowledge base not found' });
+      // Remove all chunks then the artifact and its tags
+      const { KbChunk } = await import('../domain/entities/KbChunk.js');
+      const chunks = await em.find(KbChunk, { artifact: artifact.id });
+      for (const chunk of chunks) em.remove(chunk);
+      for (const tag of artifact.tags) em.remove(tag);
+      em.remove(artifact);
+      await em.flush();
+      return reply.send({ deleted: true });
+    },
+  );
+
+  // ── Deployments ───────────────────────────────────────────────────────────
+
+  // ── GET /v1/portal/deployments ────────────────────────────────────────────
+  fastify.get('/v1/portal/deployments', { preHandler: authRequired }, async (request, reply) => {
+    const { tenantId } = request.portalUser!;
+    const em = orm.em.fork();
+    const deployments = await provisionSvc.listDeployments(tenantId, em);
+    return reply.send(
+      deployments.map((d) => ({
+        id: d.id,
+        status: d.status,
+        environment: d.environment,
+        deployedAt: d.deployedAt,
+        artifact: d.artifact
+          ? { name: (d.artifact as any).name, tag: (d.artifact as any).version, kind: (d.artifact as any).kind }
+          : null,
+      })),
+    );
+  });
+
+  // ── GET /v1/portal/deployments/:id ───────────────────────────────────────
+  fastify.get<{ Params: { id: string } }>(
+    '/v1/portal/deployments/:id',
+    { preHandler: authRequired },
+    async (request, reply) => {
+      const { tenantId } = request.portalUser!;
+      const { id } = request.params;
+      const em = orm.em.fork();
+      const deployment = await provisionSvc.getDeployment(id, tenantId, em);
+      if (!deployment) return reply.code(404).send({ error: 'Deployment not found' });
+      await em.populate(deployment, ['artifact', 'artifact.vectorSpace'] as any);
+      const artifact = deployment.artifact as any;
+      let chunkCount: number | null = null;
+      if (artifact && artifact.kind === 'KnowledgeBase') {
+        const { KbChunk } = await import('../domain/entities/KbChunk.js');
+        chunkCount = await em.count(KbChunk, { artifact: artifact.id });
+      }
+      return reply.send({
+        id: deployment.id,
+        status: deployment.status,
+        environment: deployment.environment,
+        deployedAt: deployment.deployedAt,
+        createdAt: deployment.createdAt,
+        artifact: artifact
+          ? {
+              name: artifact.name,
+              tag: artifact.version,
+              kind: artifact.kind,
+              chunkCount: artifact.kind === 'KnowledgeBase' ? chunkCount : undefined,
+            }
+          : null,
+      });
+    },
+  );
+
+  // ── DELETE /v1/portal/deployments/:id ────────────────────────────────────
+  fastify.delete<{ Params: { id: string } }>(
+    '/v1/portal/deployments/:id',
+    { preHandler: authRequired },
+    async (request, reply) => {
+      const { tenantId } = request.portalUser!;
+      const { id } = request.params;
+      const em = orm.em.fork();
+      const ok = await provisionSvc.unprovision(id, tenantId, em);
+      if (!ok) return reply.code(404).send({ error: 'Deployment not found' });
+      return reply.send({ success: true });
     },
   );
 }

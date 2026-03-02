@@ -2,16 +2,20 @@ import { randomUUID } from 'node:crypto';
 import type { Tenant } from './Tenant.js';
 import { ApiKey } from './ApiKey.js';
 
+export type AgentKind = 'inference' | 'embedding';
+
 export class Agent {
   id!: string;
   tenant!: Tenant;
   name!: string;
+  kind!: AgentKind;
   providerConfig!: any | null;
   systemPrompt!: string | null;
   skills!: any[] | null;
   mcpEndpoints!: any[] | null;
   mergePolicies!: any;
   availableModels!: any[] | null;
+  knowledgeBaseRef!: string | null;
   conversationsEnabled!: boolean;
   conversationTokenLimit!: number;
   conversationSummaryModel!: string | null;
@@ -24,6 +28,7 @@ export class Agent {
     this.id = randomUUID();
     this.tenant = tenant;
     this.name = name;
+    this.kind = config?.kind ?? 'inference';
     this.providerConfig = config?.providerConfig ?? null;
     this.systemPrompt = config?.systemPrompt ?? null;
     this.skills = config?.skills ?? null;
@@ -34,6 +39,7 @@ export class Agent {
       mcp_endpoints: 'merge',
     };
     this.availableModels = config?.availableModels ?? null;
+    this.knowledgeBaseRef = config?.knowledgeBaseRef ?? null;
     this.conversationsEnabled = config?.conversationsEnabled ?? false;
     this.conversationTokenLimit = config?.conversationTokenLimit ?? 4000;
     this.conversationSummaryModel = config?.conversationSummaryModel ?? null;

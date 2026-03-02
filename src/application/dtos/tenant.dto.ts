@@ -35,6 +35,7 @@ export interface CreateInviteDto {
 
 export interface UpdateTenantDto {
   name?: string;
+  orgSlug?: string | null;
   providerConfig?: any;
   systemPrompt?: string | null;
   skills?: any[] | null;

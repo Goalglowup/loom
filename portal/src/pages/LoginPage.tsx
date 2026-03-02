@@ -31,7 +31,7 @@ export default function LoginPage() {
       <div className="w-full max-w-sm space-y-6">
         {/* Logo */}
         <div className="text-center">
-          <Link to="/" className="text-2xl font-bold text-white">⧖ Loom</Link>
+          <Link to="/" className="text-2xl font-bold text-white">⧖ Arachne</Link>
           <p className="text-gray-400 mt-2 text-sm">Sign in to your account</p>
         </div>
 

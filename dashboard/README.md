@@ -1,6 +1,6 @@
-# Loom Dashboard
+# Arachne Dashboard
 
-Minimal observability dashboard for Loom Phase 1.
+Minimal observability dashboard for Arachne Phase 1.
 
 ## Tech Stack
 

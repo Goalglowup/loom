@@ -5,7 +5,7 @@ export default function LandingPage() {
     <div className="min-h-screen bg-gray-950 text-gray-100 flex flex-col">
       {/* Nav */}
       <header className="flex items-center justify-between px-8 py-5 border-b border-gray-800">
-        <span className="text-xl font-bold tracking-tight">⧖ Loom</span>
+        <span className="text-xl font-bold tracking-tight">⧖ Arachne</span>
         <div className="flex items-center gap-4">
           <Link to="/login" className="text-sm text-gray-400 hover:text-gray-100 transition-colors">
             Sign in
@@ -27,7 +27,7 @@ export default function LandingPage() {
           </div>
 
           <h1 className="text-5xl font-bold tracking-tight bg-gradient-to-br from-white to-gray-400 bg-clip-text text-transparent">
-            ⧖ Loom
+            ⧖ Arachne
           </h1>
 
           <p className="text-xl text-gray-400 leading-relaxed">
@@ -83,7 +83,7 @@ export default function LandingPage() {
       </main>
 
       <footer className="text-center text-xs text-gray-600 py-6 border-t border-gray-800">
-        © {new Date().getFullYear()} Loom — AI Runtime Control Plane
+        © {new Date().getFullYear()} Arachne — AI Runtime Control Plane
       </footer>
     </div>
   );

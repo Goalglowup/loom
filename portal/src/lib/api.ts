@@ -137,6 +137,30 @@ export const api = {
   deletePartition: (token: string, id: string) =>
     request<void>('DELETE', `/v1/portal/partitions/${id}`, undefined, token),
 
+  // Knowledge Bases
+  listKnowledgeBases: (token: string) =>
+    request<{ knowledgeBases: KnowledgeBase[] }>('GET', '/v1/portal/knowledge-bases', undefined, token),
+
+  getKnowledgeBase: (token: string, id: string) =>
+    request<KnowledgeBase>('GET', `/v1/portal/knowledge-bases/${id}`, undefined, token),
+
+  deleteKnowledgeBase: (token: string, id: string) =>
+    request<void>('DELETE', `/v1/portal/knowledge-bases/${id}`, undefined, token),
+
+  // Deployments
+  listDeployments: (token: string) =>
+    request<{ deployments: Deployment[] }>('GET', '/v1/portal/deployments', undefined, token),
+
+  deleteDeployment: (token: string, id: string) =>
+    request<void>('DELETE', `/v1/portal/deployments/${id}`, undefined, token),
+
+  // Registry
+  listArtifacts: (token: string, org: string) =>
+    request<{ artifacts: ArtifactSummary[] }>('GET', `/v1/registry/list?org=${encodeURIComponent(org)}`, undefined, token),
+
+  deployArtifact: (token: string, body: { org: string; name: string; tag: string; env: string }) =>
+    request<{ deployment: Deployment }>('POST', '/v1/registry/deploy', body, token),
+
   // Conversations
   getConversations: (token: string, partitionId?: string) => {
     const params = partitionId ? `?partition_id=${encodeURIComponent(partitionId)}` : '';
@@ -240,6 +264,7 @@ export interface Agent {
   conversations_enabled?: boolean;
   conversation_token_limit?: number | null;
   conversation_summary_model?: string | null;
+  knowledgeBaseRef?: string | null;
   createdAt: string;
   updatedAt?: string | null;
 }
@@ -255,6 +280,38 @@ export interface AgentInput {
   conversationsEnabled?: boolean;
   conversationTokenLimit?: number | null;
   conversationSummaryModel?: string | null;
+  knowledgeBaseRef?: string | null;
+}
+
+export interface KnowledgeBase {
+  id: string;
+  org: string;
+  name: string;
+  version: string;
+  createdAt: string;
+  chunkCount: number;
+  vectorSpace: string;
+}
+
+export interface Deployment {
+  id: string;
+  artifactId: string;
+  env: string;
+  status: string;
+  deployedAt: string;
+  artifact: {
+    org: string;
+    name: string;
+    version: string;
+  };
+}
+
+export interface ArtifactSummary {
+  org: string;
+  name: string;
+  version: string;
+  kind: string;
+  createdAt: string;
 }
 
 export type CreateAgentInput = AgentInput;

@@ -1,12 +1,14 @@
 import { promisify } from 'node:util';
 import { scrypt, randomBytes, timingSafeEqual } from 'node:crypto';
 import { signJwt } from '../../auth/jwtUtils.js';
+import { TENANT_OWNER_SCOPES } from '../../auth/registryScopes.js';
 import type { EntityManager } from '@mikro-orm/core';
 import { User } from '../../domain/entities/User.js';
 import { Tenant } from '../../domain/entities/Tenant.js';
 import { TenantMembership } from '../../domain/entities/TenantMembership.js';
 import { Invite } from '../../domain/entities/Invite.js';
 import type { CreateUserDto, LoginDto, AcceptInviteDto, AuthResult } from '../dtos/index.js';
+import { generateOrgSlug } from '../../utils/slug.js';
 
 const scryptAsync = promisify(scrypt);
 
@@ -36,6 +38,17 @@ export class UserManagementService {
     return { user, tenant };
   }
 
+  private async assignUniqueSlug(tenant: Tenant): Promise<void> {
+    const base = generateOrgSlug(tenant.name);
+    let candidate = base;
+    let suffix = 2;
+    while (await this.em.findOne(Tenant, { orgSlug: candidate })) {
+      candidate = `${base.slice(0, 47)}-${suffix}`;
+      suffix++;
+    }
+    tenant.orgSlug = candidate;
+  }
+
   async createUser(dto: CreateUserDto): Promise<AuthResult> {
     if (!dto.email || !dto.password || dto.password.length < 8) {
       throw new Error('Valid email and password (min 8 chars) required');
@@ -55,9 +68,10 @@ export class UserManagementService {
 
     this.em.persist(user);
     this.em.persist(tenant);
+    await this.assignUniqueSlug(tenant);
     await this.em.flush();
 
-    const token = signJwt({ sub: user.id, tenantId: tenant.id, role: 'owner' }, PORTAL_JWT_SECRET, 86_400_000);
+    const token = signJwt({ sub: user.id, tenantId: tenant.id, role: 'owner', scopes: TENANT_OWNER_SCOPES, orgSlug: tenant.orgSlug ?? null }, PORTAL_JWT_SECRET, 86_400_000);
     return { token, userId: user.id, tenantId: tenant.id, email: user.email, tenantName: tenant.name };
   }
 
@@ -103,7 +117,8 @@ export class UserManagementService {
       role: m.role,
     }));
 
-    const token = signJwt({ sub: user.id, tenantId, role: primaryMembership.role }, PORTAL_JWT_SECRET, 86_400_000);
+    const scopes = primaryMembership.role === 'owner' ? TENANT_OWNER_SCOPES : [];
+    const token = signJwt({ sub: user.id, tenantId, role: primaryMembership.role, scopes, orgSlug: (primaryMembership.tenant as Tenant).orgSlug ?? null }, PORTAL_JWT_SECRET, 86_400_000);
     return { token, userId: user.id, tenantId, email: user.email, tenantName, tenants };
   }
 
@@ -142,6 +157,7 @@ export class UserManagementService {
       user = newUser;
       this.em.persist(user);
       this.em.persist(personalTenant);
+      await this.assignUniqueSlug(personalTenant);
     }
 
     // Check for existing membership
@@ -159,7 +175,8 @@ export class UserManagementService {
     invite.useCount += 1;
     await this.em.flush();
 
-    const token = signJwt({ sub: user.id, tenantId: tenant.id, role }, PORTAL_JWT_SECRET, 86_400_000);
+    const inviteScopes = role === 'owner' ? TENANT_OWNER_SCOPES : [];
+    const token = signJwt({ sub: user.id, tenantId: tenant.id, role, scopes: inviteScopes, orgSlug: tenant.orgSlug ?? null }, PORTAL_JWT_SECRET, 86_400_000);
     return {
       token,
       userId: user.id,
@@ -204,7 +221,8 @@ export class UserManagementService {
       role: m.role,
     }));
 
-    const token = signJwt({ sub: userId, tenantId: newTenantId, role: membership.role }, PORTAL_JWT_SECRET, 86_400_000);
+    const switchScopes = membership.role === 'owner' ? TENANT_OWNER_SCOPES : [];
+    const token = signJwt({ sub: userId, tenantId: newTenantId, role: membership.role, scopes: switchScopes, orgSlug: tenant.orgSlug ?? null }, PORTAL_JWT_SECRET, 86_400_000);
     return {
       token,
       userId: user.id,

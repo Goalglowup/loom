@@ -1,5 +1,5 @@
 /**
- * ConversationManager — conversation state management for the Loom gateway.
+ * ConversationManager — conversation state management for the Arachne gateway.
  *
  * Handles partition resolution, conversation lifecycle, context loading,
  * message storage, and snapshot (summary) creation. All message content

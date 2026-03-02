@@ -1,4 +1,4 @@
-# Running Loom Locally
+# Running Arachne Locally
 
 ## Prerequisites
 
@@ -54,3 +54,14 @@ The server will start on `http://localhost:3000`.
 - Framework: Fastify (HTTP server)
 - HTTP Client: undici (upstream provider requests)
 - Migrations: node-pg-migrate
+
+## System Embedder (for RAG features)
+
+To enable the default embedding agent for Knowledge Bases:
+```
+SYSTEM_EMBEDDER_PROVIDER=openai
+SYSTEM_EMBEDDER_MODEL=text-embedding-3-small
+SYSTEM_EMBEDDER_API_KEY=sk-...
+```
+
+The gateway will automatically create a `system-embedder` agent for each tenant on startup.

@@ -117,6 +117,7 @@ export class TenantService {
       tenantId: tenant.id,
       name: tenant.name,
       agentId: agent?.id ?? undefined,
+      knowledgeBaseRef: agent?.knowledgeBaseRef ?? undefined,
       providerConfig: resolvedProviderConfig,
       agentSystemPrompt: agent?.systemPrompt ?? undefined,
       agentSkills: agent?.skills ?? undefined,

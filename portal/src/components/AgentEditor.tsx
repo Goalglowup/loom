@@ -1,9 +1,37 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { api } from '../lib/api';
-import type { Agent, AgentInput, AgentMergePolicies, Skill, McpEndpoint, ResolvedAgentConfig } from '../lib/api';
+import type { Agent, AgentInput, AgentMergePolicies, Skill, McpEndpoint, ResolvedAgentConfig, KnowledgeBase } from '../lib/api';
 import { getToken } from '../lib/auth';
 import ModelListEditor from './ModelListEditor';
 import { COMMON_MODELS } from '../lib/models';
+
+function slugify(str: string): string {
+  return str.toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+}
+
+function buildYaml(agent: Agent, kbRef: string | null): string {
+  const name = slugify(agent.name);
+  const lines: string[] = [
+    'apiVersion: arachne.ai/v0',
+    'kind: Agent',
+    'metadata:',
+    `  name: ${name}`,
+    'spec:',
+  ];
+  if (agent.providerConfig && typeof agent.providerConfig.model === 'string') {
+    lines.push(`  model: ${agent.providerConfig.model}`);
+  }
+  if (agent.systemPrompt) {
+    lines.push('  systemPrompt: |');
+    for (const line of agent.systemPrompt.split('\n')) {
+      lines.push(`    ${line}`);
+    }
+  }
+  if (kbRef) {
+    lines.push(`  knowledgeBaseRef: ${kbRef}`);
+  }
+  return lines.join('\n') + '\n';
+}
 
 interface AgentEditorProps {
   agent: Agent | null; // null = create mode
@@ -31,11 +59,28 @@ export default function AgentEditor({ agent, onSave, onCancel }: AgentEditorProp
   const [conversationsEnabled, setConversationsEnabled] = useState(agent?.conversations_enabled ?? false);
   const [conversationTokenLimit, setConversationTokenLimit] = useState<number>(agent?.conversation_token_limit ?? 4000);
   const [conversationSummaryModel, setConversationSummaryModel] = useState(agent?.conversation_summary_model ?? '');
+  const [knowledgeBaseRef, setKnowledgeBaseRef] = useState<string | null>(agent?.knowledgeBaseRef ?? null);
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
-  // Resolved config state
+  // Knowledge bases
+  const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBase[]>([]);
+  const [loadingKbs, setLoadingKbs] = useState(false);
+
+  const loadKbs = useCallback(async () => {
+    setLoadingKbs(true);
+    try {
+      const { knowledgeBases: kbs } = await api.listKnowledgeBases(token);
+      setKnowledgeBases(kbs);
+    } catch {
+      // non-fatal — KB section just shows empty
+    } finally {
+      setLoadingKbs(false);
+    }
+  }, [token]);
+
+  useEffect(() => { loadKbs(); }, [loadKbs]);
   const [showResolved, setShowResolved] = useState(false);
   const [resolved, setResolved] = useState<ResolvedAgentConfig | null>(null);
   const [loadingResolved, setLoadingResolved] = useState(false);
@@ -63,6 +108,7 @@ export default function AgentEditor({ agent, onSave, onCancel }: AgentEditorProp
       setConversationsEnabled(agent.conversations_enabled ?? false);
       setConversationTokenLimit(agent.conversation_token_limit ?? 4000);
       setConversationSummaryModel(agent.conversation_summary_model ?? '');
+      setKnowledgeBaseRef(agent.knowledgeBaseRef ?? null);
     }
   }, [agent]);
 
@@ -82,6 +128,7 @@ export default function AgentEditor({ agent, onSave, onCancel }: AgentEditorProp
         conversationsEnabled: conversationsEnabled,
         conversationTokenLimit: conversationsEnabled ? conversationTokenLimit : null,
         conversationSummaryModel: conversationsEnabled && conversationSummaryModel.trim() ? conversationSummaryModel.trim() : null,
+        knowledgeBaseRef: knowledgeBaseRef || null,
       };
       let saved: Agent;
       if (agent) {
@@ -131,6 +178,21 @@ export default function AgentEditor({ agent, onSave, onCancel }: AgentEditorProp
         setLoadingResolved(false);
       }
     }
+  }
+
+  function handleExportYaml() {
+    if (!agent) return;
+    const yaml = buildYaml(
+      { ...agent, name, systemPrompt, knowledgeBaseRef },
+      knowledgeBaseRef,
+    );
+    const blob = new Blob([yaml], { type: 'text/yaml' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${slugify(name || agent.name)}.yaml`;
+    a.click();
+    URL.revokeObjectURL(url);
   }
 
   const inputCls = 'w-full bg-gray-950 border border-gray-700 rounded-lg px-3 py-2 text-gray-100 placeholder-gray-600 focus:outline-none focus:border-indigo-500 text-sm';
@@ -186,6 +248,28 @@ export default function AgentEditor({ agent, onSave, onCancel }: AgentEditorProp
             <option value="overwrite">Overwrite (replace request's system message)</option>
             <option value="ignore">Ignore (don't inject — pass request through)</option>
           </select>
+        </div>
+      </section>
+
+      {/* Knowledge Base */}
+      <section className="space-y-3">
+        <h3 className="text-sm font-semibold text-gray-300 uppercase tracking-wide">Knowledge Base</h3>
+        <p className="text-xs text-gray-500">Attach a knowledge base for retrieval-augmented responses</p>
+        <div>
+          <select
+            value={knowledgeBaseRef ?? ''}
+            onChange={e => setKnowledgeBaseRef(e.target.value || null)}
+            disabled={loadingKbs}
+            className="w-full bg-gray-950 border border-gray-700 rounded-lg px-3 py-2 text-gray-100 focus:outline-none focus:border-indigo-500 text-sm disabled:opacity-60"
+          >
+            <option value="">— No knowledge base —</option>
+            {knowledgeBases.map(kb => (
+              <option key={kb.id} value={kb.name}>
+                {kb.name} ({kb.chunkCount.toLocaleString()} chunks)
+              </option>
+            ))}
+          </select>
+          {loadingKbs && <p className="text-xs text-gray-500 mt-1 animate-pulse">Loading knowledge bases…</p>}
         </div>
       </section>
 
@@ -442,6 +526,15 @@ export default function AgentEditor({ agent, onSave, onCancel }: AgentEditorProp
         >
           {saving ? 'Saving…' : agent ? 'Save changes' : 'Create agent'}
         </button>
+        {agent && (
+          <button
+            type="button"
+            onClick={handleExportYaml}
+            className="px-4 py-2 text-sm bg-gray-800 hover:bg-gray-700 border border-gray-600 text-gray-300 rounded-lg transition-colors"
+          >
+            Export as YAML
+          </button>
+        )}
         <button
           type="button"
           onClick={onCancel}

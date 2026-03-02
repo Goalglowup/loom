@@ -16,5 +16,6 @@ export const ApiKeySchema = new EntitySchema<ApiKey>({
     status: { type: 'string', columnType: 'varchar(20)', default: 'active' },
     revokedAt: { type: 'Date', fieldName: 'revoked_at', nullable: true },
     createdAt: { type: 'Date', fieldName: 'created_at', onCreate: () => new Date() },
+    rawKey: { type: 'string', persist: false },
   },
 });

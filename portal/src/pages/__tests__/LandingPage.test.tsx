@@ -12,10 +12,10 @@ function renderPage() {
 }
 
 describe('LandingPage', () => {
-  it('renders the Loom branding', () => {
+  it('renders the Arachne branding', () => {
     renderPage();
-    // Multiple instances of "Loom" expected
-    expect(screen.getAllByText(/Loom/i).length).toBeGreaterThan(0);
+    // Multiple instances of "Arachne" expected
+    expect(screen.getAllByText(/Arachne/i).length).toBeGreaterThan(0);
   });
 
   it('renders Sign in link to /login', () => {

@@ -1320,3 +1320,197 @@ const t = Object.assign(Object.create(Tenant.prototype) as Tenant, {
 - `createBearerAuth` returns `{ error: 'Unauthorized' }` for all auth failures (no distinction between missing header vs invalid token). The old `adminAuth.ts` had distinct messages for each case. Two test assertions were checking for the old specific messages and needed updating.
 - `fast-jwt`'s `createSigner` takes `expiresIn` in milliseconds; `jsonwebtoken`'s `sign` takes `expiresIn` in seconds. `signJwt` handles the conversion internally (`Math.floor(expiresInMs / 1000)`).
 - The `@fastify/jwt` plugin decorated `fastify` with `.jwt.sign()` and augmented `FastifyRequest` with `.jwtVerify()`. Both are now gone — no TypeScript augmentation needed for those.
+
+### Registry/KB Migration (2026)
+
+**Task:** Create `migrations/1000000000015_registry.cjs` — pgvector extension, org_slug, agents.kind, vector_spaces, artifacts, artifact_tags, kb_chunks, deployments, embedding_operations, artifact_operations, and RAG columns on traces.
+
+**Pattern:** Follows `1000000000014_conversations.cjs` exactly — `exports.shorthands = undefined`, `exports.up = async (pgm)`, `exports.down = async (pgm)`. Standard DDL uses `pgm.createTable`/`pgm.addColumns`/`pgm.addConstraint`/`pgm.createIndex`; raw SQL via `pgm.sql()` for pgvector extension, ivfflat index, and partial index on traces.
+
+**Key decisions:**
+- `tenants.org_slug` is nullable (backfill deferred to application logic or a follow-up migration)
+- `agents.kind` is `NOT NULL DEFAULT 'inference'` — safe to add without backfill
+- `kb_chunks.embedding` is `vector(1536)` for text-embedding-3-small
+- ivfflat index with `lists = 100` on kb_chunks embedding (cosine ops)
+- `deployments.runtime_token` stored as plain TEXT; at-rest encryption is infra responsibility
+- Down migration drops tables in strict reverse order, then drops added columns, then drops the extension
+
+**Status:** ✅ Complete — file written, inbox decision filed at `.squad/decisions/inbox/fenster-registry-migration.md`
+
+## 2026-02-27: Registry Scopes + JWT Extension + registryAuth Middleware
+
+**Event:** Implemented registry scope constants, extended JWT payload, and created scope-based auth middleware  
+**Artifacts:** `src/auth/registryScopes.ts`, `src/auth/jwtUtils.ts` (extended), `src/middleware/registryAuth.ts`, `src/application/services/UserManagementService.ts` (updated)
+
+**What was built:**
+- `REGISTRY_SCOPES` constants and `TENANT_OWNER_SCOPES` array in `registryScopes.ts`
+- `JwtPayload` interface in `jwtUtils.ts` with `scopes?: string[]` and `orgSlug?: string | null`
+- `registryAuth(requiredScope, secret)` Fastify preHandler factory in `registryAuth.ts`
+- All four `signJwt` calls in `UserManagementService` now emit `scopes` (role-based) and `orgSlug: null`
+
+## Learnings
+
+- **JWT payload extension is always additive**: Adding optional fields to an existing `signJwt(payload: object, ...)` call is safe — existing token consumers that don't read the new fields are unaffected. Only add required fields once all consumers are ready to handle them.
+- **Scope assignment at mint time, not lookup time**: Embedding scopes directly in the JWT at login/signup avoids per-request DB lookups in registry middleware. Role-to-scopes mapping belongs in the auth service, not in the middleware.
+- **Factory pattern for auth middleware**: Following the `createBearerAuth` factory pattern (accept secret + config, return async handler) keeps middleware testable in isolation and prevents secret leakage into module scope.
+- **`orgSlug: null` as safe placeholder**: When a migration is running in parallel, using `null` for the new field is preferable to blocking on the migration. The `JwtPayload` type marks it `orgSlug?: string | null` to make the null case explicit and type-safe.
+
+### Loom → Arachne Rebrand (2026)
+
+**Task:** Rename all user-facing product strings from "Loom" to "Arachne" across codebase.
+
+**Approach:** Targeted `grep` to find occurrences, then surgical `edit` tool changes. Scope was strictly user-facing strings; variable names (`loomConfig` etc.) deferred.
+
+**Files changed (17 total):**
+- `package.json` — `"name"` field
+- `src/index.ts` — `X-Loom-Conversation-ID` → `X-Arachne-Conversation-ID` response header
+- `src/conversations.ts`, `src/agent.ts` — file-level comments
+- `portal/src/` — AppLayout, LoginPage, SignupPage, LandingPage, TracesPage, ApiKeysPage + their tests
+- `dashboard/src/` — Layout, ApiKeyPrompt, README
+- `README.md`, `RUNNING_LOCALLY.md`
+
+**Intentionally skipped:**
+- Variable/function names (`loomConfig`, etc.) — too risky for P0
+- `docker-compose.yml` POSTGRES_DB/USER — DB infra, changing would require data migration
+- No `loom.ai/v0` strings or `loom_` migration tables found; migrations untouched
+
+**Key learnings:**
+- `sed -i ''` (macOS) handles multi-occurrence symbol replacements (like the `⧖ Loom` logo) more reliably than the `edit` tool when the pattern appears identically multiple times in a file
+- Always search `dashboard/README.md` — sub-package READMEs are easily missed
+- HTTP response headers are user/API-facing and should be rebranded (breaking change for callers — coordinate with API consumers)
+
+## 2026-02-25: RegistryService Implementation
+
+**Event:** Implemented `src/services/RegistryService.ts` — content-addressed artifact registry for KnowledgeBase, Agent, and EmbeddingAgent bundles.
+
+**Methods delivered:**
+- `push(input, em)` — idempotent push: checks sha256 uniqueness per tenant, creates Artifact + optional VectorSpace + KbChunks, upserts ArtifactTag
+- `resolve(ref, tenantId, em)` — resolves `org/name:tag` to Artifact entity; tenant-scoped
+- `list(tenantId, org, em)` — groups artifacts by name, returns tag list + latestVersion per name
+- `pull(ref, tenantId, em)` — delegates to resolve, returns bundleData Buffer or null
+- `delete(ref, tenantId, em)` — removes ArtifactTag; if zero remaining tags point to artifact version, removes Artifact + KbChunks
+
+**Patterns used:**
+- `em.findOne` / `em.findOneOrFail` / `em.find` / `em.count` — standard MikroORM EntityManager queries
+- `em.persist()` per entity + `em.flush()` at end of write operations (matches existing service patterns)
+- `em.remove()` for cascading deletes; chunks queried then individually removed before artifact removal
+- `_upsertTag` private helper: looks up existing ArtifactTag for same org/name/tenant, calls `.reassign()` if found, creates new otherwise
+
+**Key decisions:**
+- `version` field on Artifact set to `input.tag` (the incoming tag serves as the version label)
+- VectorSpace created only for `kind === 'KnowledgeBase'` with `vectorSpaceData` present
+- sha256 idempotency: on duplicate, re-upserts tag to point to existing artifact (no error thrown)
+- Tenant scope guard in `resolve()` handles both populated `Tenant` object and raw ID string
+
+## 2026-02-27T: EmbeddingAgent kind + system-embedder bootstrap
+
+**Event:** Implemented EmbeddingAgentService and startup bootstrap hook  
+**Artifacts:** `src/services/EmbeddingAgentService.ts`, `src/index.ts` (startup hook), `RUNNING_LOCALLY.md` (new section), `src/domain/schemas/Agent.schema.ts` (kind field), `src/domain/schemas/ApiKey.schema.ts` (rawKey persist:false)
+
+**What was built:**
+- `EmbeddingAgentService` with `resolveEmbedder()`, `bootstrapSystemEmbedder()`, `bootstrapAllTenants()` methods
+- Resolution order: named agentRef → env vars → throw
+- systemPrompt field stores JSON config for embedding agents: `{ provider, model, dimensions }`
+- Startup hook in `src/index.ts` after `initOrm()`: bootstraps system-embedder for all active tenants if `SYSTEM_EMBEDDER_PROVIDER` + `SYSTEM_EMBEDDER_MODEL` env vars are set
+- Upsert semantics: create if not exists, update systemPrompt only if config changed
+- Fixed pre-existing schema breakage: `kind` was missing from `Agent.schema.ts`; `rawKey` (persist:false) was missing from `ApiKey.schema.ts`
+
+## Learnings
+
+- **Embedding agent config lives in systemPrompt as JSON**: Since systemPrompt is already a text field, embedding agents can store `{"provider":"openai","model":"text-embedding-3-small","dimensions":1536}` there cleanly. No new columns needed.
+- **Schema `persist: false` requires `type` alongside it**: MikroORM's `EntitySchemaProperty` requires `type` to be present even for virtual (non-persisted) fields; `{ type: 'string', persist: false }` is the correct pattern.
+- **bootstrapAllTenants uses sequential loop not parallel**: Using `for...of` instead of `Promise.all` avoids flooding the DB with concurrent flush() calls during startup; startup is a one-time event so throughput over correctness is fine.
+- **Startup hook placement**: The embedding bootstrap runs on a fresh `orm.em.fork()` distinct from the main `em` used for the request lifecycle; this keeps the startup work isolated and prevents identity map conflicts.
+- **ProvisionService: use `em.count()` not `artifact.chunkCount` for live KB validation**: `artifact.chunkCount` is set at push time but can drift if chunks are deleted. `em.count(KbChunk, { artifact: artifact.id })` queries live state and is the correct choice for a readiness gate.
+- **Runtime JWT secret pattern**: `RUNTIME_JWT_SECRET` env var with `PORTAL_JWT_SECRET` fallback avoids hard boot failures in dev while keeping production secrets separate. Runtime tokens use `runtime:access` scope and 1-year expiry.
+- **`deploymentId` must be returned even for early FAILED (artifact not found)**: `DeployResult` requires `deploymentId: string`. When the artifact lookup short-circuits before a Deployment row is created, return a `randomUUID()` — callers treat FAILED results as transient.
+- **`unprovision` must explicitly null `runtimeToken`**: `Deployment.markFailed()` doesn't clear `runtimeToken` by design; `unprovision` sets it to `null` after `markFailed` to revoke runtime access.
+- **`orgSlug` uniqueness check must exclude current tenant**: `findByOrgSlug(slug)` returns any tenant with that slug; in the update flow, check `existing.id !== tenantId` before returning 409.
+- **`assignUniqueSlug` must be called before flush**: The method uses `em.findOne` to check uniqueness; since the tenant is already persisted (via `em.persist`) but not flushed, the DB doesn't yet have the row, so the uniqueness check is safe to run before flush without a conflict.
+- **Extending existing Fastify routes vs. adding new ones**: Fastify throws if you register the same method+path twice. When a task asks to "add" a route that already exists, extend the existing handler to handle the new field rather than registering a duplicate.
+- **`provider` field in PATCH /v1/portal/settings made optional**: The existing endpoint required `provider`. Extended it to also handle `orgSlug`-only updates by making `provider` optional and short-circuiting when only `orgSlug` is provided.
+
+## 2026-02-25T04:00:00Z: WeaveService Implementation
+
+**Event:** Implemented `src/services/WeaveService.ts` — the `loom weave` pipeline  
+**Task:** Requested by Michael Brown  
+**Artifacts:** `src/services/WeaveService.ts`
+
+**What was built:**
+- `parseSpec(yamlPath)` — reads and validates a YAML spec file using a custom minimal YAML parser (no external dependencies); validates `apiVersion` and `kind`
+- `resolveDocs(docsPath)` — resolves docs from a directory (recursive walk), `.zip` file (binary ZIP extraction), or single file; returns `{ filename, content: Buffer }[]`
+- `chunkText(text, tokenSize, overlap)` — word-aligned sliding-window chunker; 1 token ≈ 4 chars heuristic; step = `(tokenSize - overlap) * 4`
+- `embedTexts(texts, provider, model, apiKey)` — OpenAI embeddings via native `fetch`; batches at 100 texts/request; sorts by index to preserve order
+- `computePreprocessingHash(config)` — SHA-256 of `{ provider, model, tokenSize, overlap }` JSON for VectorSpace fingerprint
+- `packageBundle(spec, chunks, vectorSpace)` — builds `.tgz` in-memory (custom minimal POSIX ustar tar + node:zlib gzip); signs with HMAC-SHA256 if `BUNDLE_SIGNING_SECRET` is set
+- `weaveKnowledgeBase(yamlPath, outputDir, tenantId, em?)` — full pipeline: parse → resolve docs → chunk → embed → package → write `.tgz`
+- `weaveConfigArtifact(yamlPath, outputDir)` — config-only bundle for Agent/EmbeddingAgent specs
+
+**Key Design Decisions:**
+- No external YAML or tar library installed; implemented minimal versions inline (keeps deps clean)
+- YAML parser uses indent-stack approach; handles 3+ levels of nesting cleanly
+- ZIP extractor scans local file headers sequentially; supports stored (0) and deflated (8) compression
+- Tar builder uses POSIX ustar format with correct checksum computation
+- `em` param reserved for future EmbeddingAgent DB lookup; P0 always uses system env vars
+
+## Learnings
+
+- **No js-yaml in package.json**: A minimal line-by-line indented-YAML parser with an indent-stack (push nested objects, pop on de-dent) is ~40 lines and handles all realistic spec structures without additional dependencies.
+- **Custom POSIX ustar tar**: Building tar headers manually (512-byte blocks, octal size/mtime, checksum over all 512 bytes) is about 30 lines. The checksum must be calculated with the checksum field pre-filled with spaces (0x20), not zeros.
+- **ZIP local file header scanning**: Scanning sequentially from offset 0 via local file header signatures (`0x04034b50`) is reliable for valid ZIPs. Stop on central directory signature (`0x02014b50`). Handle data descriptor flag (bit 3) by skipping 16 bytes.
+- **embedTexts + internal batching**: Even when the caller batches at 100 chunks, `embedTexts` should also enforce the 100-per-request limit internally — callers may pass arbitrary-sized arrays.
+- **Dimensions from first response**: Don't hardcode embedding dimensions — infer from `embeddings[0].length` after the first API call. Model-specific dimension knowledge would create coupling.
+
+## 2026-02-28: Portal KB + Deployment routes
+
+**Event:** Added 6 new portal API routes to `src/routes/portal.ts` for Knowledge Base and Deployment resources.
+
+**Routes delivered:**
+- `GET /v1/portal/knowledge-bases` — lists all KnowledgeBase artifacts for tenant (id, name, tags, chunkCount, createdAt, vectorSpace)
+- `GET /v1/portal/knowledge-bases/:id` — single KB detail with live chunkCount and searchReady flag
+- `DELETE /v1/portal/knowledge-bases/:id` — removes artifact, all chunks, and all tags
+- `GET /v1/portal/deployments` — lists deployments with artifact info (no runtimeToken)
+- `GET /v1/portal/deployments/:id` — single deployment detail including chunkCount for KB artifacts
+- `DELETE /v1/portal/deployments/:id` — calls `ProvisionService.unprovision()` to mark FAILED + clear runtimeToken
+
+**Patterns used:**
+- Auth: `authRequired` preHandler (same as all portal routes)
+- `tenantId` extracted from `request.portalUser!`
+- `orm.em.fork()` per request — `orm` imported from `../orm.js`; `RegistryService`/`ProvisionService` take em per method call, so no constructor em needed
+- Dynamic `import()` for `Artifact`, `KbChunk` entities to avoid circular dependencies at module load
+- `runtimeToken` intentionally excluded from all portal responses (CLI-only field)
+- `chunkCount` on KB detail is queried live via `em.count(KbChunk, ...)` — same pattern as ProvisionService deploy validation
+
+## Learnings
+
+- **`orm.em.fork()` per request for services that take em per method**: When a service's methods accept `em` as a parameter (not via constructor), import `orm` and fork per handler. This is cleaner than adding `em` to service constructors or to `registerPortalRoutes` signature.
+- **Dynamic import to avoid circular deps**: Importing entity classes inside handler bodies (`await import('../domain/entities/Artifact.js')`) avoids potential circular dependency issues at module load time.
+- **`em.populate()` for nested relations on fetched entities**: When `getDeployment` returns a Deployment without populated `artifact.vectorSpace`, call `em.populate(deployment, ['artifact', 'artifact.vectorSpace'])` before accessing nested fields.
+
+## Learnings
+
+### 2026-07-15: Registry Gateway Routes (F-registry-routes)
+
+**Task:** Implemented `src/routes/registry.ts` — all 7 Fastify route handlers for the artifact registry.
+
+**Routes delivered:**
+- `POST /v1/registry/push` — multipart/form-data upload, sha256 validation, delegates to `RegistryService.push()`
+- `GET /v1/registry/list` — lists artifacts by org, delegates to `RegistryService.list()`
+- `GET /v1/registry/pull/:org/:name/:tag` — streams bundle as `application/octet-stream`
+- `DELETE /v1/registry/:org/:name/:tag` — removes artifact tag/artifact, delegates to `RegistryService.delete()`
+- `POST /v1/registry/deploy` — provisions a deployment, delegates to `ProvisionService.deploy()`
+- `GET /v1/registry/deployments` — lists deployments, delegates to `ProvisionService.listDeployments()`
+- `DELETE /v1/registry/deployments/:id` — unprovisions a deployment, delegates to `ProvisionService.unprovision()`
+
+**Key decisions:**
+- Installed `@fastify/multipart` (^9.4.0) — not in original package.json, required for multipart push endpoint
+- `REGISTRY_JWT_SECRET` env var with fallback to `PORTAL_JWT_SECRET` then dev default (same pattern as `ProvisionService`)
+- `orm.em.fork()` per request — EntityManager is not request-safe
+- `registryAuth` preHandler per route (not global) for per-scope enforcement
+- Compute sha256 from uploaded bundle; validate against provided value if present; 400 on mismatch
+
+**Pattern notes:**
+- `@fastify/multipart` must be registered as a plugin on the fastify instance *before* routes that use `request.parts()`
+- Iterate `request.parts()` with `for await` — accumulate file chunks into `Buffer.concat()`
+- Route registration uses same `fastify.register((instance, opts, done) => { ... done(); })` wrapper as other route files
+- Passed `orm` (not `orm.em`) to `registerRegistryRoutes` so each handler can call `orm.em.fork()` safely

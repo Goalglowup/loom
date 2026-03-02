@@ -10,7 +10,7 @@ import { registerAuthMiddleware } from './auth.js';
 import { createSSEProxy } from './streaming.js';
 import { traceRecorder } from './tracing.js';
 import { getProviderForTenant } from './providers/registry.js';
-import { applyAgentToRequest, handleMcpRoundTrip } from './agent.js';
+import { applyAgentToRequest, handleMcpRoundTrip, injectRagContext } from './agent.js';
 import { ConversationManagementService } from './application/services/ConversationManagementService.js';
 import { PortalService } from './application/services/PortalService.js';
 import { AdminService } from './application/services/AdminService.js';
@@ -21,7 +21,9 @@ import { randomUUID } from 'node:crypto';
 import { registerDashboardRoutes } from './routes/dashboard.js';
 import { registerAdminRoutes } from './routes/admin.js';
 import { registerPortalRoutes } from './routes/portal.js';
+import { registerRegistryRoutes } from './routes/registry.js';
 import { initOrm } from './orm.js';
+import { EmbeddingAgentService } from './services/EmbeddingAgentService.js';
 
 // Startup warning: check critical env vars
 if (!process.env.ENCRYPTION_MASTER_KEY) {
@@ -43,6 +45,13 @@ const start = async () => {
   try {
     const orm = await initOrm();
     const em = orm.em.fork();
+
+    // Bootstrap system-embedder agent for all tenants if configured
+    if (process.env.SYSTEM_EMBEDDER_PROVIDER && process.env.SYSTEM_EMBEDDER_MODEL) {
+      const embeddingAgentService = new EmbeddingAgentService();
+      await embeddingAgentService.bootstrapAllTenants(orm.em.fork());
+      console.log('[startup] System embedder bootstrapped for all tenants');
+    }
 
     const fastify = Fastify({
       logger: true
@@ -112,6 +121,12 @@ const start = async () => {
     // Register portal routes (/v1/portal/*)
     fastify.register((instance, opts, done) => {
       registerPortalRoutes(instance, portalSvc, conversationSvc, userMgmtSvc, tenantMgmtSvc);
+      done();
+    });
+
+    // Register registry routes (/v1/registry/*)
+    fastify.register((instance, opts, done) => {
+      registerRegistryRoutes(instance, orm);
       done();
     });
 
@@ -220,8 +235,17 @@ const start = async () => {
           ? { ...cleanBody, messages: [...historyMessages, ...(cleanBody.messages ?? [])] }
           : cleanBody;
 
+      // Inject RAG context if agent has a knowledgeBaseRef (before merge policies).
+      let ragResult = {};
+      let bodyWithRag = bodyWithHistory;
+      if (tenant?.knowledgeBaseRef) {
+        const ragOutput = await injectRagContext(bodyWithHistory, tenant, em);
+        bodyWithRag = ragOutput.body;
+        ragResult = ragOutput.ragResult;
+      }
+
       // Apply agent merge policies (system prompt injection, skills merge) before forwarding.
-      const effectiveBody = tenant ? applyAgentToRequest(bodyWithHistory, tenant) : bodyWithHistory;
+      const effectiveBody = tenant ? applyAgentToRequest(bodyWithRag, tenant) : bodyWithRag;
 
       const proxyReq: ProxyRequest = {
         url: '/v1/chat/completions',
@@ -276,6 +300,7 @@ const start = async () => {
 
           const latencyMs = Date.now() - startTimeMs;
           const usage = (finalBody as any)?.usage;
+          const r = ragResult as any;
           traceRecorder.record({
             tenantId: tenant.tenantId,
             agentId: tenant.agentId,
@@ -290,6 +315,15 @@ const start = async () => {
             totalTokens: usage?.total_tokens,
             ttfbMs: latencyMs,
             gatewayOverheadMs: upstreamStartMs - startTimeMs,
+            knowledgeBaseId: r.knowledgeBaseId,
+            ragRetrievalLatencyMs: r.ragRetrievalLatencyMs,
+            embeddingLatencyMs: r.embeddingLatencyMs,
+            vectorSearchLatencyMs: r.vectorSearchLatencyMs,
+            retrievedChunkCount: r.retrievedChunkCount,
+            topChunkSimilarity: r.topChunkSimilarity,
+            avgChunkSimilarity: r.avgChunkSimilarity,
+            ragStageFailed: r.ragStageFailed,
+            fallbackToNoRag: r.fallbackToNoRag,
           });
 
           // Store conversation messages (fire-and-forget; do not block the response)
@@ -326,7 +360,7 @@ const start = async () => {
               : finalBody;
 
           if (conversationUUID) {
-            reply.header('X-Loom-Conversation-ID', resolvedConversationId ?? '');
+            reply.header('X-Arachne-Conversation-ID', resolvedConversationId ?? '');
           }
           return reply.code(response.status).send(responseToSend);
         }

@@ -23,7 +23,7 @@ function ApiKeyPrompt({ onSaved }: ApiKeyPromptProps) {
       <div className="api-key-card">
         <h2 className="api-key-title">API Key Required</h2>
         <p className="api-key-desc">
-          Enter your Loom API key to load dashboard data. You can find it in your tenant settings.
+          Enter your Arachne API key to load dashboard data. You can find it in your tenant settings.
         </p>
         <form onSubmit={handleSubmit}>
           <input

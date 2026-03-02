@@ -1,5 +1,13 @@
 import { query } from './db.js';
 
+export interface RagMetrics {
+  totalRagRequests: number;
+  ragFailureRate: number;
+  avgRetrievalMs: number;
+  avgChunksRetrieved: number;
+  fallbackRate: number;
+}
+
 export interface AnalyticsSummary {
   totalRequests: number;
   totalTokens: number;
@@ -10,6 +18,7 @@ export interface AnalyticsSummary {
   errorRate: number;
   avgOverheadMs: number;
   avgTtfbMs: number;
+  ragMetrics: RagMetrics;
 }
 
 export interface TimeseriesBucket {
@@ -91,7 +100,20 @@ export async function getAnalyticsSummary(
          0
        )::float                                                       AS error_rate,
        COALESCE(AVG(gateway_overhead_ms), 0)::float                  AS avg_overhead_ms,
-       COALESCE(AVG(ttfb_ms), 0)::float                              AS avg_ttfb_ms
+       COALESCE(AVG(ttfb_ms), 0)::float                              AS avg_ttfb_ms,
+       COUNT(*) FILTER (WHERE rag_artifact_id IS NOT NULL)::int       AS rag_total_requests,
+       COALESCE(
+         COUNT(*) FILTER (WHERE rag_artifact_id IS NOT NULL AND rag_stage_failed IS NOT NULL)::float
+           / NULLIF(COUNT(*) FILTER (WHERE rag_artifact_id IS NOT NULL), 0),
+         0
+       )::float                                                       AS rag_failure_rate,
+       COALESCE(AVG(rag_retrieval_ms) FILTER (WHERE rag_artifact_id IS NOT NULL), 0)::float AS avg_retrieval_ms,
+       COALESCE(AVG(rag_chunks_retrieved) FILTER (WHERE rag_artifact_id IS NOT NULL), 0)::float AS avg_chunks_retrieved,
+       COALESCE(
+         COUNT(*) FILTER (WHERE rag_fallback_to_no_rag = true)::float
+           / NULLIF(COUNT(*) FILTER (WHERE rag_artifact_id IS NOT NULL), 0),
+         0
+       )::float                                                       AS rag_fallback_rate
      FROM traces
      WHERE tenant_id IN (SELECT id FROM subtenant_tree)
        AND created_at >= NOW() - ($2 || ' hours')::interval`
@@ -112,7 +134,20 @@ export async function getAnalyticsSummary(
          0
        )::float                                                       AS error_rate,
        COALESCE(AVG(gateway_overhead_ms), 0)::float                  AS avg_overhead_ms,
-       COALESCE(AVG(ttfb_ms), 0)::float                              AS avg_ttfb_ms
+       COALESCE(AVG(ttfb_ms), 0)::float                              AS avg_ttfb_ms,
+       COUNT(*) FILTER (WHERE rag_artifact_id IS NOT NULL)::int       AS rag_total_requests,
+       COALESCE(
+         COUNT(*) FILTER (WHERE rag_artifact_id IS NOT NULL AND rag_stage_failed IS NOT NULL)::float
+           / NULLIF(COUNT(*) FILTER (WHERE rag_artifact_id IS NOT NULL), 0),
+         0
+       )::float                                                       AS rag_failure_rate,
+       COALESCE(AVG(rag_retrieval_ms) FILTER (WHERE rag_artifact_id IS NOT NULL), 0)::float AS avg_retrieval_ms,
+       COALESCE(AVG(rag_chunks_retrieved) FILTER (WHERE rag_artifact_id IS NOT NULL), 0)::float AS avg_chunks_retrieved,
+       COALESCE(
+         COUNT(*) FILTER (WHERE rag_fallback_to_no_rag = true)::float
+           / NULLIF(COUNT(*) FILTER (WHERE rag_artifact_id IS NOT NULL), 0),
+         0
+       )::float                                                       AS rag_fallback_rate
      FROM traces
      WHERE tenant_id = $1
        AND created_at >= NOW() - ($2 || ' hours')::interval`;
@@ -130,6 +165,13 @@ export async function getAnalyticsSummary(
     errorRate:        row.error_rate         ?? 0,
     avgOverheadMs:    row.avg_overhead_ms    ?? 0,
     avgTtfbMs:        row.avg_ttfb_ms        ?? 0,
+    ragMetrics: {
+      totalRagRequests:   row.rag_total_requests    ?? 0,
+      ragFailureRate:     row.rag_failure_rate       ?? 0,
+      avgRetrievalMs:     row.avg_retrieval_ms       ?? 0,
+      avgChunksRetrieved: row.avg_chunks_retrieved   ?? 0,
+      fallbackRate:       row.rag_fallback_rate      ?? 0,
+    },
   };
 }
 
@@ -161,7 +203,20 @@ export async function getAdminAnalyticsSummary(
          0
        )::float                                                       AS error_rate,
        COALESCE(AVG(gateway_overhead_ms), 0)::float                  AS avg_overhead_ms,
-       COALESCE(AVG(ttfb_ms), 0)::float                              AS avg_ttfb_ms
+       COALESCE(AVG(ttfb_ms), 0)::float                              AS avg_ttfb_ms,
+       COUNT(*) FILTER (WHERE rag_artifact_id IS NOT NULL)::int       AS rag_total_requests,
+       COALESCE(
+         COUNT(*) FILTER (WHERE rag_artifact_id IS NOT NULL AND rag_stage_failed IS NOT NULL)::float
+           / NULLIF(COUNT(*) FILTER (WHERE rag_artifact_id IS NOT NULL), 0),
+         0
+       )::float                                                       AS rag_failure_rate,
+       COALESCE(AVG(rag_retrieval_ms) FILTER (WHERE rag_artifact_id IS NOT NULL), 0)::float AS avg_retrieval_ms,
+       COALESCE(AVG(rag_chunks_retrieved) FILTER (WHERE rag_artifact_id IS NOT NULL), 0)::float AS avg_chunks_retrieved,
+       COALESCE(
+         COUNT(*) FILTER (WHERE rag_fallback_to_no_rag = true)::float
+           / NULLIF(COUNT(*) FILTER (WHERE rag_artifact_id IS NOT NULL), 0),
+         0
+       )::float                                                       AS rag_fallback_rate
      FROM traces
      WHERE created_at >= NOW() - ($1 || ' hours')::interval
      ${tenantFilter}`,
@@ -179,6 +234,13 @@ export async function getAdminAnalyticsSummary(
     errorRate:        row.error_rate         ?? 0,
     avgOverheadMs:    row.avg_overhead_ms    ?? 0,
     avgTtfbMs:        row.avg_ttfb_ms        ?? 0,
+    ragMetrics: {
+      totalRagRequests:   row.rag_total_requests    ?? 0,
+      ragFailureRate:     row.rag_failure_rate       ?? 0,
+      avgRetrievalMs:     row.avg_retrieval_ms       ?? 0,
+      avgChunksRetrieved: row.avg_chunks_retrieved   ?? 0,
+      fallbackRate:       row.rag_fallback_rate      ?? 0,
+    },
   };
 }
 

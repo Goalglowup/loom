@@ -50,9 +50,9 @@ describe('AppLayout', () => {
     vi.resetAllMocks();
   });
 
-  it('renders Loom branding', () => {
+  it('renders Arachne branding', () => {
     renderLayout();
-    expect(screen.getByText(/Loom/)).toBeInTheDocument();
+    expect(screen.getByText(/Arachne/)).toBeInTheDocument();
   });
 
   it('renders nav links', () => {

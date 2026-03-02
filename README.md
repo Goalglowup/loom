@@ -1,8 +1,8 @@
-# Loom
+# Arachne
 
-**Loom** is an AI gateway and control plane that proxies requests to LLM providers (OpenAI, Azure, etc.) with deep observability, tenant isolation, intelligent agent routing, and persistent conversation memory.
+**Arachne** is an AI gateway and control plane that proxies requests to LLM providers (OpenAI, Azure, etc.) with deep observability, tenant isolation, intelligent agent routing, and persistent conversation memory.
 
-## What Loom Does
+## What Arachne Does
 
 - **Provider-agnostic gateway** — OpenAI-compatible API that routes to multiple LLM providers (OpenAI, Azure OpenAI) with per-tenant configuration
 - **Multi-tenant isolation** — Separate API keys, agent configurations, and trace storage per tenant; strict data isolation
@@ -82,9 +82,9 @@ Admin operations:
 
 For the full architecture reference — component diagrams, data flows, multi-tenancy model, encryption design, and more — see **[docs/architecture.md](docs/architecture.md)**.
 
-## Loom CLI
+## Arachne CLI
 
-Developers can use the `loom` CLI to define Agent and KnowledgeBase artifacts as YAML specs, weave them into signed bundles, push to the registry, and deploy to tenants.
+Developers can use the `arachne` CLI to define Agent and KnowledgeBase artifacts as YAML specs, weave them into signed bundles, push to the registry, and deploy to tenants.
 
 - **[docs/cli.md](docs/cli.md)** — CLI command reference and end-to-end example
 - **[docs/cli-overview.md](docs/cli-overview.md)** — System overview: how the artifact model, weave pipeline, registry, and deployment flow fit together
@@ -102,7 +102,7 @@ Developers can use the `loom` CLI to define Agent and KnowledgeBase artifacts as
 
 ## API Compatibility
 
-Loom proxies OpenAI's `/v1/chat/completions` endpoint with extensions:
+Arachne proxies OpenAI's `/v1/chat/completions` endpoint with extensions:
 
 **Request Extensions:**
 - `conversation_id` (optional) — External conversation identifier for memory injection
@@ -111,7 +111,7 @@ Loom proxies OpenAI's `/v1/chat/completions` endpoint with extensions:
 **Response Extensions:**
 - `conversation_id` — Echo of request conversation ID
 - `partition_id` — Echo of request partition ID (if provided)
-- `X-Loom-Conversation-ID` header — Resolved conversation UUID
+- `X-Arachne-Conversation-ID` header — Resolved conversation UUID
 
 ## Getting Started
 
