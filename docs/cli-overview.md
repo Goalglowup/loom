@@ -354,3 +354,32 @@ CLI commands (`arachne weave`, `arachne push`, `arachne deploy`) use the stored 
 
 3. **Embedder scoping** ✅  
    The embedder is configured as an **EmbeddingAgent** — a new agent kind (`kind: EmbeddingAgent`) with its own provider, model, and optional `knowledgeBaseRef`. KnowledgeBase specs reference an EmbeddingAgent via `spec.embedder.agentRef`. Resolution order: (1) named `agentRef`, (2) tenant's default EmbeddingAgent, (3) system `system-embedder` EmbeddingAgent (configured via `SYSTEM_EMBEDDER_PROVIDER/MODEL/API_KEY` env vars), (4) error. An EmbeddingAgent can itself have a KB for meta-context.
+
+---
+
+## Future Work (Deferred)
+
+These features are NOT in scope for P0 but are planned for future iterations. They are documented here so design decisions don't accidentally close off these paths.
+
+### Conversation → KnowledgeBase
+
+Allow any conversation thread to be exported as a KnowledgeBase artifact, making the dialogue history searchable and reusable by future agents.
+
+**User story:** *As an operator, I want to promote a conversation thread to a Knowledge Base so that insights captured in that chat are available to all future agents using that KB.*
+
+**Design sketch:**
+- **Portal UI:** Conversation detail page gains a **"Create KB from conversation"** button
+- **Backend:** `POST /v1/portal/conversations/:id/export-kb`
+  - Reads all messages in the conversation (from `conversations` / `conversation_messages` tables)
+  - Formats as structured text: alternating `## User` / `## Assistant` headings with timestamps
+  - Passes formatted text through WeaveService (chunk → embed → sign)
+  - Pushes resulting bundle to registry as `org/conv-{slug}:latest` (or user-supplied name:tag)
+- **Chunking strategy:** Each user+assistant exchange pair is a chunk candidate — preserves conversational context
+- **Operator controls:** Filter by date range before exporting; retag the artifact name/version before pushing
+- **CLI support:** `arachne weave --from-conversation <id>` as an alternative entry point
+
+**Why this is natural:** Conversations are already stored. WeaveService and RegistryService already handle the chunk/embed/push pipeline. This feature is primarily plumbing between the two existing systems.
+
+**Dependencies:** Conversations (shipped), WeaveService + RegistryService (shipped in P0)
+**GitHub story:** To be created when this moves to active work.
+
