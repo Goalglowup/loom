@@ -1,6 +1,6 @@
 # Loom UI Reference
 
-_Generated 2/27/2026 from smoke test screenshots._
+_Generated 3/2/2026 from smoke test screenshots._
 
 ## Analytics
 

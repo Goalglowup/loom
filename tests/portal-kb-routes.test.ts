@@ -1,0 +1,403 @@
+/**
+ * Portal KB and deployment route tests.
+ * Follows the pattern established in tests/portal-routes.test.ts.
+ *
+ * Mocks:
+ *  - src/orm.js            → provides a controllable mock EntityManager via fork()
+ *  - src/services/ProvisionService.js → controls deployment-route behaviour
+ *  - src/providers/registry.js        → prevents real provider initialisation
+ */
+
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import Fastify from 'fastify';
+import type { FastifyInstance } from 'fastify';
+import { signJwt } from '../src/auth/jwtUtils.js';
+
+// ── Hoisted mocks (must run before module imports) ───────────────────────────
+
+const { mockEm, mockProvisionInstance } = vi.hoisted(() => {
+  const mockProvisionInstance = {
+    listDeployments: vi.fn(),
+    getDeployment: vi.fn(),
+    unprovision: vi.fn(),
+    deploy: vi.fn(),
+  };
+
+  const mockEm = {
+    find: vi.fn(),
+    findOne: vi.fn(),
+    findOneOrFail: vi.fn(),
+    persist: vi.fn(),
+    flush: vi.fn(),
+    remove: vi.fn(),
+    count: vi.fn(),
+    populate: vi.fn(),
+  };
+
+  return { mockEm, mockProvisionInstance };
+});
+
+vi.mock('../src/orm.js', () => ({
+  orm: { em: { fork: vi.fn(() => mockEm) } },
+}));
+
+vi.mock('../src/services/ProvisionService.js', () => ({
+  ProvisionService: vi.fn(() => mockProvisionInstance),
+}));
+
+vi.mock('../src/providers/registry.js', () => ({
+  evictProvider: vi.fn(),
+  getProviderForTenant: vi.fn(),
+}));
+
+// ── Now import the route registrar (after mocks are set up) ──────────────────
+
+import { registerPortalRoutes } from '../src/routes/portal.js';
+import { PortalService } from '../src/application/services/PortalService.js';
+import { ConversationManagementService } from '../src/application/services/ConversationManagementService.js';
+import { UserManagementService } from '../src/application/services/UserManagementService.js';
+import { TenantManagementService } from '../src/application/services/TenantManagementService.js';
+
+// ── Constants ────────────────────────────────────────────────────────────────
+
+const PORTAL_JWT_SECRET = 'unsafe-portal-secret-change-in-production';
+const TEST_USER_ID = 'user-uuid-0001';
+const TEST_TENANT_ID = 'tenant-uuid-0001';
+const TEST_KB_ID = 'artifact-uuid-0001';
+const TEST_DEPLOYMENT_ID = 'deployment-uuid-0001';
+
+function authToken(userId = TEST_USER_ID, tenantId = TEST_TENANT_ID, role = 'owner'): string {
+  return signJwt({ sub: userId, tenantId, role }, PORTAL_JWT_SECRET, 86_400_000);
+}
+
+// ── Minimal service stubs (portal routes need these injected) ────────────────
+
+function buildStubPortalSvc(): PortalService {
+  return {} as unknown as PortalService;
+}
+function buildStubConvSvc(): ConversationManagementService {
+  return {} as unknown as ConversationManagementService;
+}
+function buildStubUserMgmtSvc(): UserManagementService {
+  return {} as unknown as UserManagementService;
+}
+function buildStubTenantMgmtSvc(): TenantManagementService {
+  return {} as unknown as TenantManagementService;
+}
+
+async function buildApp(): Promise<FastifyInstance> {
+  const app = Fastify({ logger: false });
+  registerPortalRoutes(
+    app,
+    buildStubPortalSvc(),
+    buildStubConvSvc(),
+    buildStubUserMgmtSvc(),
+    buildStubTenantMgmtSvc(),
+  );
+  await app.ready();
+  return app;
+}
+
+// Shared mock KB artifact shape returned from em.find / em.findOne
+const mockKbArtifact = {
+  id: TEST_KB_ID,
+  name: 'my-docs',
+  org: 'myorg',
+  version: 'v1',
+  kind: 'KnowledgeBase',
+  chunkCount: 10,
+  createdAt: new Date('2024-01-01'),
+  tags: [{ tag: 'latest' }],
+  vectorSpace: {
+    provider: 'openai',
+    model: 'text-embedding-3-small',
+    dimensions: 1536,
+    preprocessingHash: 'abc123',
+  },
+};
+
+const mockDeployment = {
+  id: TEST_DEPLOYMENT_ID,
+  status: 'READY',
+  environment: 'production',
+  deployedAt: new Date('2024-01-02'),
+  createdAt: new Date('2024-01-02'),
+  artifact: {
+    id: TEST_KB_ID,
+    name: 'my-docs',
+    version: 'v1',
+    kind: 'KnowledgeBase',
+  },
+};
+
+// ── GET /v1/portal/knowledge-bases ──────────────────────────────────────────
+
+describe('GET /v1/portal/knowledge-bases', () => {
+  let app: FastifyInstance;
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    mockEm.flush.mockResolvedValue(undefined);
+    mockEm.find.mockResolvedValue([mockKbArtifact]);
+    app = await buildApp();
+  });
+
+  afterEach(async () => {
+    await app.close();
+  });
+
+  it('returns 200 with list of knowledge bases', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/portal/knowledge-bases',
+      headers: { authorization: `Bearer ${authToken()}` },
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json<{ id: string; name: string }[]>();
+    expect(Array.isArray(body)).toBe(true);
+    expect(body.length).toBe(1);
+    expect(body[0].id).toBe(TEST_KB_ID);
+    expect(body[0].name).toBe('my-docs');
+  });
+
+  it('returns 401 without an auth token', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/portal/knowledge-bases',
+    });
+    expect(res.statusCode).toBe(401);
+  });
+
+  it('returns empty array when tenant has no knowledge bases', async () => {
+    mockEm.find.mockResolvedValue([]);
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/portal/knowledge-bases',
+      headers: { authorization: `Bearer ${authToken()}` },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual([]);
+  });
+});
+
+// ── GET /v1/portal/knowledge-bases/:id ──────────────────────────────────────
+
+describe('GET /v1/portal/knowledge-bases/:id', () => {
+  let app: FastifyInstance;
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    mockEm.flush.mockResolvedValue(undefined);
+    mockEm.findOne.mockResolvedValue(mockKbArtifact);
+    mockEm.count.mockResolvedValue(10);
+    app = await buildApp();
+  });
+
+  afterEach(async () => {
+    await app.close();
+  });
+
+  it('returns 200 with knowledge base details', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: `/v1/portal/knowledge-bases/${TEST_KB_ID}`,
+      headers: { authorization: `Bearer ${authToken()}` },
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json<{
+      id: string;
+      name: string;
+      chunkCount: number;
+      searchReady: boolean;
+    }>();
+    expect(body.id).toBe(TEST_KB_ID);
+    expect(body.name).toBe('my-docs');
+    expect(body.chunkCount).toBe(10);
+    expect(body.searchReady).toBe(true);
+  });
+
+  it('returns 404 when knowledge base not found', async () => {
+    mockEm.findOne.mockResolvedValue(null);
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/portal/knowledge-bases/nonexistent-id',
+      headers: { authorization: `Bearer ${authToken()}` },
+    });
+
+    expect(res.statusCode).toBe(404);
+    expect(res.json<{ error: string }>().error).toContain('not found');
+  });
+
+  it('returns 401 without an auth token', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: `/v1/portal/knowledge-bases/${TEST_KB_ID}`,
+    });
+    expect(res.statusCode).toBe(401);
+  });
+});
+
+// ── DELETE /v1/portal/knowledge-bases/:id ───────────────────────────────────
+
+describe('DELETE /v1/portal/knowledge-bases/:id', () => {
+  let app: FastifyInstance;
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    mockEm.flush.mockResolvedValue(undefined);
+    mockEm.find.mockResolvedValue([]);     // KbChunk.find → empty
+    mockEm.remove.mockReturnValue(undefined);
+    app = await buildApp();
+  });
+
+  afterEach(async () => {
+    await app.close();
+  });
+
+  it('returns 200 with deleted:true on success', async () => {
+    mockEm.findOne.mockResolvedValue(mockKbArtifact);
+
+    const res = await app.inject({
+      method: 'DELETE',
+      url: `/v1/portal/knowledge-bases/${TEST_KB_ID}`,
+      headers: { authorization: `Bearer ${authToken()}` },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json<{ deleted: boolean }>().deleted).toBe(true);
+    expect(mockEm.flush).toHaveBeenCalled();
+  });
+
+  it('returns 404 when knowledge base not found', async () => {
+    mockEm.findOne.mockResolvedValue(null);
+
+    const res = await app.inject({
+      method: 'DELETE',
+      url: '/v1/portal/knowledge-bases/nonexistent-id',
+      headers: { authorization: `Bearer ${authToken()}` },
+    });
+
+    expect(res.statusCode).toBe(404);
+    expect(res.json<{ error: string }>().error).toContain('not found');
+  });
+
+  it('returns 401 without an auth token', async () => {
+    const res = await app.inject({
+      method: 'DELETE',
+      url: `/v1/portal/knowledge-bases/${TEST_KB_ID}`,
+    });
+    expect(res.statusCode).toBe(401);
+  });
+});
+
+// ── GET /v1/portal/deployments ───────────────────────────────────────────────
+
+describe('GET /v1/portal/deployments', () => {
+  let app: FastifyInstance;
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    mockEm.flush.mockResolvedValue(undefined);
+    mockProvisionInstance.listDeployments.mockResolvedValue([mockDeployment]);
+    app = await buildApp();
+  });
+
+  afterEach(async () => {
+    await app.close();
+  });
+
+  it('returns 200 with list of deployments', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/portal/deployments',
+      headers: { authorization: `Bearer ${authToken()}` },
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json<{ id: string; status: string }[]>();
+    expect(Array.isArray(body)).toBe(true);
+    expect(body.length).toBe(1);
+    expect(body[0].id).toBe(TEST_DEPLOYMENT_ID);
+    expect(body[0].status).toBe('READY');
+  });
+
+  it('returns 401 without an auth token', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/portal/deployments',
+    });
+    expect(res.statusCode).toBe(401);
+  });
+
+  it('returns empty array when no deployments exist', async () => {
+    mockProvisionInstance.listDeployments.mockResolvedValue([]);
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/portal/deployments',
+      headers: { authorization: `Bearer ${authToken()}` },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual([]);
+  });
+});
+
+// ── DELETE /v1/portal/deployments/:id ────────────────────────────────────────
+
+describe('DELETE /v1/portal/deployments/:id', () => {
+  let app: FastifyInstance;
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    mockEm.flush.mockResolvedValue(undefined);
+    mockProvisionInstance.unprovision.mockResolvedValue(true);
+    app = await buildApp();
+  });
+
+  afterEach(async () => {
+    await app.close();
+  });
+
+  it('returns 200 with success:true on successful unprovision', async () => {
+    const res = await app.inject({
+      method: 'DELETE',
+      url: `/v1/portal/deployments/${TEST_DEPLOYMENT_ID}`,
+      headers: { authorization: `Bearer ${authToken()}` },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json<{ success: boolean }>().success).toBe(true);
+    expect(mockProvisionInstance.unprovision).toHaveBeenCalledWith(
+      TEST_DEPLOYMENT_ID,
+      TEST_TENANT_ID,
+      expect.anything(),
+    );
+  });
+
+  it('returns 404 when deployment not found', async () => {
+    mockProvisionInstance.unprovision.mockResolvedValue(false);
+
+    const res = await app.inject({
+      method: 'DELETE',
+      url: '/v1/portal/deployments/nonexistent-id',
+      headers: { authorization: `Bearer ${authToken()}` },
+    });
+
+    expect(res.statusCode).toBe(404);
+    expect(res.json<{ error: string }>().error).toContain('not found');
+  });
+
+  it('returns 401 without an auth token', async () => {
+    const res = await app.inject({
+      method: 'DELETE',
+      url: `/v1/portal/deployments/${TEST_DEPLOYMENT_ID}`,
+    });
+    expect(res.statusCode).toBe(401);
+  });
+});
