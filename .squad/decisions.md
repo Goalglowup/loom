@@ -2107,3 +2107,65 @@ New tables:
 2. Documentation must be written/updated covering what has changed or been added — both internal (architecture/API docs) and public user-facing docs
 **Why:** User request — captured for team memory
 **Impact:** All future features must pass Edie's documentation gate before closure; enforces quality bar and knowledge preservation
+
+## 2026-03-02: Docker Compose Architecture Decision
+
+**By:** Fenster (Backend)  
+**Date:** 2026-03-02
+
+**What:** Implemented full-stack Docker Compose configuration with multi-stage builds for both gateway (Node.js) and portal (React/nginx).
+
+**Decisions:**
+- Gateway: Multi-stage build separates build-time (TypeScript) from runtime (Node.js); includes `migrations/` for startup DB migrations
+- Portal: Vite build → static files served by nginx (not Node.js); nginx reverse-proxies `/v1` API calls to gateway service; `try_files $uri $uri/ /index.html` enables client-side routing
+- Services: postgres with healthcheck; ollama without healthcheck (startup too slow); gateway depends on postgres (healthy) + ollama (started); portal depends on gateway (started only)
+- All dev secrets explicitly commented as placeholders in compose file
+
+**Impact:** `docker compose up` brings full local development stack; portal at http://localhost:5174, gateway API at http://localhost:3000; developers can override env vars via `.env`
+
+## 2026-03-02: Docker Compose Setup Documentation
+
+**By:** Edie (Technical Writer)  
+**Date:** 2026-03-02
+
+**What:** Updated `RUNNING_LOCALLY.md` with comprehensive two-path setup guide: (1) Docker Compose (recommended) — full stack with postgres + ollama + gateway + portal, (2) Node.js development — for active development on gateway/portal only.
+
+**Decisions:**
+- Docker Compose emphasized as recommended starting point; clear service reference table with ports
+- Ollama specifics: model pulling (llama3.2, nomic-embed-text) using `http://ollama:11434` Docker service name
+- Production safety: explicit guidance on generating encryption keys and JWT secrets
+- RAG support: System Embedder configuration examples for both Ollama and OpenAI
+- README.md already has "Getting Started" link to RUNNING_LOCALLY.md — no changes needed
+
+**Impact:** New developers get full stack running in minutes via Docker Compose; development workflow clearly separated for those modifying gateway/portal code
+
+## 2026-03-02: P0 Documentation Organization & Format
+
+**By:** Edie (Technical Writer)
+
+**What:** Created four separate focused documentation files for P0 Registry/RAG/Portal features instead of one mega-doc. Registry API uses table-based format (method, auth, request fields, response, curl). RAG inference docs include both user-visible behavior (citation blocks, graceful degradation) and internal implementation details. Portal guide includes org slug validation as detailed section and separates "Creating a KB" (CLI) from "Viewing KBs" (Portal). System Embedder doc assumes OpenAI as default with future-proofing for custom embedders. All docs include working code examples (curl, YAML, real env vars), not pseudo-code.
+
+**Decisions:**
+- Separate docs per audience (API users, system integrators, end users, DevOps) instead of single mega-doc
+- Table-based API format for quick field/auth scanning
+- 13 RAG trace fields documented as table with type and description for observability
+- Org slugs documented with validation rules, valid/invalid examples, and migration warning
+- Documented current OpenAI-only implementation with "Custom Embedders (Future)" section showing YAML spec for tenant/agent-level embedders (Phase 2)
+
+**Impact:** Users quickly find relevant doc; reduces support questions; enables SDK generation from API tables; operators understand trace fields for building dashboards; developers understand design for future phases
+
+## 2026-03-02: P0 Coverage Gaps Summary
+
+**By:** Hockney (Tester)
+
+**What:** Documented coverage gaps in P0 modules (RAG, Registry Routes, EmbeddingAgentService, Slug utils) with rationale for each gap and recommendations.
+
+**Gaps acknowledged (low risk):**
+- `retrieveChunks` `fallbackToNoRag`: not implemented (throws on embedding failure); test if added in future
+- `EmbeddingAgentService.bootstrapAllTenants`: delegates entirely to `bootstrapSystemEmbedder` (fully covered); test if error-isolation logic added
+- Registry `POST /v1/registry/push` sha256-match: implicitly covered by main happy-path; low risk
+- Registry `GET /v1/registry/pull` Content-Disposition header: requires integration test with real DB; out-of-scope for unit tests
+- `EmbeddingAgentService` apiKey fallback: partially covered; low risk (`?? process.env.*` is single expression)
+- Multi-tenant isolation for registry routes: delegated to `RegistryService` (fully tested separately); no additional test needed
+
+**Impact:** Team understands why certain paths are not tested; recommendations for future test additions guide coverage expansion

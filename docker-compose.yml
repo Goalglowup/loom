@@ -6,7 +6,7 @@ services:
     environment:
       POSTGRES_DB: loom
       POSTGRES_USER: loom
-      POSTGRES_PASSWORD: loom_dev_password
+      POSTGRES_PASSWORD: loom_dev_password  # DEV ONLY — change for production
     ports:
       - "5432:5432"
     volumes:
@@ -17,5 +17,51 @@ services:
       timeout: 5s
       retries: 5
 
+  ollama:
+    image: ollama/ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+
+  gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      ollama:
+        condition: service_started
+    environment:
+      DATABASE_URL: postgresql://loom:loom_dev_password@postgres:5432/loom
+      PORT: 3000
+      HOST: 0.0.0.0
+      ENCRYPTION_MASTER_KEY: "0000000000000000000000000000000000000000000000000000000000000001"  # DEV ONLY — change for production
+      ADMIN_JWT_SECRET: dev-admin-secret-change-in-production  # DEV ONLY — change for production
+      PORTAL_JWT_SECRET: dev-portal-secret-change-in-production  # DEV ONLY — change for production
+      SYSTEM_EMBEDDER_PROVIDER: ollama
+      SYSTEM_EMBEDDER_MODEL: nomic-embed-text
+      SYSTEM_EMBEDDER_API_KEY: ollama
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:3000/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  portal:
+    build:
+      context: .
+      dockerfile: Dockerfile.portal
+    ports:
+      - "5174:80"
+    depends_on:
+      gateway:
+        condition: service_started
+
 volumes:
   postgres_data:
+  ollama_data:

@@ -1,0 +1,38 @@
+# Multi-stage build for Arachne Portal (React/Vite frontend)
+
+# Build stage
+FROM node:20-alpine AS builder
+
+WORKDIR /app
+
+# Copy portal package files
+COPY portal/package*.json ./portal/
+
+# Install portal dependencies
+WORKDIR /app/portal
+RUN npm ci
+
+# Copy shared directory (referenced as @shared in portal)
+WORKDIR /app
+COPY shared/ ./shared/
+
+# Copy portal source
+COPY portal/ ./portal/
+
+# Build portal
+WORKDIR /app/portal
+RUN npm run build
+
+# Serve stage
+FROM nginx:alpine
+
+# Copy custom nginx config
+COPY nginx.portal.conf /etc/nginx/conf.d/default.conf
+
+# Copy built static files
+COPY --from=builder /app/portal/dist /usr/share/nginx/html
+
+# Expose HTTP port
+EXPOSE 80
+
+# nginx starts automatically via base image CMD
