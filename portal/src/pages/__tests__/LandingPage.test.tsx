@@ -35,14 +35,14 @@ describe('LandingPage', () => {
 
   it('renders feature cards', () => {
     renderPage();
-    expect(screen.getAllByText(/Multi-provider routing/i).length).toBeGreaterThan(0);
-    expect(screen.getAllByText(/Encrypted trace recording/i).length).toBeGreaterThan(0);
-    expect(screen.getAllByText(/Per-tenant API keys/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Full audit traces/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Streaming support/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Multi-tenant proxy/i).length).toBeGreaterThan(0);
   });
 
   it('renders the hero tagline', () => {
     renderPage();
-    expect(screen.getByText(/Provider-agnostic AI gateway/i)).toBeInTheDocument();
+    expect(screen.getByText(/The AI runtime built for builders who ship/i)).toBeInTheDocument();
   });
 
   it('renders footer with current year', () => {

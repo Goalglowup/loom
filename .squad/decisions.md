@@ -2353,3 +2353,26 @@ A remote `backend "azurerm"` block was added to `main.tf`. Values are placeholde
 - `terraform init` now requires `-backend-config` or a `backend.hcl` file pointing to real Azure Storage
 - `db_admin_password` must be supplied at plan/apply time (e.g., `TF_VAR_db_admin_password` in CI)
 - Database changes (e.g., firewall rules, HA) can now be tracked in version control
+
+## 2026-03-02: Test Maintenance — Frontend Content Tests Drift
+
+**From:** Hockney (Tester)  
+**Date:** 2026-03-02  
+**Triggered by:** LandingPage test failures after UI redesign
+
+### Issue
+When LandingPage.tsx was redesigned (new hero headline + new feature card titles), the test assertions still referenced the old copy. This caused 2 test failures that had nothing to do with broken behavior — just stale string matchers.
+
+### Pattern
+Any test that asserts on visible UI text strings (`getByText`, `getAllByText`) will silently break when copy changes. This is especially common for:
+- Marketing landing pages (frequently redesigned)
+- Feature card titles / hero headlines
+- CTA button labels
+
+### Recommendation
+1. **Use `data-testid` for structural/functional assertions** — e.g., `data-testid="feature-cards"` so tests verify the cards exist, not their exact titles.
+2. **Reserve text assertions for contractually stable strings** — error messages, form labels, navigation links. These change less often.
+3. **When changing UI copy, search for the old string in `__tests__/`** before merging — a quick `grep -r "old text" portal/src` catches stale tests at PR time.
+
+### Action
+McManus (Frontend): Consider adding `data-testid` anchors to LandingPage feature card section and hero heading for future test stability.

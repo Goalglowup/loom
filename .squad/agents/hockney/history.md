@@ -532,3 +532,15 @@
 - `validateOrgSlug` returns `{ valid: boolean; error?: string }` — tests check `.valid` property
 
 **Coverage gaps documented in:** `.squad/decisions/inbox/hockney-coverage-gaps.md`
+
+### 2026-06-XX: LandingPage test snapshot drift
+
+**What was failing:** 2 tests in `portal/src/pages/__tests__/LandingPage.test.tsx`
+- `renders feature cards` — expected `/Multi-provider routing/i`, `/Encrypted trace recording/i`, `/Per-tenant API keys/i` (old feature card titles)
+- `renders the hero tagline` — expected `/Provider-agnostic AI gateway/i` (old h1 text)
+
+**Root cause:** LandingPage.tsx was redesigned (new hero copy "The AI runtime built for builders who ship." and new feature cards: Full audit traces, Streaming support, Multi-tenant proxy, KnowledgeBase RAG) but the tests were not updated alongside the production change.
+
+**Fix:** Updated both test assertions to match current production content. No production code changed.
+
+**Pattern:** Frontend copy/content tests are brittle when they assert exact text strings — they silently lag behind UI redesigns. Consider using `data-testid` attributes for structural assertions and only assert on text for copy that is contractually stable.
