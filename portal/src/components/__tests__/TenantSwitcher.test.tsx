@@ -72,7 +72,7 @@ describe('TenantSwitcher', () => {
 
   it('disables select and shows switching indicator while switching', async () => {
     // switchTenant that never resolves during the test assertion window
-    let resolveSwitchTenant!: () => void;
+    let resolveSwitchTenant!: (value: void | PromiseLike<void>) => void;
     mockSwitchTenant.mockImplementation(() => new Promise(res => { resolveSwitchTenant = res; }));
 
     setup();

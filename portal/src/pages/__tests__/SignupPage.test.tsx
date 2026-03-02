@@ -52,6 +52,20 @@ describe('SignupPage', () => {
       expect(screen.getByRole('button', { name: /create account/i })).toBeInTheDocument();
     });
 
+    it('shows signups-disabled CTA with waitlist link when backend returns signups_disabled', async () => {
+      vi.mocked(api.signup).mockRejectedValue(new Error('signups_disabled'));
+      const user = userEvent.setup();
+      renderPage();
+      await user.type(screen.getByPlaceholderText(/Acme Corp/i), 'My Org');
+      await user.type(screen.getByPlaceholderText(/you@example\.com/i), 'test@example.com');
+      await user.type(screen.getByPlaceholderText(/min\. 8 characters/i), 'password123');
+      await user.click(screen.getByRole('button', { name: /create account/i }));
+      expect(await screen.findByText(/signups are currently closed/i)).toBeInTheDocument();
+      const waitlistLink = await screen.findByRole('link', { name: /join the beta waitlist/i });
+      expect(waitlistLink).toHaveAttribute('href', '/#beta-signup');
+      expect(mockNavigate).not.toHaveBeenCalled();
+    });
+
     it('shows error on failed signup', async () => {
       vi.mocked(api.signup).mockRejectedValue(new Error('Email already taken'));
       const user = userEvent.setup();
@@ -67,6 +81,7 @@ describe('SignupPage', () => {
       vi.mocked(api.signup).mockResolvedValue({
         token: 'tok-abc',
         user: { id: '1', email: 'test@example.com', role: 'owner' },
+        tenant: { id: 't1', name: 'Acme' },
         tenants: [],
         apiKey: 'loom_sk_testkey123',
       });
@@ -84,6 +99,7 @@ describe('SignupPage', () => {
       vi.mocked(api.signup).mockResolvedValue({
         token: 'tok-abc',
         user: { id: '1', email: 'test@example.com', role: 'owner' },
+        tenant: { id: 't1', name: 'Acme' },
         tenants: [],
         apiKey: undefined,
       });
@@ -105,29 +121,30 @@ describe('SignupPage', () => {
     });
 
     it('shows error when invite is invalid', async () => {
-      vi.mocked(api.getInviteInfo).mockResolvedValue({ isValid: false });
+      vi.mocked(api.getInviteInfo).mockResolvedValue({ isValid: false, tenantName: '', expiresAt: '' });
       renderPage('?invite=bad-token');
       await waitFor(() => expect(screen.getByText(/invalid or has expired/i)).toBeInTheDocument());
     });
 
     it('hides org name field in invite mode', async () => {
-      vi.mocked(api.getInviteInfo).mockResolvedValue({ isValid: true, tenantName: 'Partner Co' });
+      vi.mocked(api.getInviteInfo).mockResolvedValue({ isValid: true, tenantName: 'Partner Co', expiresAt: '2024-12-31T00:00:00Z' });
       renderPage('?invite=good-token');
       await waitFor(() => expect(screen.getAllByText(/Join Partner Co/i).length).toBeGreaterThan(0));
       expect(screen.queryByPlaceholderText(/Acme Corp/i)).not.toBeInTheDocument();
     });
 
     it('shows join button with tenant name in invite mode', async () => {
-      vi.mocked(api.getInviteInfo).mockResolvedValue({ isValid: true, tenantName: 'Partner Co' });
+      vi.mocked(api.getInviteInfo).mockResolvedValue({ isValid: true, tenantName: 'Partner Co', expiresAt: '2024-12-31T00:00:00Z' });
       renderPage('?invite=good-token');
       await waitFor(() => expect(screen.getByRole('button', { name: /Join Partner Co/i })).toBeInTheDocument());
     });
 
     it('navigates to /app/traces on successful invite signup', async () => {
-      vi.mocked(api.getInviteInfo).mockResolvedValue({ isValid: true, tenantName: 'Partner Co' });
+      vi.mocked(api.getInviteInfo).mockResolvedValue({ isValid: true, tenantName: 'Partner Co', expiresAt: '2024-12-31T00:00:00Z' });
       vi.mocked(api.signup).mockResolvedValue({
         token: 'tok',
         user: { id: '2', email: 'member@example.com', role: 'user' },
+        tenant: { id: 't1', name: 'Partner Co' },
         tenants: [{ id: 't1', name: 'Partner Co', role: 'member' }],
       });
       const user = userEvent.setup();

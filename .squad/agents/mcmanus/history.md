@@ -1015,3 +1015,54 @@ Used `adminMode?: boolean` prop pattern instead of passing full URLs/header fact
 
 **Impact:** Full beta UX ready. Landing page funnels users to beta signup. Portal gracefully handles signups-disabled state. CLI configured for beta API endpoint.
 
+
+### 2024-12-26: Portal Build Type Errors Fixed
+
+**Problem:**
+The portal build was failing with TypeScript compilation errors:
+- Test files had incomplete mock objects missing required fields
+- `import.meta.env` type was undefined (Vite-specific)
+- Mock type declarations used incorrect syntax
+
+**Root Cause:**
+The Agent interface was updated to require `createdAt`, and mergePolicies type was made stricter with literal union types. Test mocks weren't updated accordingly. Additionally, no vite-env.d.ts existed to declare import.meta types.
+
+**Solution:**
+1. **Created `portal/src/vite-env.d.ts`** to declare ImportMeta and ImportMetaEnv types for Vite environment
+2. **Fixed test mocks across all test files** by adding missing required fields:
+   - `createdAt: '2024-01-01T00:00:00Z'` to Agent mocks
+   - `mergePolicies: { system_prompt: 'prepend' as const, skills: 'merge' as const, mcp_endpoints: 'merge' as const }` with literal types
+   - `providerConfig: { provider: null, baseUrl: null, deployment: null, apiVersion: null, hasApiKey: false }` for TenantDetail
+   - `lastLogin` field to Member mocks
+   - `created_at` field to Conversation, Partition, and Invite mocks
+   - Fixed mock function return types (void vs objects)
+3. **Imported `type Mock` from vitest** and used proper typing for mock functions
+4. **Fixed literal types** for role, parent_id, and other union-constrained fields
+
+**Files Modified:**
+- `portal/src/vite-env.d.ts` (created)
+- `portal/src/components/__tests__/AgentEditor.test.tsx`
+- `portal/src/components/__tests__/AgentSandbox.test.tsx`
+- `portal/src/components/__tests__/AppLayout.test.tsx`
+- `portal/src/components/__tests__/ModelListEditor.test.tsx`
+- `portal/src/components/__tests__/ProviderConfigForm.test.tsx`
+- `portal/src/components/__tests__/shared-AnalyticsPage.test.tsx`
+- `portal/src/components/__tests__/shared-TimeseriesCharts.test.tsx`
+- `portal/src/components/__tests__/TenantSwitcher.test.tsx`
+- `portal/src/context/__tests__/AuthContext.test.tsx`
+- `portal/src/pages/__tests__/AgentsPage.test.tsx`
+- `portal/src/pages/__tests__/ApiKeysPage.test.tsx`
+- `portal/src/pages/__tests__/ConversationsPage.test.tsx`
+- `portal/src/pages/__tests__/DashboardHome.test.tsx`
+- `portal/src/pages/__tests__/MembersPage.test.tsx`
+- `portal/src/pages/__tests__/SandboxPage.test.tsx`
+- `portal/src/pages/__tests__/SettingsPage.test.tsx`
+- `portal/src/pages/__tests__/SignupPage.test.tsx`
+
+**Verification:**
+✅ `npm run build` completes successfully
+✅ Vite build produces dist/index.html and bundled assets
+✅ All TypeScript errors resolved
+
+**Takeaway:**
+When API types change (especially adding required fields or restricting to literal unions), all test mocks must be updated. Creating proper type declaration files (like vite-env.d.ts) prevents environment-specific type errors.

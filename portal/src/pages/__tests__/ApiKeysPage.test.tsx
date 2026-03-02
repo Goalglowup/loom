@@ -35,7 +35,7 @@ const mockKeys = [
 ];
 
 const mockAgents = [
-  { id: 'a1', name: 'Alpha', systemPrompt: '', skills: [], mcpEndpoints: [], availableModels: null, mergePolicies: null, conversations_enabled: false, conversation_token_limit: 4000, conversation_summary_model: null },
+  { id: 'a1', name: 'Alpha', systemPrompt: '', skills: [], mcpEndpoints: [], availableModels: null, mergePolicies: { system_prompt: 'prepend' as const, skills: 'merge' as const, mcp_endpoints: 'merge' as const }, conversations_enabled: false, conversation_token_limit: 4000, conversation_summary_model: null, createdAt: '2024-01-01T00:00:00Z' },
 ];
 
 function renderPage() {
@@ -125,7 +125,7 @@ describe('ApiKeysPage', () => {
   it('revokes API key when revoke button is clicked', async () => {
     vi.mocked(api.listApiKeys).mockResolvedValue({ apiKeys: mockKeys });
     vi.mocked(api.listAgents).mockResolvedValue({ agents: mockAgents });
-    vi.mocked(api.revokeApiKey).mockResolvedValue({ success: true });
+    vi.mocked(api.revokeApiKey).mockResolvedValue(undefined);
     global.confirm = vi.fn(() => true);
     const user = userEvent.setup();
     renderPage();

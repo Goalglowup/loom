@@ -1,6 +1,6 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest';
 import AgentEditor from '../AgentEditor';
 
 vi.mock('../../lib/api', () => ({
@@ -29,15 +29,16 @@ const mockAgent = {
   skills: [],
   mcpEndpoints: [],
   availableModels: null,
-  mergePolicies: { system_prompt: 'prepend', skills: 'merge', mcp_endpoints: 'merge' },
+  mergePolicies: { system_prompt: 'prepend' as const, skills: 'merge' as const, mcp_endpoints: 'merge' as const },
   conversations_enabled: false,
   conversation_token_limit: 4000,
   conversation_summary_model: null,
+  createdAt: '2024-01-01T00:00:00Z',
 };
 
 describe('AgentEditor', () => {
-  let onSave: ReturnType<typeof vi.fn>;
-  let onCancel: ReturnType<typeof vi.fn>;
+  let onSave: Mock<(agent: any) => void>;
+  let onCancel: Mock<() => void>;
 
   beforeEach(() => {
     onSave = vi.fn();
@@ -53,6 +54,7 @@ describe('AgentEditor', () => {
         skills: [],
         mcpEndpoints: [],
         systemPrompt: 'Be helpful',
+        mergePolicies: { system_prompt: 'prepend' as const, skills: 'merge' as const, mcp_endpoints: 'merge' as const },
       },
     });
   });

@@ -25,8 +25,8 @@ vi.mock('../../components/AgentSandbox', () => ({
 import { api } from '../../lib/api';
 
 const mockAgents = [
-  { id: 'a1', name: 'Alpha', systemPrompt: 'Be helpful', availableModels: null, skills: [], mcpEndpoints: [], mergePolicies: null, conversations_enabled: false, conversation_token_limit: 4000, conversation_summary_model: null },
-  { id: 'a2', name: 'Beta', systemPrompt: 'Be concise', availableModels: null, skills: [], mcpEndpoints: [], mergePolicies: null, conversations_enabled: false, conversation_token_limit: 4000, conversation_summary_model: null },
+  { id: 'a1', name: 'Alpha', systemPrompt: 'Be helpful', availableModels: null, skills: [], mcpEndpoints: [], mergePolicies: { system_prompt: 'prepend' as const, skills: 'merge' as const, mcp_endpoints: 'merge' as const }, conversations_enabled: false, conversation_token_limit: 4000, conversation_summary_model: null, createdAt: '2024-01-01T00:00:00Z' },
+  { id: 'a2', name: 'Beta', systemPrompt: 'Be concise', availableModels: null, skills: [], mcpEndpoints: [], mergePolicies: { system_prompt: 'prepend' as const, skills: 'merge' as const, mcp_endpoints: 'merge' as const }, conversations_enabled: false, conversation_token_limit: 4000, conversation_summary_model: null, createdAt: '2024-01-01T00:00:00Z' },
 ];
 
 function renderPage() {

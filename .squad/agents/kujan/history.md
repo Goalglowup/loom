@@ -61,3 +61,20 @@
 
 **Impact:** Full CI/CD pipeline ready for beta launch. Infra scales from image build to Azure deployment with safety guards.
 
+
+### PostgreSQL + Azurerm Backend ($(date +%Y-%m-%d))
+- Added `azurerm_postgresql_flexible_server` resource (`B_Standard_B1ms`, PG 15, 32 GB) to `resources.tf`
+- Added `azurerm_postgresql_flexible_server_database` for database named `arachne` (UTF8 / en_US.utf8)
+- Added `db_admin_password` sensitive variable to `variables.tf`
+- Added sensitive `database_url` output to `outputs.tf` constructed from server FQDN + credentials
+- Replaced stale "provision manually" comment in `resources.tf` with actual TF resources
+- Added `backend "azurerm"` block to `terraform {}` in `main.tf` with placeholder values overrideable via `-backend-config` at init time
+- Added bootstrap CLI comment in `main.tf` for creating the TF state storage account (chicken-and-egg pattern — not managed by this TF config)
+- Refactored flat `resources.tf` into 4 modules: `observability`, `keyvault`, `database`, `container_apps`
+- Added Azure Key Vault (`azurerm_key_vault`) with user-assigned managed identity; deployer gets full CRUD access, app identity gets read-only
+- DB admin password is now auto-generated via `random_password` inside the keyvault module — no longer a manual input variable
+- Container App gateway secrets now use `key_vault_secret_id` + managed identity instead of inline plaintext values (requires azurerm ≥ 3.87.0)
+- `database_url` KV secret is created as a root-level resource (not inside either module) to avoid circular dependency: keyvault module generates the DB password, database module produces the FQDN, root stitches them together
+- Removed `database_url` and `db_admin_password` from root `variables.tf` — both are now derived automatically
+- Bumped azurerm provider constraint from `~> 3.0` to `~> 3.87` to unlock `key_vault_secret_id` on Container App secret blocks
+- Added `random` provider `~> 3.0` to root terraform block (forwarded to keyvault module which also declares it)

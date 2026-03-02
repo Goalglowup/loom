@@ -31,10 +31,11 @@ const mockAgent = {
   availableModels: null,
   skills: [],
   mcpEndpoints: [],
-  mergePolicies: null,
+  mergePolicies: { system_prompt: 'prepend' as const, skills: 'merge' as const, mcp_endpoints: 'merge' as const },
   conversations_enabled: false,
   conversation_token_limit: 4000,
   conversation_summary_model: null,
+  createdAt: '2024-01-01T00:00:00Z',
 };
 
 describe('AgentSandbox', () => {
@@ -66,8 +67,8 @@ describe('AgentSandbox', () => {
   it('sends message and displays user and assistant messages', async () => {
     vi.mocked(api.sandboxChat).mockResolvedValue({
       message: { role: 'assistant', content: 'Hello! How can I help?' },
+      model: 'gpt-4',
       usage: { prompt_tokens: 10, completion_tokens: 8, total_tokens: 18 },
-      conversation_id: null,
     });
     const user = userEvent.setup();
     render(<AgentSandbox agent={mockAgent} />);
@@ -93,8 +94,8 @@ describe('AgentSandbox', () => {
 
     resolveChat({
       message: { role: 'assistant', content: 'Done' },
-      usage: null,
-      conversation_id: null,
+      model: 'gpt-4',
+      usage: { prompt_tokens: 5, completion_tokens: 1, total_tokens: 6 },
     });
     await waitFor(() => expect(screen.queryByText(/thinking/i)).not.toBeInTheDocument());
   });
@@ -113,8 +114,8 @@ describe('AgentSandbox', () => {
   it('sends message via Enter key', async () => {
     vi.mocked(api.sandboxChat).mockResolvedValue({
       message: { role: 'assistant', content: 'Reply' },
-      usage: null,
-      conversation_id: null,
+      model: 'gpt-4',
+      usage: { prompt_tokens: 5, completion_tokens: 1, total_tokens: 6 },
     });
     const user = userEvent.setup();
     render(<AgentSandbox agent={mockAgent} />);
@@ -126,8 +127,8 @@ describe('AgentSandbox', () => {
   it('clears input after sending', async () => {
     vi.mocked(api.sandboxChat).mockResolvedValue({
       message: { role: 'assistant', content: 'Hi!' },
-      usage: null,
-      conversation_id: null,
+      model: 'gpt-4',
+      usage: { prompt_tokens: 5, completion_tokens: 1, total_tokens: 6 },
     });
     const user = userEvent.setup();
     render(<AgentSandbox agent={mockAgent} />);

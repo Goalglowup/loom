@@ -37,8 +37,8 @@ import { api } from '../../lib/api';
 import { getToken } from '../../lib/auth';
 
 const mockAgents = [
-  { id: 'a1', name: 'Alpha', systemPrompt: 'Be helpful', skills: [], mcpEndpoints: [], availableModels: null, mergePolicies: null, conversations_enabled: false, conversation_token_limit: 4000, conversation_summary_model: null },
-  { id: 'a2', name: 'Beta', systemPrompt: 'Be concise', skills: ['skill1'], mcpEndpoints: ['endpoint1'], availableModels: null, mergePolicies: null, conversations_enabled: false, conversation_token_limit: 4000, conversation_summary_model: null },
+  { id: 'a1', name: 'Alpha', systemPrompt: 'Be helpful', skills: [], mcpEndpoints: [], availableModels: null, mergePolicies: { system_prompt: 'prepend' as const, skills: 'merge' as const, mcp_endpoints: 'merge' as const }, conversations_enabled: false, conversation_token_limit: 4000, conversation_summary_model: null, createdAt: '2024-01-01T00:00:00Z' },
+  { id: 'a2', name: 'Beta', systemPrompt: 'Be concise', skills: [{ name: 'skill1', description: 'A skill' }], mcpEndpoints: [{ name: 'endpoint1', url: 'http://example.com' }], availableModels: null, mergePolicies: { system_prompt: 'prepend' as const, skills: 'merge' as const, mcp_endpoints: 'merge' as const }, conversations_enabled: false, conversation_token_limit: 4000, conversation_summary_model: null, createdAt: '2024-01-01T00:00:00Z' },
 ];
 
 function renderPage() {
@@ -95,7 +95,7 @@ describe('AgentsPage', () => {
 
   it('deletes agent when delete button is clicked and confirmed', async () => {
     vi.mocked(api.listAgents).mockResolvedValue({ agents: mockAgents });
-    vi.mocked(api.deleteAgent).mockResolvedValue({ success: true });
+    vi.mocked(api.deleteAgent).mockResolvedValue(undefined);
     global.confirm = vi.fn(() => true);
     const user = userEvent.setup();
     renderPage();
