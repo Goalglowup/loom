@@ -59,22 +59,3 @@ export default function App() {
     </AuthProvider>
   );
 }
-
-          <Route index element={<DashboardHome />} />
-          <Route path="settings" element={<SettingsPage />} />
-          <Route path="api-keys" element={<ApiKeysPage />} />
-          <Route path="traces" element={<TracesPage />} />
-          <Route path="analytics" element={<AnalyticsPage />} />
-          <Route path="members" element={<MembersPage />} />
-          <Route path="subtenants" element={<SubtenantsPage />} />
-          <Route path="agents" element={<AgentsPage />} />
-          <Route path="sandbox" element={<SandboxPage />} />
-          <Route path="conversations" element={<ConversationsPage />} />
-          <Route path="knowledge-bases" element={<KnowledgeBasesPage />} />
-          <Route path="deployments" element={<DeploymentsPage />} />
-        </Route>
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
-    </AuthProvider>
-  );
-}
