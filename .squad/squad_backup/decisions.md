@@ -1,5 +1,39 @@
 # Team Decisions
 
+## 2026-03-03: Beta Signup Proxy Fix — nginx Host Header & Infrastructure
+
+**By:** Fenster (Backend), Hockney (Tester), Kujan (DevOps)  
+**PR:** #97  
+**Branch:** `feature/fix-beta-signup-proxy`
+
+### nginx proxy Host Header Must Match Upstream FQDN for Azure Container Apps
+**Decision:** Hardcode gateway FQDN in `proxy_set_header Host` directive; enable SNI with `proxy_ssl_server_name on`.  
+**Rationale:** ACA routes traffic by Host header. `proxy_set_header Host $host` forwards the client's host (portal domain `arachne-ai.com`) to the gateway, causing ACA to reject the request. Fixed by:
+- `proxy_set_header Host ca-arachne-gateway-prod.happysea-1e8f1a10.centralus.azurecontainerapps.io;`
+- `proxy_ssl_server_name on;` for SNI support
+**Impact:** Beta signup form POST now routes correctly to the gateway; silent failures eliminated.
+
+### Beta Signup Coverage Gap — Email Validation Whitespace Ordering
+**Reporter:** Hockney (Tester)  
+**Severity:** Low (UX issue, not security/data integrity)  
+**Issue:** Email validation regex runs BEFORE trimming, rejecting valid emails with leading/trailing whitespace.
+- Input `"  user@example.com  "` → 400 error (regex rejects)
+- Input `"user@example.com"` → 201 success (trimmed later)
+
+**Recommendation:** Trim email BEFORE validation (1-line change in `src/routes/beta.ts`):
+```typescript
+const trimmedEmail = email.toLowerCase().trim();
+if (!trimmedEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) {
+  return reply.code(400).send({ error: 'Valid email is required' });
+}
+```
+**Test Coverage:** Hockney wrote 10 tests for POST /v1/beta/signup; test for whitespace will need updating if validation order is fixed.
+
+### Local Dev Postgres Image Must Be pgvector/pgvector:pg16
+**Decision:** Use `pgvector/pgvector:pg16` instead of `postgres:16-alpine` in `docker-compose.yml`.  
+**Rationale:** pgvector extension required for migration 015 (kb_chunks embeddings table). Alpine image does not include pgvector; migrations fail locally without it.
+**Impact:** Developers can now run full migration suite locally without manual pgvector extension installation.
+
 ## 2026-03-02: CI and GHCR Publish Workflows
 
 **By:** Kujan (DevOps)  
@@ -2413,133 +2447,3 @@ The `exclude` approach is the minimal, idiomatic fix. TypeScript docs recommend 
 - Docker build now succeeds
 - 635 existing tests continue to pass (Vitest uses its own config)
 
-
----
-
-# Decision: Admin must_change_password Implementation
-
-**Date:** 2025-03-02  
-**Author:** Fenster (Backend Dev)  
-**Status:** Implemented
-
-## Context
-
-Admin users needed ability to be forced to change their password on first login or after password reset. Seed admin user created with default password should require password change.
-
-## Decision
-
-Implemented `must_change_password` boolean flag on `admin_users` table with supporting API endpoint:
-
-### Migration
-- Added `must_change_password` column (boolean, NOT NULL, default false)
-- Seed admin user automatically flagged with `must_change_password = true`
-
-### Service Layer
-- `AdminService.validateAdminLogin()` now returns `mustChangePassword` flag
-- New `changeAdminPassword()` validates current password before change
-- New `forceChangeAdminPassword()` allows change without current password verification
-- Both methods clear `must_change_password` flag on success
-- Password hashing extracted to `hashPassword()` helper using scrypt (matches existing pattern)
-
-### API Layer
-- Login response includes `mustChangePassword: boolean`
-- New `POST /v1/admin/auth/change-password` endpoint (authenticated)
-  - Body: `{ currentPassword?: string, newPassword: string }`
-  - If `currentPassword` provided: verify before change
-  - If omitted: force change (useful when `mustChangePassword` is true)
-  - Validates `newPassword` >= 8 characters
-  - Returns 400 if current password incorrect
-
-## Rationale
-
-- **Security:** Forces password change for default credentials
-- **Flexibility:** Two change modes (verified vs. forced) support different workflows
-- **UX:** Login response signals UI to prompt password change
-- **Separation of concerns:** Validation at route layer, business logic in service layer
-
-## Consequences
-
-- Seed admin cannot use system without changing default password
-- Admins can change their own password securely
-- Clean API for future password management features
-
-## Related Files
-- `migrations/1000000000018_admin-must-change-password.cjs`
-- `src/domain/entities/AdminUser.ts`
-- `src/domain/schemas/AdminUser.schema.ts`
-- `src/application/services/AdminService.ts`
-- `src/routes/admin.ts`
-
----
-
-# Decision: Password Change UI Implementation
-
-**Date:** 2025-01-27  
-**Status:** Implemented  
-**Owner:** McManus (Frontend Dev)
-
-## Context
-
-Admin users need the ability to change their passwords. Two scenarios:
-1. **Forced change**: Backend requires password change before access (first login, expired password, etc.)
-2. **Voluntary change**: Admin wants to update their password proactively
-
-## Decision
-
-### Force-Change-Password Flow
-
-When the login API returns `mustChangePassword: true`:
-- Show `ForceChangePassword` modal (non-dismissible)
-- User MUST complete password change before accessing admin portal
-- API endpoint: `POST /v1/admin/auth/change-password` with `{ newPassword }` only
-- Uses existing auth token from login response
-- No `currentPassword` field required (backend trusts the forced-change flag)
-
-**Why non-dismissible:** User cannot bypass the requirement. No close button, no overlay click handler.
-
-### Voluntary Password Change
-
-Added "Change Password" button in admin panel header:
-- Shows `ChangePasswordModal` (dismissible)
-- Requires `currentPassword` for security
-- API endpoint: `POST /v1/admin/auth/change-password` with `{ currentPassword, newPassword }`
-- Shows success message then auto-closes after 1.5s
-
-**Why dismissible:** Optional action. User can close and continue working.
-
-### UI/UX Choices
-
-**Placement:**
-- Button placed in admin header next to Logout
-- Grouped in `.admin-header-actions` for visual cohesion
-
-**Styling:**
-- Change Password: purple outline button (matches Arachne primary color)
-- Logout: gray filled button (secondary action)
-- Hover states: filled purple vs darker gray
-
-**Validation:**
-- Minimum 8 characters (client-side)
-- Password confirmation match (client-side)
-- Backend errors shown inline
-
-**Accessibility:**
-- ARIA labels on all inputs
-- Modal `role="dialog"` with `aria-modal="true"`
-- Keyboard focus management (autofocus on first input)
-
-## Implementation Files
-
-**New:**
-- `dashboard/src/components/ForceChangePassword.tsx`
-- `dashboard/src/components/ForceChangePassword.css`
-- `dashboard/src/components/ChangePasswordModal.tsx`
-- `dashboard/src/components/ChangePasswordModal.css`
-
-**Modified:**
-- `dashboard/src/components/AdminLogin.tsx`
-- `dashboard/src/pages/AdminPage.tsx`
-- `dashboard/src/pages/AdminPage.css`
-
-## Related Work
-- Backend endpoint: `POST /v1/admin/auth/change-password`

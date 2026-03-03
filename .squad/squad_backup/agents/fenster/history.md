@@ -1695,48 +1695,25 @@ const t = Object.assign(Object.create(Tenant.prototype) as Tenant, {
 
 ---
 
-### Admin Password Management — must_change_password Flag
+## 2026-03-03: Beta Signup Proxy Fix (#97)
 
-**Implementation (COMPLETED)**
-- **Migration 18:** Added `must_change_password` boolean to `admin_users` table, defaulting to false; seed admin user forced to change password
-- **AdminUser entity:** Added `mustChangePassword: boolean` field
-- **AdminUserSchema:** Mapped `mustChangePassword` to `must_change_password` column
-- **AdminService:** 
-  - Updated `validateAdminLogin` to SELECT and return `mustChangePassword` flag
-  - Added `hashPassword()` helper using scrypt (matching existing pattern with randomBytes)
-  - Added `changeAdminPassword(id, currentPassword, newPassword)` with verification
-  - Added `forceChangeAdminPassword(id, newPassword)` for self-service when flag is set
-- **Admin routes:**
-  - Login response now includes `mustChangePassword: boolean`
-  - New `POST /v1/admin/auth/change-password` endpoint (requires auth)
-    - Accepts `{ currentPassword?, newPassword }`
-    - Validates newPassword >= 8 chars
-    - Uses `changeAdminPassword` if currentPassword provided, else `forceChangeAdminPassword`
-    - Clears `must_change_password` flag on success
+**Problem:** Beta signup form POST to `/v1/beta/signup` failing silently in production. Form worked locally but failed when deployed to Azure Container Apps.
 
-**Key patterns used:**
-- Migration SQL to update seed user: `UPDATE admin_users SET must_change_password = true WHERE username = 'admin'`
-- AdminService returns enriched DTOs (not raw entities)
-- Route handler checks `request.adminUser.sub` for authenticated admin ID (from middleware)
-- Password validation at route layer (8-char minimum)
-- Service layer handles both verified and forced password changes
+**Investigation:**
+- Confirmed route registration: `registerBetaRoutes()` called in `src/index.ts` ✓
+- Confirmed migration: `1000000000017_beta_signups.cjs` correct ✓
+- Confirmed CORS: ALLOWED_ORIGINS set correctly ✓
+- **Found bug:** `nginx.portal.conf` used `proxy_set_header Host $host;` which forwards client hostname to gateway
 
-**Impact:** Admins can be forced to change password on first login; seed user requires password change; clean separation of concerns between route validation and service logic.
+**Root Cause:** Azure Container Apps routes by Host header. Nginx was sending portal's hostname (`arachne-ai.com`) instead of gateway's FQDN. ACA rejected requests because Host didn't match the gateway service.
 
+**Fix (PR #97):**
+- Changed `proxy_set_header Host $host;` → `proxy_set_header Host ca-arachne-gateway-prod.happysea-1e8f1a10.centralus.azurecontainerapps.io;`
+- Added `proxy_ssl_server_name on;` for SNI support with HTTPS upstream
 
----
+**Learnings:**
+- **ACA Host header routing:** Unlike traditional reverse proxies, ACA requires Host header to match upstream service's FQDN. Using `$host` (client hostname) causes routing failures.
+- **nginx SNI:** When proxying to HTTPS upstream with a hardcoded Host header, must enable `proxy_ssl_server_name on;` for proper TLS handshake.
+- **Debugging proxy issues:** Check nginx config first when API calls work locally but fail in cloud environments with reverse proxy layers.
 
-## Session: Must Change Password Feature (2026-03-03)
-
-**Status:** ✅ COMPLETE  
-**Coordination:** Fenster (backend) + McManus (frontend)
-
-Implemented forced password change for admin users:
-- Added `must_change_password` migration and schema
-- Implemented AdminService methods for verified and forced password changes
-- Created `POST /v1/admin/auth/change-password` endpoint
-- All tests passing (28 admin tests)
-- TypeScript compilation clean
-
-**Deliverable:** Backend ready for UI integration
-**Next:** Production deployment (E2E testing in progress by McManus)
+**Decision:** Documented in `.squad/decisions.md` under "nginx proxy Host Header Must Match Upstream FQDN for Azure Container Apps"
