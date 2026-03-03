@@ -23,8 +23,8 @@ COPY portal/ ./portal/
 WORKDIR /app/portal
 RUN npm run build
 
-# Serve stage — pin to stable nginx (mainline 1.29.x enforces HTTP/2 upgrade compliance
-# strictly, returning 426 on Azure Container Apps ingress which passes h2c upgrade headers)
+# Serve stage — nginx.portal.conf enables http2 (h2c) on port 80 so Azure Container
+# Apps Envoy ingress Upgrade: h2c negotiation succeeds instead of returning 426.
 FROM nginx:stable-alpine
 
 # Copy custom nginx config
