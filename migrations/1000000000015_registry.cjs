@@ -63,7 +63,7 @@ exports.up = async (pgm) => {
       references: '"vector_spaces"',
     },
     chunk_count: { type: 'int' },
-    metadata: { type: 'jsonb', default: "'{}'" },
+    metadata: { type: 'jsonb', default: pgm.func("'{}'") },
     created_at: { type: 'timestamp', default: pgm.func('now()') },
   });
   pgm.addConstraint(
@@ -111,7 +111,7 @@ exports.up = async (pgm) => {
     source_path: { type: 'varchar(500)' },
     token_count: { type: 'int' },
     embedding: { type: 'vector(1536)' },
-    metadata: { type: 'jsonb', default: "'{}'" },
+    metadata: { type: 'jsonb', default: pgm.func("'{}'") },
     created_at: { type: 'timestamp', default: pgm.func('now()') },
   });
   pgm.createIndex('kb_chunks', ['artifact_id'], {
