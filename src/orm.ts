@@ -14,12 +14,18 @@ export async function initOrm(overrides?: Partial<Options>): Promise<MikroORM> {
   const driverType = (process.env.DB_DRIVER ?? 'postgres') as DriverType;
   const driver = DRIVER_MAP[driverType] ?? PostgreSqlDriver;
 
+  const clientUrl =
+    process.env.DATABASE_URL ?? 'postgres://loom:loom_dev_password@localhost:5432/loom';
+  const useSSL = clientUrl.includes('sslmode=require') || clientUrl.includes('sslmode=verify');
+
   const config: Options = {
     driver,
-    clientUrl:
-      process.env.DATABASE_URL ?? 'postgres://loom:loom_dev_password@localhost:5432/loom',
+    clientUrl,
     entities: allSchemas,
     debug: process.env.NODE_ENV === 'development',
+    ...(useSSL && driverType === 'postgres'
+      ? { driverOptions: { connection: { ssl: { rejectUnauthorized: false } } } }
+      : {}),
     ...overrides,
   };
 

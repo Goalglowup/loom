@@ -1,6 +1,6 @@
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest';
 import ProviderConfigForm from '../ProviderConfigForm';
 import type { ProviderConfigSafe, ProviderConfig } from '../../lib/api';
 
@@ -13,7 +13,7 @@ const emptyConfig: ProviderConfigSafe = {
 };
 
 describe('ProviderConfigForm', () => {
-  let onSave: ReturnType<typeof vi.fn>;
+  let onSave: Mock<(config: ProviderConfig) => Promise<void>>;
 
   beforeEach(() => {
     onSave = vi.fn().mockResolvedValue(undefined);

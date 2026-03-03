@@ -1,12 +1,12 @@
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest';
 import ModelListEditor from '../ModelListEditor';
 
 const defaultModels = ['gpt-4o', 'gpt-3.5-turbo'];
 
 describe('ModelListEditor', () => {
-  let onChange: ReturnType<typeof vi.fn>;
+  let onChange: Mock<(models: string[] | null) => void>;
 
   beforeEach(() => {
     onChange = vi.fn();

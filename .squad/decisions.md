@@ -1,4 +1,98 @@
 # Team Decisions
+
+## 2026-03-02: CI and GHCR Publish Workflows
+
+**By:** Kujan (DevOps)  
+**Issues:** #85, #86  
+
+### CI Workflow (`.github/workflows/ci.yml`)
+- Triggers on PR to `main` and `dev`
+- Two parallel jobs: `test` and `lint`
+- `test` installs root + `cli/` deps, runs `vitest run`, builds root and cli
+- `lint` installs root deps, runs `npm run lint --if-present` (graceful no-op if script absent)
+- Uses `actions/checkout@v4`, `actions/setup-node@v4` with npm cache, Node 20
+
+### Publish Workflow (`.github/workflows/publish.yml`)
+- Triggers on push to `main` only (not dev — images only from stable branch)
+- Single `publish` job with `packages: write` permission for GHCR auth
+- Builds and pushes two images: `arachne-gateway` and `arachne-portal`
+- Tags: `:latest` and `:<full-sha>` for traceability
+- Package visibility must be set to public manually in GitHub Settings → Packages after first push
+
+### Key Decisions
+- **No build matrix** — single Node 20 target; matrix can be added later if needed
+- **GITHUB_TOKEN for GHCR** — no external secrets required; token has `packages: write` via job permission
+- **SHA tag** — full commit SHA used (not short) for precision; matches GitHub's `github.sha` context
+- **Portal image** — uses `context: .` (repo root) because Dockerfile.portal likely references portal/ subdirectory
+
+## 2026-03-02: Terraform Azure Infra + Deploy Workflow
+
+**By:** Kujan (DevOps)  
+**Issues:** #87, #88  
+
+### Key Decisions
+- **`workflow_run` trigger:** Deploy waits for publish workflow completion to ensure GHCR images exist (avoids race conditions)
+- **Secrets as Terraform variables (v1):** DATABASE_URL, MASTER_KEY, JWT_SECRET, ADMIN_JWT_SECRET passed as sensitive `TF_VAR_*` env vars; Key Vault deferred to v2
+- **Database NOT in Terraform (v1):** PostgreSQL provisioned manually to prevent accidental `terraform destroy` wiping production data; will import in v2
+- **Image override variables:** `gateway_image` and `portal_image` default to empty string; fall back to `:latest` when empty (allows local `terraform plan/apply` without real SHA)
+- **SIGNUPS_ENABLED=false hardcoded:** Static env var, visible in plan, clearly documents invite-only beta decision
+- **Resource asymmetry:** Gateway (0.5 CPU / 1 GiB) for AI proxy compute; Portal (0.25 CPU / 0.5 GiB) for static React bundle
+
+## 2026-03-02: Beta Launch Backend — Signups & CORS
+
+**By:** Fenster (Backend)  
+**Issues:** #75, #79, #84  
+
+### SIGNUPS_ENABLED Semantics
+**Decision:** Treat any value other than `"false"` as signups-enabled (not `=== "true"` check).  
+**Rationale:** Safer default — if the env var is accidentally unset or misspelled, signups remain open rather than silently locking out users.
+
+### Config Module
+**Decision:** Created dedicated `src/config.ts` module for app-wide config helpers rather than inlining checks.  
+**Rationale:** Single source of truth; reusable across modules (e.g., future admin overrides); consistent with team preference for explicit module boundaries.
+
+### HTTP Status for Disabled Signups
+**Decision:** Return HTTP 503 (Service Unavailable) when signups are disabled, not 401 (Unauthorized).  
+**Rationale:** 401 implies authentication failure; 503 correctly signals the service is intentionally unavailable. Portal UI can display waitlist CTA on 503.
+
+### Beta Signups — No Auth
+**Decision:** `POST /v1/beta/signup` is a fully public endpoint with no authentication.  
+**Rationale:** Pre-signup users have no credentials; rate limiting can be added later at the nginx/load-balancer layer if needed.
+
+### Duplicate Email Response
+**Decision:** Return HTTP 200 `{ status: "already_registered" }` for duplicate beta signups rather than 409.  
+**Rationale:** From the user's perspective, their email is already on the list — this is a successful outcome. 409 would surface as an error in the UI unnecessarily.
+
+### CORS Already Implemented
+**Decision:** No code change needed for #84; `src/index.ts` already had the correct ALLOWED_ORIGINS parsing.  
+**Rationale:** Verified existing code correctly splits comma-separated origins and falls back to `true` (permissive) when unset. Only .env.example documentation was missing.
+
+## 2026-03-02: Beta Launch Frontend Sprint
+
+**By:** McManus (Frontend Dev)  
+**Issues:** #71, #72, #74, #76, #77, #78, #80, #81, #82, #83  
+
+### Beta Signup Form — Direct Fetch
+**Decision:** Beta signup form uses direct `fetch`, not the `api` module.  
+**Rationale:** `/v1/beta/signup` is unauthenticated and doesn't fit the existing `api.ts` request helper pattern (no token, different error shape). Inline fetch directly in `LandingPage.tsx` using `import.meta.env.VITE_API_BASE_URL` as base.
+
+### VITE_API_BASE_URL Already Wired
+**Decision:** No migration needed; `portal/src/lib/api.ts` already declared `const API_BASE = import.meta.env.VITE_API_BASE_URL ?? ''`.  
+**Rationale:** No hardcoded gateway URLs existed in portal source. Only change was creating `portal/.env.example` to document the variable.
+
+### CLI Default URL Already Set
+**Decision:** Closed #72 without code changes; `cli/src/config.ts` already defaulted to `https://api.arachne-ai.com`.  
+**Rationale:** Feature already shipped; docs only update needed.
+
+### CLI Init Config Fullness
+**Decision:** `arachne init` saves full config (gatewayUrl + token), not just one field.  
+**Rationale:** Consistent with `login.ts` which also calls `writeConfig({ gatewayUrl, token })`. Existing config read first so defaults are pre-filled.
+
+### Footer Placement
+**Decision:** Footer is on public pages only (LandingPage, PrivacyPage, AboutPage), not AppLayout.  
+**Rationale:** AppLayout sidebar footer is a "sign out" button for authenticated users. Public-facing Synaptic Weave copyright/links footer lives as inline footers on relevant pages. Kept minimal—no separate Footer component created.
+
+# Team Decisions
 ## 2026-02-27: Subtenant Hierarchy with Self-Foreign Key
 
 **By:** Fenster (Backend)  
@@ -2192,3 +2286,130 @@ New tables:
 **Why:** README is a product homepage for repo visitors, not an API reference. Developers should understand what Arachne does immediately; implementation details belong in a dedicated developer guide indexed from architecture.
 
 **Impact:** Clearer positioning; reduced cognitive load (~55-line README vs ~240); implementation details discoverable but not blocking first-time users
+
+## 2026-03-02: Modular Terraform + Azure Key Vault for Secret Management
+
+**By:** Kujan (DevOps / Infrastructure Engineer)  
+**Status:** Accepted
+
+### Context
+
+The original `terraform/resources.tf` was a single flat file containing all Azure resources. Secrets (DB password, JWT keys, master key) were passed as plain Terraform input variables and stored as inline Container App secrets — not stored in Key Vault.
+
+### Decision
+
+Refactor the Terraform configuration into 4 child modules and introduce Azure Key Vault with a user-assigned managed identity.
+
+**Module split:**
+- `modules/observability` — Log Analytics workspace
+- `modules/keyvault` — Key Vault, user-assigned identity, access policies, secrets, `random_password`
+- `modules/database` — PostgreSQL Flexible Server, pgvector config, firewall rule, database
+- `modules/container_apps` — Container App Environment, gateway app, portal app
+
+**Key Vault design:**
+- User-assigned managed identity (`azurerm_user_assigned_identity`) is created inside the keyvault module; its resource ID is threaded into Container Apps via `identity_ids`.
+- Deployer access policy: Get, Set, Delete, List, Purge, Recover — needed for `terraform apply`.
+- App identity access policy: Get only — least-privilege at runtime.
+- DB admin password is auto-generated by `random_password` (24 chars, mixed case + numeric + special) — no longer a manual input.
+
+**Container App secrets:**
+Gateway secrets now use `key_vault_secret_id` + `identity` on each secret block instead of inline plaintext values. This requires azurerm provider `~> 3.87`.
+
+**Circular dependency resolution:**
+The `database_url` connection string depends on both the DB FQDN (from `module.database`) and the DB password (from `module.keyvault`). To avoid a circular reference, `azurerm_key_vault_secret.database_url` is defined as a root-level resource after both modules resolve, with `depends_on = [module.keyvault]`.
+
+### Consequences
+
+- `database_url` and `db_admin_password` are no longer root input variables — consumers must remove them from `terraform.tfvars` / CI secrets.
+- `master_key`, `jwt_secret`, `admin_jwt_secret` remain as sensitive input variables (they must be supplied externally; only the DB password is auto-generated).
+- azurerm provider minimum version is now `~> 3.87` (was `~> 3.0`).
+- Fresh deploys only — no `terraform state mv` required as there is no existing infrastructure.
+
+## 2026-03-02: PostgreSQL Flexible Server now managed by Terraform
+
+**By:** Kujan (DevOps)  
+**Status:** Accepted
+
+### Context
+
+The original `resources.tf` contained a placeholder comment deferring PostgreSQL provisioning to a manual step for beta, with Terraform support noted as a v2 goal. This created operational risk: the database connection string had to be injected as a raw variable (`var.database_url`) with no infrastructure-as-code traceability.
+
+### Decision
+
+PostgreSQL Flexible Server is now fully managed in Terraform:
+
+- **Resource:** `azurerm_postgresql_flexible_server.main` — `B_Standard_B1ms` SKU, PostgreSQL 15, 32 GB storage, zone 1
+- **Database:** `azurerm_postgresql_flexible_server_database.main` — database named `arachne`, UTF8/en_US.utf8
+- **Variable:** `var.db_admin_password` (sensitive) replaces the need to hand-construct a URL externally
+- **Output:** `database_url` (sensitive) is now derived from TF-managed FQDN, making it available to other modules or CI pipelines without manual string construction
+
+The existing `var.database_url` variable in `variables.tf` is retained for now as it is still referenced by the gateway Container App secret; a follow-up task should migrate the gateway to use the new `output.database_url` instead.
+
+**Azurerm Backend:**
+A remote `backend "azurerm"` block was added to `main.tf`. Values are placeholder defaults that should be overridden at `terraform init` time via `-backend-config` flags. The storage account is intentionally NOT managed by this Terraform config (bootstrap chicken-and-egg); creation instructions are documented in a comment in `main.tf`.
+
+### Consequences
+
+- `terraform init` now requires `-backend-config` or a `backend.hcl` file pointing to real Azure Storage
+- `db_admin_password` must be supplied at plan/apply time (e.g., `TF_VAR_db_admin_password` in CI)
+- Database changes (e.g., firewall rules, HA) can now be tracked in version control
+
+## 2026-03-02: Test Maintenance — Frontend Content Tests Drift
+
+**From:** Hockney (Tester)  
+**Date:** 2026-03-02  
+**Triggered by:** LandingPage test failures after UI redesign
+
+### Issue
+When LandingPage.tsx was redesigned (new hero headline + new feature card titles), the test assertions still referenced the old copy. This caused 2 test failures that had nothing to do with broken behavior — just stale string matchers.
+
+### Pattern
+Any test that asserts on visible UI text strings (`getByText`, `getAllByText`) will silently break when copy changes. This is especially common for:
+- Marketing landing pages (frequently redesigned)
+- Feature card titles / hero headlines
+- CTA button labels
+
+### Recommendation
+1. **Use `data-testid` for structural/functional assertions** — e.g., `data-testid="feature-cards"` so tests verify the cards exist, not their exact titles.
+2. **Reserve text assertions for contractually stable strings** — error messages, form labels, navigation links. These change less often.
+3. **When changing UI copy, search for the old string in `__tests__/`** before merging — a quick `grep -r "old text" portal/src` catches stale tests at PR time.
+
+### Action
+McManus (Frontend): Consider adding `data-testid` anchors to LandingPage feature card section and hero heading for future test stability.
+# Decision: Exclude Test Files from portal/tsconfig.json
+
+**Date:** 2025-07-14
+**Author:** McManus (Frontend Dev)
+**Requested by:** Michael Brown
+
+## Context
+
+`docker build -f Dockerfile.portal .` was failing during the `tsc && vite build` step. TypeScript was compiling test files under `src/**/__tests__/` and `src/**/*.test.tsx`, which reference `global` (a Node.js global unavailable in the browser DOM TS lib).
+
+Locally `npm run build` succeeded because Vite handles transpilation itself and doesn't surface these TS errors in the same way. Docker exposes the failure because it runs a clean `tsc` pass first.
+
+## Decision
+
+Added `"exclude"` to `portal/tsconfig.json` to explicitly remove test files from the production TypeScript compilation:
+
+```json
+"exclude": ["src/**/__tests__/**", "src/**/*.test.ts", "src/**/*.test.tsx"]
+```
+
+## Alternatives Considered
+
+1. **Add `@types/node`** — would let `global` compile, but is wrong because production browser code shouldn't have Node types mixed in.
+2. **Add a separate `tsconfig.test.json`** — cleaner long-term, but adds complexity for no immediate gain since Vitest already handles its own tsconfig via `viteEnvironment`.
+3. **Move test files outside `src/`** — invasive refactor, changes existing test structure for all 635 tests.
+
+## Rationale
+
+The `exclude` approach is the minimal, idiomatic fix. TypeScript docs recommend excluding test files from the app tsconfig when they're not part of the compiled output. This aligns with standard Vite+React+Vitest project conventions.
+
+## Impact
+
+- `portal/tsconfig.json` — one line added
+- No changes to test setup, test files, or Vite config
+- Docker build now succeeds
+- 635 existing tests continue to pass (Vitest uses its own config)
+

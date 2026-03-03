@@ -949,3 +949,154 @@ Used `adminMode?: boolean` prop pattern instead of passing full URLs/header fact
 - KB selector only shown when at least one KB exists (avoids empty-state confusion)
 - Export YAML generates a client-side blob download — no new API endpoint needed
 - Deployments page re-uses existing `authRequired` pattern; optimistic delete with rollback on error
+
+## Learnings (2026-03-02 beta launch sprint)
+
+### Files modified
+- `portal/src/pages/LandingPage.tsx` — rewrote hero copy, updated badge, 4-feature grid, added inline beta signup form with idle/loading/success/error states, updated footer to "© 2026 Synaptic Weave, Inc."
+- `portal/src/App.tsx` — added imports + routes for PrivacyPage (`/privacy`) and AboutPage (`/about`)
+
+### Files created
+- `portal/src/pages/PrivacyPage.tsx` — static privacy policy page for beta
+- `portal/src/pages/AboutPage.tsx` — about page with Arachne myth + product story
+- `portal/.env.example` — documents `VITE_API_BASE_URL=` env var
+- `cli/src/commands/init.ts` — `arachne init` interactive setup (gateway URL + masked token)
+- `cli/README.md` — npm package readme with install, quick start, command table
+
+### Patterns used
+- Beta signup form: local `useState` for `idle|loading|success|error`, direct `fetch` using `import.meta.env.VITE_API_BASE_URL` prefix, `<section id="beta-signup">` for anchor scroll
+- `VITE_API_BASE_URL` was already in `portal/src/lib/api.ts` — no API calls needed updating
+- CLI `init` command follows same pattern as `login.ts` (promptPassword, writeConfig)
+- Issue #72 (default gateway URL) was already `https://api.arachne-ai.com` in `cli/src/config.ts` — closed as already done
+
+### Issue #76: Portal signups_disabled handling
+
+**Implemented:**
+- Added `signupsDisabled` state to `portal/src/pages/SignupPage.tsx`
+- Changed the `signups_disabled` catch branch: instead of navigating away (`navigate('/')`), sets `signupsDisabled = true`
+- Renders an amber warning banner with the message "Signups are currently closed." and an `<a href="/#beta-signup">Join the beta waitlist →</a>` link
+- The form remains visible beneath the banner so users can still act if signups later re-open
+- Added test: "shows signups-disabled CTA with waitlist link when backend returns signups_disabled" in `portal/src/pages/__tests__/SignupPage.test.tsx`
+- All 11 SignupPage tests pass
+
+**Key Files:**
+- `portal/src/pages/SignupPage.tsx` — state + catch branch + amber CTA banner
+- `portal/src/pages/__tests__/SignupPage.test.tsx` — new test case
+
+---
+
+### Beta Launch Sprint — Epic #70 Completion
+
+**Wave 1 Frontend — Issues #71, #72, #74, #77, #78, #80, #81, #82, #83 (COMPLETED)**
+- **#77 Landing page rewrite:** Rebuilt with Synaptic Weave branding, hero section, signup flow
+- **#78 Beta signup form:** Integrated direct fetch to `POST /v1/beta/signup` in LandingPage (no api module, no auth)
+- **#80 VITE_API_BASE_URL:** Verified already wired in `portal/src/lib/api.ts`; created `.env.example` docs
+- **#81 Footer branding:** Added Synaptic Weave copyright/links footer to public pages (LandingPage, PrivacyPage, AboutPage)
+- **#82 Privacy page:** Implemented dedicated privacy policy page
+- **#83 About page:** Implemented dedicated about page
+- **#71 CLI init command:** Implemented `arachne init` with full config save (gatewayUrl + token)
+- **#72 CLI default URLs:** Verified already defaulted to `https://api.arachne-ai.com`; docs-only
+- **#74 CLI README:** Updated with new command structure and examples
+
+**Wave 2 Portal — Issue #76 (COMPLETED)**
+- **#76 Portal redirect:** Added client-side check for 503 response, redirect to waitlist CTA when signups disabled
+
+**Cross-team coordination:**
+- Landing page signup form calls backend's public `/v1/beta/signup` endpoint
+- Portal redirect coordinates with backend's 503 status code
+- CLI init consistent with login flow (saves full config object)
+- All base URLs via environment variables (Vite + dotenv)
+
+**Key decisions captured:**
+- Beta signup form uses direct fetch (not api module) due to public/no-auth pattern mismatch
+- Footer only on public pages (not AppLayout, which has sign-out button)
+- CLI init saves full config (gatewayUrl + token) for consistency
+- VITE_API_BASE_URL + CLI defaults already wired (docs-only updates)
+
+**Impact:** Full beta UX ready. Landing page funnels users to beta signup. Portal gracefully handles signups-disabled state. CLI configured for beta API endpoint.
+
+
+### 2024-12-26: Portal Build Type Errors Fixed
+
+**Problem:**
+The portal build was failing with TypeScript compilation errors:
+- Test files had incomplete mock objects missing required fields
+- `import.meta.env` type was undefined (Vite-specific)
+- Mock type declarations used incorrect syntax
+
+**Root Cause:**
+The Agent interface was updated to require `createdAt`, and mergePolicies type was made stricter with literal union types. Test mocks weren't updated accordingly. Additionally, no vite-env.d.ts existed to declare import.meta types.
+
+**Solution:**
+1. **Created `portal/src/vite-env.d.ts`** to declare ImportMeta and ImportMetaEnv types for Vite environment
+2. **Fixed test mocks across all test files** by adding missing required fields:
+   - `createdAt: '2024-01-01T00:00:00Z'` to Agent mocks
+   - `mergePolicies: { system_prompt: 'prepend' as const, skills: 'merge' as const, mcp_endpoints: 'merge' as const }` with literal types
+   - `providerConfig: { provider: null, baseUrl: null, deployment: null, apiVersion: null, hasApiKey: false }` for TenantDetail
+   - `lastLogin` field to Member mocks
+   - `created_at` field to Conversation, Partition, and Invite mocks
+   - Fixed mock function return types (void vs objects)
+3. **Imported `type Mock` from vitest** and used proper typing for mock functions
+4. **Fixed literal types** for role, parent_id, and other union-constrained fields
+
+**Files Modified:**
+- `portal/src/vite-env.d.ts` (created)
+- `portal/src/components/__tests__/AgentEditor.test.tsx`
+- `portal/src/components/__tests__/AgentSandbox.test.tsx`
+- `portal/src/components/__tests__/AppLayout.test.tsx`
+- `portal/src/components/__tests__/ModelListEditor.test.tsx`
+- `portal/src/components/__tests__/ProviderConfigForm.test.tsx`
+- `portal/src/components/__tests__/shared-AnalyticsPage.test.tsx`
+- `portal/src/components/__tests__/shared-TimeseriesCharts.test.tsx`
+- `portal/src/components/__tests__/TenantSwitcher.test.tsx`
+- `portal/src/context/__tests__/AuthContext.test.tsx`
+- `portal/src/pages/__tests__/AgentsPage.test.tsx`
+- `portal/src/pages/__tests__/ApiKeysPage.test.tsx`
+- `portal/src/pages/__tests__/ConversationsPage.test.tsx`
+- `portal/src/pages/__tests__/DashboardHome.test.tsx`
+- `portal/src/pages/__tests__/MembersPage.test.tsx`
+- `portal/src/pages/__tests__/SandboxPage.test.tsx`
+- `portal/src/pages/__tests__/SettingsPage.test.tsx`
+- `portal/src/pages/__tests__/SignupPage.test.tsx`
+
+**Verification:**
+✅ `npm run build` completes successfully
+✅ Vite build produces dist/index.html and bundled assets
+✅ All TypeScript errors resolved
+
+**Takeaway:**
+When API types change (especially adding required fields or restricting to literal unions), all test mocks must be updated. Creating proper type declaration files (like vite-env.d.ts) prevents environment-specific type errors.
+
+---
+
+## Session: Docker Build Fix
+
+**Date:** $(date +%Y-%m-%d)
+
+### Problem
+`docker build -f Dockerfile.portal .` was failing with TypeScript errors:
+```
+src/pages/__tests__/AgentsPage.test.tsx(99,5): error TS2304: Cannot find name 'global'.
+```
+Multiple test files were included in the production TypeScript compilation, which failed because test files reference `global` (a Node.js runtime global not available in browser/DOM TS lib).
+
+### Root Cause
+`portal/tsconfig.json` had `"include": ["src", "../shared"]` with **no `exclude`**. This caused `tsc` to compile all files under `src/`, including `src/**/__tests__/`. Test files use `global.fetch = ...` patterns valid in Vitest/Node context but not in the browser DOM lib.
+
+The previous fix session resolved the `npm run build` locally (probably because the test files didn't exist on disk at that time or a .dockerignore was excluding them), but they ARE present in the Docker build context.
+
+### Fix
+Added `"exclude"` to `portal/tsconfig.json`:
+```json
+"exclude": ["src/**/__tests__/**", "src/**/*.test.ts", "src/**/*.test.tsx"]
+```
+
+**File changed:** `portal/tsconfig.json`
+
+### Verification
+✅ `docker build -f Dockerfile.portal .` completes successfully
+✅ Vite produces `dist/index.html` and bundled assets
+✅ No TypeScript errors during Docker build
+
+### Takeaway
+`tsconfig.json` for a browser app should always explicitly exclude `**/__tests__/**` and `**/*.test.{ts,tsx}` — even if `npm run build` passes locally (Vite uses its own resolution), `tsc` alone (which runs first in `tsc && vite build`) will pick up test files unless excluded. Docker builds expose this because they run the full clean pipeline.

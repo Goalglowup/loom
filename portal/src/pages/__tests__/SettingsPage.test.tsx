@@ -98,7 +98,7 @@ describe('SettingsPage', () => {
       tenant: {
         id: 't1',
         name: 'Acme',
-        providerConfig: null,
+        providerConfig: { provider: null, baseUrl: null, deployment: null, apiVersion: null, hasApiKey: false },
         availableModels: null,
       },
       tenants: [],
@@ -126,7 +126,7 @@ describe('SettingsPage', () => {
       },
       tenants: [],
     });
-    vi.mocked(api.updateSettings).mockResolvedValue({ providerConfig: null });
+    vi.mocked(api.updateSettings).mockResolvedValue({ providerConfig: { provider: null, baseUrl: null, deployment: null, apiVersion: null, hasApiKey: false } });
     const user = userEvent.setup();
     renderPage();
     await waitFor(() => expect(screen.getByTestId('model-list-editor')).toBeInTheDocument());

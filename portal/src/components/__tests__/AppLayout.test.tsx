@@ -25,7 +25,17 @@ import userEvent from '@testing-library/user-event';
 
 const baseAuth = {
   user: { id: '1', email: 'user@example.com', role: 'admin' },
-  tenant: { id: 't1', name: 'Acme' },
+  tenant: { 
+    id: 't1', 
+    name: 'Acme', 
+    providerConfig: { 
+      provider: null, 
+      baseUrl: null, 
+      deployment: null, 
+      apiVersion: null, 
+      hasApiKey: false 
+    } 
+  },
   tenants: [],
   token: 'tok',
   loading: false,

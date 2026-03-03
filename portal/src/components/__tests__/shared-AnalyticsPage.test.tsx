@@ -1,6 +1,6 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest';
 import AnalyticsPage from '@shared/analytics/AnalyticsPage';
 import type { SummaryData, TimeseriesData, ModelBreakdown, Tenant } from '@shared/analytics/types';
 
@@ -46,10 +46,10 @@ const mockTenants: Tenant[] = [
 ];
 
 describe('AnalyticsPage', () => {
-  let fetchSummary: ReturnType<typeof vi.fn>;
-  let fetchTimeseries: ReturnType<typeof vi.fn>;
-  let fetchModels: ReturnType<typeof vi.fn>;
-  let fetchTenants: ReturnType<typeof vi.fn>;
+  let fetchSummary: Mock<(tenantId?: string, window?: string) => Promise<SummaryData>>;
+  let fetchTimeseries: Mock<(tenantId?: string, window?: string, bucketSize?: string) => Promise<TimeseriesData[]>>;
+  let fetchModels: Mock<(tenantId?: string, window?: string) => Promise<ModelBreakdown[]>>;
+  let fetchTenants: Mock<() => Promise<Tenant[]>>;
 
   beforeEach(() => {
     vi.clearAllMocks();

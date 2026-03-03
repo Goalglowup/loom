@@ -28,12 +28,12 @@ import { getToken } from '../../lib/auth';
 import { useAuth } from '../../context/AuthContext';
 
 const mockMembers = [
-  { id: 'u1', email: 'alice@example.com', role: 'owner', joinedAt: '2024-01-01T00:00:00Z' },
-  { id: 'u2', email: 'bob@example.com', role: 'member', joinedAt: '2024-01-02T00:00:00Z' },
+  { id: 'u1', email: 'alice@example.com', role: 'owner', joinedAt: '2024-01-01T00:00:00Z', lastLogin: '2024-01-01T00:00:00Z' },
+  { id: 'u2', email: 'bob@example.com', role: 'member', joinedAt: '2024-01-02T00:00:00Z', lastLogin: null },
 ];
 
 const mockInvites = [
-  { id: 'i1', token: 'abc123', inviteUrl: 'http://example.com/invite/abc123', maxUses: null, useCount: 0, expiresAt: '2024-12-31T00:00:00Z', revokedAt: null, isActive: true },
+  { id: 'i1', token: 'abc123', inviteUrl: 'http://example.com/invite/abc123', maxUses: null, useCount: 0, expiresAt: '2024-12-31T00:00:00Z', revokedAt: null, createdAt: '2024-01-01T00:00:00Z', isActive: true },
 ];
 
 function renderPage() {
@@ -91,6 +91,7 @@ describe('MembersPage', () => {
       useCount: 0,
       expiresAt: '2024-12-31T00:00:00Z',
       revokedAt: null,
+      createdAt: '2024-01-01T00:00:00Z',
       isActive: true,
     });
     const user = userEvent.setup();
@@ -108,7 +109,7 @@ describe('MembersPage', () => {
   it('revokes invite when revoke button is clicked', async () => {
     vi.mocked(api.listMembers).mockResolvedValue({ members: mockMembers });
     vi.mocked(api.listInvites).mockResolvedValue({ invites: mockInvites });
-    vi.mocked(api.revokeInvite).mockResolvedValue({ success: true });
+    vi.mocked(api.revokeInvite).mockResolvedValue(undefined as any);
     const user = userEvent.setup();
     renderPage();
     await waitFor(() => expect(screen.getByText(/…abc123/)).toBeInTheDocument());

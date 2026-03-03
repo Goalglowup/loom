@@ -20,22 +20,23 @@ import { api } from '../../lib/api';
 import { getToken } from '../../lib/auth';
 
 const mockPartitions = [
-  { id: 'p1', external_id: 'partition-1', title: 'Support', parent_id: null, children: [] },
-  { id: 'p2', external_id: 'partition-2', title: 'Sales', parent_id: null, children: [] },
+  { id: 'p1', external_id: 'partition-1', title: 'Support', parent_id: undefined, children: [], created_at: '2024-01-01T00:00:00Z' },
+  { id: 'p2', external_id: 'partition-2', title: 'Sales', parent_id: undefined, children: [], created_at: '2024-01-01T00:00:00Z' },
 ];
 
 const mockConversations = [
-  { id: 'c1', external_id: 'conv-1', last_active_at: '2024-01-01T12:00:00Z', message_count: 5 },
-  { id: 'c2', external_id: 'conv-2', last_active_at: '2024-01-02T12:00:00Z', message_count: 3 },
+  { id: 'c1', external_id: 'conv-1', last_active_at: '2024-01-01T12:00:00Z', message_count: 5, created_at: '2024-01-01T00:00:00Z' },
+  { id: 'c2', external_id: 'conv-2', last_active_at: '2024-01-02T12:00:00Z', message_count: 3, created_at: '2024-01-01T00:00:00Z' },
 ];
 
 const mockConversationDetail = {
   id: 'c1',
   external_id: 'conv-1',
   last_active_at: '2024-01-01T12:00:00Z',
+  created_at: '2024-01-01T00:00:00Z',
   messages: [
-    { id: 'm1', role: 'user', content: 'Hello', token_estimate: 10 },
-    { id: 'm2', role: 'assistant', content: 'Hi there', token_estimate: 15 },
+    { id: 'm1', role: 'user' as const, content: 'Hello', token_estimate: 10, created_at: '2024-01-01T00:00:00Z' },
+    { id: 'm2', role: 'assistant' as const, content: 'Hi there', token_estimate: 15, created_at: '2024-01-01T00:00:01Z' },
   ],
   snapshots: [],
 };

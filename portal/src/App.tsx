@@ -17,6 +17,11 @@ import ConversationsPage from './pages/ConversationsPage';
 import KnowledgeBasesPage from './pages/KnowledgeBasesPage';
 import DeploymentsPage from './pages/DeploymentsPage';
 import AuthGuard from './components/AuthGuard';
+import AdminProtectedRoute from './components/AdminProtectedRoute';
+import AdminLoginPage from './pages/AdminLoginPage';
+import AdminTenantsPage from './pages/AdminTenantsPage';
+import PrivacyPage from './pages/PrivacyPage';
+import AboutPage from './pages/AboutPage';
 
 export default function App() {
   return (
@@ -25,6 +30,8 @@ export default function App() {
         <Route path="/" element={<LandingPage />} />
         <Route path="/login" element={<LoginPage />} />
         <Route path="/signup" element={<SignupPage />} />
+        <Route path="/privacy" element={<PrivacyPage />} />
+        <Route path="/about" element={<AboutPage />} />
         <Route path="/app" element={<AuthGuard><AppLayout /></AuthGuard>}>
           <Route index element={<DashboardHome />} />
           <Route path="settings" element={<SettingsPage />} />
@@ -39,6 +46,9 @@ export default function App() {
           <Route path="knowledge-bases" element={<KnowledgeBasesPage />} />
           <Route path="deployments" element={<DeploymentsPage />} />
         </Route>
+        <Route path="/admin/login" element={<AdminLoginPage />} />
+        <Route path="/admin" element={<AdminProtectedRoute><Navigate to="/admin/tenants" replace /></AdminProtectedRoute>} />
+        <Route path="/admin/tenants" element={<AdminProtectedRoute><AdminTenantsPage /></AdminProtectedRoute>} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </AuthProvider>

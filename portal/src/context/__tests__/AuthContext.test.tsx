@@ -44,7 +44,7 @@ describe('AuthContext / AuthProvider', () => {
     vi.mocked(getToken).mockReturnValue('tok-123');
     vi.mocked(api.me).mockResolvedValue({
       user: { id: '1', email: 'alice@example.com', role: 'admin' },
-      tenant: { id: 't1', name: 'Acme', providerConfig: null },
+      tenant: { id: 't1', name: 'Acme', providerConfig: { provider: null, baseUrl: null, deployment: null, apiVersion: null, hasApiKey: false } },
       tenants: [{ id: 't1', name: 'Acme', role: 'owner' }],
     });
 
@@ -93,7 +93,7 @@ describe('AuthContext / AuthProvider', () => {
     vi.mocked(getToken).mockReturnValue('tok-123');
     vi.mocked(api.me).mockResolvedValue({
       user: { id: '1', email: 'alice@example.com', role: 'admin' },
-      tenant: { id: 't1', name: 'Acme', providerConfig: null },
+      tenant: { id: 't1', name: 'Acme', providerConfig: { provider: null, baseUrl: null, deployment: null, apiVersion: null, hasApiKey: false } },
       tenants: [],
     });
 
@@ -122,7 +122,7 @@ describe('AuthContext / AuthProvider', () => {
     vi.mocked(getToken).mockReturnValue('tok');
     vi.mocked(api.me).mockResolvedValue({
       user: { id: '1', email: 'alice@example.com', role: 'admin' },
-      tenant: { id: 't1', name: 'Acme', providerConfig: null },
+      tenant: { id: 't1', name: 'Acme', providerConfig: { provider: null, baseUrl: null, deployment: null, apiVersion: null, hasApiKey: false } },
       tenants: [{ id: 't1', name: 'Acme', role: 'owner' }],
     });
 
