@@ -15,7 +15,7 @@ export function registerBetaRoutes(fastify: FastifyInstance): void {
 
     try {
       await query(
-        `INSERT INTO beta_signups (email, name) VALUES ($1, $2)`,
+        `INSERT INTO beta_signups (email, name) VALUES (?, ?)`,
         [email.toLowerCase().trim(), name ?? null],
       );
       return reply.code(201).send({
