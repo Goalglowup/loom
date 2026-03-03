@@ -63,13 +63,13 @@ jobs:
       - name: Update gateway image
         run: |
           az containerapp update \
-            --name arachne-gateway \
-            --resource-group ${{ vars.AZURE_RESOURCE_GROUP }} \
+            --name ca-arachne-gateway-prod \
+            --resource-group ${{ secrets.AZURE_RESOURCE_GROUP }} \
             --image ghcr.io/${{ steps.coords.outputs.owner }}/arachne-gateway:${{ steps.coords.outputs.sha }}
 
       - name: Update portal image
         run: |
           az containerapp update \
-            --name arachne-portal \
-            --resource-group ${{ vars.AZURE_RESOURCE_GROUP }} \
+            --name ca-arachne-portal-prod \
+            --resource-group ${{ secrets.AZURE_RESOURCE_GROUP }} \
             --image ghcr.io/${{ steps.coords.outputs.owner }}/arachne-portal:${{ steps.coords.outputs.sha }}
