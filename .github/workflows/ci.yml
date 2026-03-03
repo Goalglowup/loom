@@ -20,6 +20,10 @@ jobs:
       - name: Install root deps
         run: npm ci
 
+      - name: Install portal deps
+        run: npm ci
+        working-directory: portal
+
       - name: Run tests
         run: npm test
 
