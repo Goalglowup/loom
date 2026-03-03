@@ -2,7 +2,7 @@
  * AdminService — encapsulates all database access for admin routes.
  * Route handlers stay thin: parse HTTP → call AdminService → return DTO.
  */
-import { scrypt, timingSafeEqual } from 'node:crypto';
+import { scrypt, timingSafeEqual, randomBytes } from 'node:crypto';
 import { promisify } from 'node:util';
 import type { EntityManager } from '@mikro-orm/core';
 
@@ -12,6 +12,12 @@ async function verifyPassword(password: string, storedHash: string): Promise<boo
   const [salt, key] = storedHash.split(':');
   const derivedKey = (await scryptAsync(password, salt, 64)) as Buffer;
   return timingSafeEqual(Buffer.from(key, 'hex'), derivedKey);
+}
+
+async function hashPassword(password: string): Promise<string> {
+  const salt = randomBytes(16).toString('hex');
+  const key = (await scryptAsync(password, salt, 64)) as Buffer;
+  return `${salt}:${key.toString('hex')}`;
 }
 
 export interface TenantRow {
@@ -76,12 +82,13 @@ export class AdminService {
   async validateAdminLogin(
     username: string,
     password: string,
-  ): Promise<{ id: string; username: string } | null> {
+  ): Promise<{ id: string; username: string; mustChangePassword: boolean } | null> {
     const result = await this.rawQuery<{
       id: string;
       username: string;
       password_hash: string;
-    }>('SELECT id, username, password_hash FROM admin_users WHERE username = $1', [username]);
+      must_change_password: boolean;
+    }>('SELECT id, username, password_hash, must_change_password FROM admin_users WHERE username = $1', [username]);
 
     if (result.rows.length === 0) return null;
 
@@ -89,11 +96,43 @@ export class AdminService {
     const isValid = await verifyPassword(password, adminUser.password_hash);
     if (!isValid) return null;
 
-    return { id: adminUser.id, username: adminUser.username };
+    return { id: adminUser.id, username: adminUser.username, mustChangePassword: adminUser.must_change_password };
   }
 
   async updateAdminLastLogin(id: string): Promise<void> {
     await this.rawQuery('UPDATE admin_users SET last_login = now() WHERE id = $1', [id]);
+  }
+
+  async changeAdminPassword(id: string, currentPassword: string, newPassword: string): Promise<{ success: boolean; error?: string }> {
+    const result = await this.rawQuery<{ password_hash: string }>(
+      'SELECT password_hash FROM admin_users WHERE id = $1',
+      [id]
+    );
+
+    if (result.rows.length === 0) {
+      return { success: false, error: 'admin_not_found' };
+    }
+
+    const isValid = await verifyPassword(currentPassword, result.rows[0].password_hash);
+    if (!isValid) {
+      return { success: false, error: 'invalid_current_password' };
+    }
+
+    const newHash = await hashPassword(newPassword);
+    await this.rawQuery(
+      'UPDATE admin_users SET password_hash = $1, must_change_password = false WHERE id = $2',
+      [newHash, id]
+    );
+
+    return { success: true };
+  }
+
+  async forceChangeAdminPassword(id: string, newPassword: string): Promise<void> {
+    const newHash = await hashPassword(newPassword);
+    await this.rawQuery(
+      'UPDATE admin_users SET password_hash = $1, must_change_password = false WHERE id = $2',
+      [newHash, id]
+    );
   }
 
   // ── Tenants ───────────────────────────────────────────────────────────────
