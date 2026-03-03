@@ -20,7 +20,7 @@ exports.up = async (pgm) => {
       notNull: true,
       default: pgm.func('now()'),
     },
-  });
+  }, { ifNotExists: true });
 };
 
 exports.down = async (pgm) => {
