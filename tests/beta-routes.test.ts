@@ -2,21 +2,25 @@
  * Beta signup endpoint tests
  *
  * Tests POST /v1/beta/signup (public endpoint, no auth required).
- * Mocks query() from src/db.js to simulate INSERT behavior and unique constraint violations.
+ * Mocks orm.em.fork() to simulate persistAndFlush behavior and unique constraint violations.
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import Fastify from 'fastify';
 import type { FastifyInstance } from 'fastify';
+import { UniqueConstraintViolationException } from '@mikro-orm/core';
 
-vi.mock('../src/db.js', () => ({
-  query: vi.fn(),
+const { mockPersistAndFlush, mockFork } = vi.hoisted(() => {
+  const mockPersistAndFlush = vi.fn();
+  const mockFork = vi.fn(() => ({ persistAndFlush: mockPersistAndFlush }));
+  return { mockPersistAndFlush, mockFork };
+});
+
+vi.mock('../src/orm.js', () => ({
+  orm: { em: { fork: mockFork } },
 }));
 
 import { registerBetaRoutes } from '../src/routes/beta.js';
-import { query } from '../src/db.js';
-
-const mockQuery = query as ReturnType<typeof vi.fn>;
 
 async function buildApp(): Promise<FastifyInstance> {
   const app = Fastify({ logger: false });
@@ -30,7 +34,7 @@ describe('POST /v1/beta/signup', () => {
 
   beforeEach(async () => {
     app = await buildApp();
-    mockQuery.mockClear();
+    mockPersistAndFlush.mockClear();
   });
 
   afterEach(async () => {
@@ -38,7 +42,7 @@ describe('POST /v1/beta/signup', () => {
   });
 
   it('returns 201 with status:registered for valid email and name', async () => {
-    mockQuery.mockResolvedValueOnce({ rows: [] });
+    mockPersistAndFlush.mockResolvedValueOnce(undefined);
 
     const res = await app.inject({
       method: 'POST',
@@ -50,16 +54,11 @@ describe('POST /v1/beta/signup', () => {
     const body = res.json<{ status: string; message: string }>();
     expect(body.status).toBe('registered');
     expect(body.message).toContain("You're on the list");
-
-    expect(mockQuery).toHaveBeenCalledTimes(1);
-    expect(mockQuery).toHaveBeenCalledWith(
-      'INSERT INTO beta_signups (email, name) VALUES ($1, $2)',
-      ['user@example.com', 'John Doe']
-    );
+    expect(mockPersistAndFlush).toHaveBeenCalledTimes(1);
   });
 
   it('returns 201 with status:registered when name is omitted (optional)', async () => {
-    mockQuery.mockResolvedValueOnce({ rows: [] });
+    mockPersistAndFlush.mockResolvedValueOnce(undefined);
 
     const res = await app.inject({
       method: 'POST',
@@ -70,17 +69,11 @@ describe('POST /v1/beta/signup', () => {
     expect(res.statusCode).toBe(201);
     const body = res.json<{ status: string }>();
     expect(body.status).toBe('registered');
-
-    expect(mockQuery).toHaveBeenCalledWith(
-      'INSERT INTO beta_signups (email, name) VALUES ($1, $2)',
-      ['user@example.com', null]
-    );
+    expect(mockPersistAndFlush).toHaveBeenCalledTimes(1);
   });
 
   it('returns 200 with status:already_registered on duplicate email (23505)', async () => {
-    const err: any = new Error('duplicate key value violates unique constraint');
-    err.code = '23505';
-    mockQuery.mockRejectedValueOnce(err);
+    mockPersistAndFlush.mockRejectedValueOnce(new UniqueConstraintViolationException(new Error('duplicate key')));
 
     const res = await app.inject({
       method: 'POST',
@@ -103,8 +96,7 @@ describe('POST /v1/beta/signup', () => {
     expect(res.statusCode).toBe(400);
     const body = res.json<{ error: string }>();
     expect(body.error).toBe('Valid email is required');
-
-    expect(mockQuery).not.toHaveBeenCalled();
+    expect(mockPersistAndFlush).not.toHaveBeenCalled();
   });
 
   it('returns 400 when email is not a string', async () => {
@@ -132,7 +124,7 @@ describe('POST /v1/beta/signup', () => {
   });
 
   it('normalizes email to lowercase (no leading/trailing spaces)', async () => {
-    mockQuery.mockResolvedValueOnce({ rows: [] });
+    mockPersistAndFlush.mockResolvedValueOnce(undefined);
 
     const res = await app.inject({
       method: 'POST',
@@ -141,10 +133,8 @@ describe('POST /v1/beta/signup', () => {
     });
 
     expect(res.statusCode).toBe(201);
-    expect(mockQuery).toHaveBeenCalledWith(
-      'INSERT INTO beta_signups (email, name) VALUES ($1, $2)',
-      ['test@example.com', 'Test User']
-    );
+    const entity = mockPersistAndFlush.mock.calls[0][0];
+    expect(entity.email).toBe('test@example.com');
   });
 
   it('returns 400 when body is empty', async () => {
@@ -172,8 +162,7 @@ describe('POST /v1/beta/signup', () => {
   });
 
   it('returns 500 on unexpected database error', async () => {
-    const err = new Error('Connection refused');
-    mockQuery.mockRejectedValue(err);
+    mockPersistAndFlush.mockRejectedValue(new Error('Connection refused'));
 
     const res = await app.inject({
       method: 'POST',
