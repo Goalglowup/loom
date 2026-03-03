@@ -544,3 +544,47 @@
 **Fix:** Updated both test assertions to match current production content. No production code changed.
 
 **Pattern:** Frontend copy/content tests are brittle when they assert exact text strings — they silently lag behind UI redesigns. Consider using `data-testid` attributes for structural assertions and only assert on text for copy that is contractually stable.
+
+---
+
+## Learnings
+
+### 2026-06-XX: Beta Signup Endpoint Tests
+
+**Task:** Write tests for `POST /v1/beta/signup` public endpoint (no auth required).
+
+**Test file created:**
+- `tests/beta-routes.test.ts` — 10 tests covering all edge cases
+
+**Test Coverage:**
+- ✅ 201 registered with valid email and name
+- ✅ 201 registered with email only (name optional)
+- ✅ 200 already_registered on duplicate email (23505 unique constraint violation)
+- ✅ 400 missing email
+- ✅ 400 email not a string
+- ✅ 400 invalid email format
+- ✅ 400 empty body
+- ✅ 400 email with leading/trailing whitespace (validation before trim)
+- ✅ Email normalization (lowercase)
+- ✅ 500 on unexpected database error
+
+**Key Learnings:**
+
+- **DB mocking pattern for beta routes:** `vi.mock('../src/db.js', () => ({ query: vi.fn() }))` at the top of the test file, then cast to `ReturnType<typeof vi.fn>` for type safety. This pattern matches existing test files (analytics.test.ts, streaming-traces.test.ts).
+
+- **Email validation happens BEFORE normalization:** The implementation at `src/routes/beta.ts:12` validates the email with a regex `/^[^\s@]+@[^\s@]+\.[^\s@]+$/` before calling `.toLowerCase().trim()` on line 19. This means emails with leading/trailing whitespace will FAIL validation (400 error), even though the implementation would trim them if they passed. This is a coverage gap but NOT a bug to fix in this test task — tests document the actual behavior.
+
+- **Unique constraint error code:** PostgreSQL returns error code `23505` for unique constraint violations. The implementation checks `err?.code === '23505'` to return 200 with `{ status: 'already_registered' }` instead of a 500 error.
+
+- **Fastify app.inject() pattern:** Use `app.inject({ method, url, payload })` for in-process HTTP testing (no port allocation needed). This is consistent with portal-routes.test.ts and auth.test.ts patterns.
+
+- **Mock cleanup in beforeEach:** Always call `mockQuery.mockClear()` in `beforeEach` to reset call counts and return values between tests.
+
+- **Testing 500 errors:** Use `mockQuery.mockRejectedValue(err)` (not `mockRejectedValueOnce`) to ensure the error persists for the single inject call. With `mockRejectedValueOnce`, if the mock is called multiple times in the same test, it will succeed on the second call.
+
+**Coverage Gap Identified:**
+- Email validation happens before normalization, so valid emails with whitespace are rejected. Should validation happen after `.trim()`? Documented in `.squad/decisions/inbox/hockney-beta-signup-coverage.md`.
+
+**Build Status:**
+- ✅ All 10 tests passing
+- ✅ Committed to `feature/fix-beta-signup-proxy` branch
