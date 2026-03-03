@@ -66,9 +66,8 @@ export class AdminService {
   constructor(private readonly em: EntityManager) {}
 
   private async rawQuery<T extends object>(sql: string, params: unknown[] = []): Promise<{ rows: T[] }> {
-    const knex = (this.em as any).getKnex();
-    const result = await knex.raw(sql, params);
-    return { rows: result.rows as T[] };
+    const rows = await this.em.getConnection().execute<T[]>(sql, params as any[], 'all');
+    return { rows };
   }
 
   // ── Auth ──────────────────────────────────────────────────────────────────
