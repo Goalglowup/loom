@@ -428,9 +428,9 @@ describe('DELETE /v1/registry/:org/:name/:tag', () => {
   });
 });
 
-// ── POST /v1/registry/deploy ─────────────────────────────────────────────────
+// ── POST /v1/registry/deployments/:org/:name/:tag ────────────────────────────
 
-describe('POST /v1/registry/deploy', () => {
+describe('POST /v1/registry/deployments/:org/:name/:tag', () => {
   let app: FastifyInstance;
 
   beforeEach(async () => {
@@ -449,15 +449,10 @@ describe('POST /v1/registry/deploy', () => {
 
     const res = await app.inject({
       method: 'POST',
-      url: '/v1/registry/deploy',
+      url: '/v1/registry/deployments/test-org/my-kb/latest?environment=production',
       headers: {
         authorization: `Bearer ${deployToken}`,
-        'content-type': 'application/json',
       },
-      payload: JSON.stringify({
-        artifactRef: { org: 'test-org', name: 'my-kb', tag: 'latest' },
-        environment: 'production',
-      }),
     });
 
     expect(res.statusCode).toBe(201);
@@ -466,33 +461,28 @@ describe('POST /v1/registry/deploy', () => {
     expect(json.status).toBe('READY');
   });
 
-  it('returns 400 when artifactRef is incomplete', async () => {
-    const res = await app.inject({
-      method: 'POST',
-      url: '/v1/registry/deploy',
-      headers: {
-        authorization: `Bearer ${deployToken}`,
-        'content-type': 'application/json',
-      },
-      payload: JSON.stringify({ artifactRef: { org: 'test-org' } }), // missing name + tag
+  it('defaults to production environment when query param is omitted', async () => {
+    mockProvisionInstance.deploy.mockResolvedValue({
+      deploymentId: 'deploy-003',
+      status: 'READY',
+      runtimeToken: 'rt-token-xyz',
     });
 
-    expect(res.statusCode).toBe(400);
-    expect(res.json().error).toMatch(/artifactRef must include/i);
-  });
-
-  it('returns 400 when artifactRef is missing entirely', async () => {
     const res = await app.inject({
       method: 'POST',
-      url: '/v1/registry/deploy',
+      url: '/v1/registry/deployments/test-org/my-kb/latest',
       headers: {
         authorization: `Bearer ${deployToken}`,
-        'content-type': 'application/json',
       },
-      payload: JSON.stringify({}),
     });
 
-    expect(res.statusCode).toBe(400);
+    expect(res.statusCode).toBe(201);
+    expect(mockProvisionInstance.deploy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        environment: 'production',
+      }),
+      expect.anything(),
+    );
   });
 
   it('returns 200 when deploy returns FAILED status', async () => {
@@ -504,14 +494,10 @@ describe('POST /v1/registry/deploy', () => {
 
     const res = await app.inject({
       method: 'POST',
-      url: '/v1/registry/deploy',
+      url: '/v1/registry/deployments/test-org/missing-kb/latest',
       headers: {
         authorization: `Bearer ${deployToken}`,
-        'content-type': 'application/json',
       },
-      payload: JSON.stringify({
-        artifactRef: { org: 'test-org', name: 'missing-kb', tag: 'latest' },
-      }),
     });
 
     expect(res.statusCode).toBe(200);
@@ -521,9 +507,7 @@ describe('POST /v1/registry/deploy', () => {
   it('returns 401 when authorization header is missing', async () => {
     const res = await app.inject({
       method: 'POST',
-      url: '/v1/registry/deploy',
-      headers: { 'content-type': 'application/json' },
-      payload: JSON.stringify({ artifactRef: { org: 'o', name: 'n', tag: 't' } }),
+      url: '/v1/registry/deployments/o/n/t',
     });
     expect(res.statusCode).toBe(401);
   });
@@ -531,12 +515,10 @@ describe('POST /v1/registry/deploy', () => {
   it('returns 403 when token lacks deploy:write scope', async () => {
     const res = await app.inject({
       method: 'POST',
-      url: '/v1/registry/deploy',
+      url: '/v1/registry/deployments/o/n/t',
       headers: {
         authorization: `Bearer ${readToken}`,
-        'content-type': 'application/json',
       },
-      payload: JSON.stringify({ artifactRef: { org: 'o', name: 'n', tag: 't' } }),
     });
     expect(res.statusCode).toBe(403);
   });

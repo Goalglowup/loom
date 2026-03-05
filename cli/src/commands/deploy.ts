@@ -2,18 +2,22 @@ import { Command } from 'commander';
 import { getGatewayUrl, getToken } from '../config.js';
 
 function parseArtifactRef(ref: string): { org: string; name: string; tag: string } {
-  const match = ref.match(/^([^/]+)\/([^:]+):(.+)$/);
+  const match = ref.match(/^([^/]+)\/([^:]+)(?::(.+))?$/);
   if (!match) {
-    throw new Error(`Invalid artifact reference: "${ref}". Expected format: org/name:tag`);
+    throw new Error(`Invalid artifact reference: "${ref}". Expected format: org/name[:tag]`);
   }
-  return { org: match[1], name: match[2], tag: match[3] };
+  return {
+    org: match[1],
+    name: match[2],
+    tag: match[3] || 'latest'
+  };
 }
 
 export const deployCommand = new Command('deploy')
-  .description('Deploy an artifact to a tenant environment')
-  .argument('<artifact>', 'Artifact reference (org/name:tag)')
-  .option('--env <env>', 'Deployment environment', 'prod')
-  .action(async (artifact: string, options: { env: string }) => {
+  .description('Deploy an artifact to a runtime environment')
+  .argument('<artifact>', 'Artifact reference (org/name[:tag], tag defaults to "latest")')
+  .option('--environment <env>', 'Deployment environment (defaults to "production")', 'production')
+  .action(async (artifact: string, options: { environment: string }) => {
     let gatewayUrl: string;
     let token: string;
     try {
@@ -33,15 +37,17 @@ export const deployCommand = new Command('deploy')
     }
 
     const { org, name, tag } = parsed;
-    const env = options.env || 'prod';
+    const environment = options.environment;
 
-    const res = await fetch(`${gatewayUrl}/v1/registry/deploy`, {
+    // Build URL with path params and query string
+    const url = new URL(`${gatewayUrl}/v1/registry/deployments/${org}/${name}/${tag}`);
+    url.searchParams.set('environment', environment);
+
+    const res = await fetch(url.toString(), {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ org, name, tag, env }),
     });
 
     if (!res.ok) {
@@ -50,5 +56,11 @@ export const deployCommand = new Command('deploy')
       process.exit(1);
     }
 
-    console.log(`✓ Deployed ${org}/${name}:${tag} → env:${env}`);
+    const data = await res.json() as { deploymentId: string; status: string; runtimeToken?: string };
+    console.log(`✓ Deployed ${org}/${name}:${tag} → ${environment}`);
+    console.log(`  Deployment ID: ${data.deploymentId}`);
+    console.log(`  Status: ${data.status}`);
+    if (data.runtimeToken) {
+      console.log(`  Runtime token: ${data.runtimeToken.substring(0, 20)}...`);
+    }
   });

@@ -132,25 +132,23 @@ export function registerRegistryRoutes(fastify: FastifyInstance, orm: MikroORM):
     },
   );
 
-  // ── POST /v1/registry/deploy ───────────────────────────────────────────────
+  // ── POST /v1/registry/deployments/:org/:name/:tag ──────────────────────────
   fastify.post<{
-    Body: { artifactRef: { org: string; name: string; tag: string }; environment?: string };
-  }>('/v1/registry/deploy', {
+    Params: { org: string; name: string; tag: string };
+    Querystring: { environment?: string };
+  }>('/v1/registry/deployments/:org/:name/:tag', {
     preHandler: registryAuth('deploy:write', REGISTRY_JWT_SECRET),
   }, async (request, reply) => {
     const registryUser = (request as any).registryUser;
-    const { artifactRef, environment } = request.body ?? {};
-
-    if (!artifactRef?.org || !artifactRef?.name || !artifactRef?.tag) {
-      return reply.code(400).send({ error: 'artifactRef must include org, name, and tag' });
-    }
+    const { org, name, tag } = request.params;
+    const { environment } = request.query;
 
     const em = orm.em.fork();
 
     const result = await provisionService.deploy(
       {
         tenantId: registryUser.tenantId,
-        artifactRef,
+        artifactRef: { org, name, tag },
         environment: environment ?? 'production',
         requestingUserId: registryUser.sub ?? registryUser.tenantId,
       },

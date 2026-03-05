@@ -216,23 +216,32 @@ Once an artifact is published, it can be deployed to a runtime environment. Depl
 
 ### Deploy Artifact
 
-**POST** `/v1/registry/deploy`
+**POST** `/v1/registry/deployments/{org}/{name}/{tag}?environment={env}`
 
-Deploy an artifact to an environment.
+Deploy an artifact to a runtime environment.
 
 **Authentication:** Requires `deploy:write` scope
 
-**Request (JSON):**
+**Path Parameters:**
 
-```json
-{
-  "artifactRef": {
-    "org": "acme-corp",
-    "name": "my-kb",
-    "tag": "v1.0"
-  },
-  "environment": "production"
-}
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `org` | string | ✓ | Organization slug |
+| `name` | string | ✓ | Artifact name |
+| `tag` | string | ✓ | Version tag (use `latest` for most recent) |
+
+**Query Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `environment` | string | | Environment label (defaults to `production`). Note: In v1, this is metadata only - no infrastructure isolation. |
+
+**Example:**
+
+```bash
+curl -X POST \
+  -H "Authorization: Bearer $REGISTRY_JWT" \
+  'https://api.arachne-ai.com/v1/registry/deployments/acme-corp/my-kb/v1.0?environment=production'
 ```
 
 **Response (201 Created or 200 OK):**
@@ -249,7 +258,7 @@ The `runtimeToken` is a scoped JWT that:
 - Expires in 1 year
 - Grants `runtime:access` permission
 - Contains the artifact ID and deployment ID
-- Can be used by inference clients to access the deployed KB
+- Can be used by inference clients to access the deployed artifact
 
 **Failure Response (200 OK with status: FAILED):**
 
@@ -319,9 +328,11 @@ arachne push my-kb.tgz \
   --org acme-corp \
   --tag v1.0
 
-# Deploy to production
-arachne deploy acme-corp/my-kb:v1.0 \
-  --environment production
+# Deploy to production (tag defaults to "latest" if omitted)
+arachne deploy acme-corp/my-kb:v1.0 --environment production
+
+# Deploy latest version to staging
+arachne deploy acme-corp/my-kb --environment staging
 ```
 
 See [docs/cli.md](cli.md) for full CLI reference.
@@ -336,7 +347,7 @@ Common error responses:
 | 400 | `Missing name field` | Artifact name not specified |
 | 400 | `Missing kind field` | Kind (KnowledgeBase, Agent, etc.) not specified |
 | 400 | `sha256 mismatch` | Pre-computed SHA-256 doesn't match bundle data |
-| 400 | `artifactRef must include org, name, and tag` | Deploy request missing required fields |
+| 400 | `Invalid artifact reference` | Deploy request has invalid org/name/tag in path |
 | 401 | `Unauthorized` | Invalid or expired JWT token |
 | 403 | `Forbidden` | JWT does not have required scope for operation |
 | 404 | `Artifact not found` | Requested artifact/deployment does not exist |
