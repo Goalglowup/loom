@@ -1,10 +1,10 @@
-# Loom Architecture
+# Arachne Architecture
 
-> Canonical architecture reference for the Loom AI gateway. Reflects the codebase as-built.
+> Canonical architecture reference for the Arachne AI Runtime. Reflects the codebase as-built.
 
 ## 1. System Overview
 
-Loom is a **provider-agnostic, OpenAI-compatible AI gateway** that proxies requests to LLM providers (OpenAI, Azure OpenAI, Ollama) while adding:
+Arachne is a **provider-agnostic, OpenAI-compatible AI Runtime** that proxies requests to LLM providers (OpenAI, Azure OpenAI, Ollama) while adding:
 
 - **Multi-tenant isolation** — API key-based tenancy with per-tenant provider configuration
 - **Structured trace recording** — Encrypted request/response audit trail with batched async persistence
@@ -28,7 +28,7 @@ graph TB
     end
 
     subgraph "Fastify Process (single)"
-        GW[Gateway<br/>POST /v1/chat/completions]
+        GW[AI Runtime<br/>POST /v1/chat/completions]
         Auth[Auth Middleware<br/>API Key → TenantContext]
         Agent[Agent Engine<br/>system prompt, skills, MCP]
         ConvMem[Conversation Memory<br/>context injection, summarization]
@@ -88,11 +88,11 @@ graph TB
 
 ## 3. Component Breakdown
 
-### 3.1 Gateway / Proxy Layer
+### 3.1 AI Runtime / Proxy Layer
 
 **Entry point:** `src/index.ts` → `POST /v1/chat/completions`
 
-The gateway is the core of Loom. A single Fastify route handles all LLM proxy traffic:
+The AI Runtime is the core of Arachne. A single Fastify route handles all LLM proxy traffic:
 
 1. **Auth middleware** (`src/auth.ts`) resolves the API key to a `TenantContext` via SHA-256 hash lookup against an LRU cache (1,000 entries) backed by the database
 2. **Conversation memory** (`ConversationManagementService`) loads context if the agent has `conversations_enabled` — injects history/snapshots into the message array
@@ -106,7 +106,7 @@ The gateway is the core of Loom. A single Fastify route handles all LLM proxy tr
 
 **Response extensions:**
 - `conversation_id` and `partition_id` echoed back when conversation memory is active
-- `X-Loom-Conversation-ID` header with the internal UUID
+- `X-Arachne-Conversation-ID` header with the internal UUID
 
 ### 3.2 Application Services
 
@@ -198,12 +198,12 @@ Admin routes (`/v1/admin/*`) are API-only with no dedicated frontend yet.
 
 ## 4. Request Data Flow
 
-### Gateway Request (Non-Streaming)
+### AI Runtime Request (Non-Streaming)
 
 ```mermaid
 sequenceDiagram
     participant C as Client
-    participant GW as Gateway
+    participant GW as AI Runtime
     participant Auth as Auth Middleware
     participant LRU as LRU Cache
     participant DB as PostgreSQL
@@ -241,12 +241,12 @@ sequenceDiagram
     GW-->>C: JSON response
 ```
 
-### Gateway Request (Streaming)
+### AI Runtime Request (Streaming)
 
 ```mermaid
 sequenceDiagram
     participant C as Client
-    participant GW as Gateway
+    participant GW as AI Runtime
     participant P as LLM Provider
     participant SSE as SSE Transform
     participant TR as Trace Recorder
@@ -324,7 +324,7 @@ API keys have `active` / `revoked` status. Revoked keys are removed from the LRU
 
 | Domain | Mechanism | Secret | Middleware |
 |--------|-----------|--------|------------|
-| **Gateway** | API key (Bearer / x-api-key header) | SHA-256 hashed, stored in `api_keys.key_hash` | `src/auth.ts` → global `preHandler` hook |
+| **AI Runtime** | API key (Bearer / x-api-key header) | SHA-256 hashed, stored in `api_keys.key_hash` | `src/auth.ts` → global `preHandler` hook |
 | **Portal** | JWT (jsonwebtoken) | `PORTAL_JWT_SECRET` env var | `src/middleware/portalAuth.ts` + `src/middleware/createBearerAuth.ts` |
 | **Admin** | JWT (jsonwebtoken) | `ADMIN_JWT_SECRET` env var | `src/middleware/adminAuth.ts` + `src/middleware/createBearerAuth.ts` |
 
@@ -521,7 +521,7 @@ Provider API keys use a special format: `encrypted:{ciphertext}:{iv}` stored in 
 | Test File | What It Tests |
 |-----------|---------------|
 | `auth.test.ts` | API key validation, LRU cache, tenant resolution |
-| `proxy.test.ts` | Gateway proxy correctness, header forwarding |
+| `proxy.test.ts` | AI Runtime proxy correctness, header forwarding |
 | `providers.test.ts` | OpenAI & Azure adapter behavior |
 | `streaming-traces.test.ts` | SSE stream tee, trace capture |
 | `encryption.test.ts` | AES-256-GCM encrypt/decrypt round-trip |
@@ -587,7 +587,7 @@ Port 3000
 ├── /                         → Portal SPA (static)
 ├── /dashboard                → Dashboard SPA (static)
 ├── /health                   → Health check
-├── /v1/chat/completions      → Gateway proxy
+├── /v1/chat/completions      → AI Runtime proxy
 ├── /v1/traces                → Dashboard API
 ├── /v1/analytics/*           → Dashboard API
 ├── /v1/portal/*              → Portal API
@@ -612,9 +612,9 @@ npm run build && npm start
 
 ## 13. Key Design Principles
 
-1. **Gateway overhead < 20ms** — Auth is LRU-cached, trace persistence is fire-and-forget (off the hot path), no per-chunk DB writes during streaming
+1. **AI Runtime overhead < 20ms** — Auth is LRU-cached, trace persistence is fire-and-forget (off the hot path), no per-chunk DB writes during streaming
 2. **Encrypt everything at rest** — All tenant data (traces, conversations, provider keys) encrypted with per-tenant derived keys
-3. **Single process for Phase 1** — Gateway, dashboard API, portal API, and admin API all share one Fastify instance. Service split is deferred to Phase 2.
+3. **Single process for Phase 1** — AI Runtime, dashboard API, portal API, and admin API all share one Fastify instance. Service split is deferred to Phase 2.
 4. **Two persistence paths** — Legacy services use raw SQL (battle-tested); domain services use MikroORM (clean architecture). Migration in progress.
 5. **Provider-agnostic** — Abstract `BaseProvider` interface; tenant config determines routing. Adding a provider means one new adapter class.
 

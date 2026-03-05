@@ -1,10 +1,10 @@
-# Loom Smoke Tests
+# Arachne Smoke Tests
 
 Browser smoke tests covering major portal and admin flows.
 
 ## Prerequisites
 
-- Loom stack running (`docker-compose up`)
+- Arachne stack running (`docker-compose up`)
 - Playwright browsers installed: `npx playwright install chromium`
 
 ## Running

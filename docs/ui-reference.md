@@ -1,4 +1,4 @@
-# Loom UI Reference
+# Arachne UI Reference
 
 _Generated 3/2/2026 from smoke test screenshots._
 

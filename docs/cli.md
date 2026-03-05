@@ -1,6 +1,6 @@
-# Loom CLI Reference
+# Arachne CLI Reference
 
-The `loom` CLI client connects to a Loom Gateway (self-hosted or remote) to define, package, and deploy AI Agent and KnowledgeBase artifacts.
+The `loom` CLI client connects to an Arachne AI Runtime (self-hosted or remote) to define, package, and deploy AI Agent and KnowledgeBase artifacts.
 
 ## Installation
 
@@ -21,7 +21,7 @@ This walkthrough creates a support agent backed by a KnowledgeBase of documentat
 ### Step 1: Authenticate
 
 ```bash
-arachne login https://your-loom-gateway.com
+arachne login https://your-arachne-runtime.com
 # Prompts for email and password
 # ✓ Logged in as alice@acme.com (tenant: acme)
 ```
@@ -111,10 +111,10 @@ The agent is now available for inference via any API key scoped to the `support-
 
 ### `arachne login [gateway-url]`
 
-Authenticate against a Loom Gateway and store credentials locally.
+Authenticate against an Arachne AI Runtime and store credentials locally.
 
 ```bash
-arachne login https://your-loom-gateway.com
+arachne login https://your-arachne-runtime.com
 arachne login                                  # prompts for gateway URL
 ```
 
@@ -129,7 +129,7 @@ arachne login                                  # prompts for gateway URL
 
 ```json
 {
-  "gatewayUrl": "https://your-loom-gateway.com",
+  "gatewayUrl": "https://your-arachne-runtime.com",
   "token": "eyJ...",
   "email": "alice@acme.com"
 }
@@ -139,7 +139,7 @@ arachne login                                  # prompts for gateway URL
 
 ### `arachne weave <spec-file>`
 
-Upload a YAML spec (and its documents) to the Gateway. The Gateway chunks the documents, generates embeddings, and returns a signed bundle.
+Upload a YAML spec (and its documents) to the AI Runtime. The AI Runtime chunks the documents, generates embeddings, and returns a signed bundle.
 
 ```bash
 arachne weave support-kb.yaml
@@ -162,7 +162,7 @@ arachne weave ./specs/support-kb.yaml --out ./artifacts/
    - **Single file** → just that file
    - **.zip file** → extracted in-memory; all contained files processed
 3. Uploads spec + docs to `POST /v1/registry/weave`
-4. Gateway chunks docs, embeds, packages, signs
+4. AI Runtime chunks docs, embeds, packages, signs
 5. Returns bundle → saved to `dist/<name>.bundle.tgz`
 
 **Output:**
@@ -176,7 +176,7 @@ dist/
 
 ### `arachne push <bundle-file>`
 
-Push a bundle file to the Gateway registry and tag it.
+Push a bundle file to the AI Runtime registry and tag it.
 
 ```bash
 arachne push dist/support-kb.bundle.tgz --tag 0.1.0
@@ -308,7 +308,7 @@ spec:
 
 ## VectorSpace Determinism
 
-Loom guarantees that deploying the same bundle always produces identical embeddings.
+Arachne guarantees that deploying the same bundle always produces identical embeddings.
 
 Each KnowledgeBase bundle records a **VectorSpace contract**:
 
@@ -322,19 +322,19 @@ Each KnowledgeBase bundle records a **VectorSpace contract**:
 }
 ```
 
-The `vectorSpaceId` is the SHA-256 of the embedder config. Loom uses this to:
+The `vectorSpaceId` is the SHA-256 of the embedder config. Arachne uses this to:
 
 - Ensure retrieval queries use the same embedding space as the stored vectors
 - Refuse deployments where the KnowledgeBase and runtime embedder don't match
 - Detect when a KnowledgeBase needs to be re-woven (embedder model upgrade)
 
-**What Loom does NOT guarantee:** If you change the embedder model and re-run `arachne weave`, the new bundle will have a different `vectorSpaceId`. The old deployment and the new bundle are incompatible — you must deploy the new bundle to create a new deployment.
+**What Arachne does NOT guarantee:** If you change the embedder model and re-run `arachne weave`, the new bundle will have a different `vectorSpaceId`. The old deployment and the new bundle are incompatible — you must deploy the new bundle to create a new deployment.
 
 ---
 
 ## Portal Integration
 
-You don't need the CLI to use the artifact system. The Loom portal provides equivalent functionality:
+You don't need the CLI to use the artifact system. The Arachne portal provides equivalent functionality:
 
 | CLI Command | Portal Equivalent |
 |-------------|-------------------|
@@ -373,18 +373,18 @@ Run `arachne login <gateway-url>` to authenticate.
 **`Error: Token expired`**  
 Your JWT has expired. Run `arachne login` again to refresh.
 
-**`Error: Insufficient scope (required: weave:write)`**  
-Your account doesn't have the required permissions. You need the `owner` role on a tenant to use registry operations. Contact your Loom administrator.
+**`Error: Insufficient scope (required: weave:write)`**
+Your account doesn't have the required permissions. You need the `owner` role on a tenant to use registry operations. Contact your Arachne administrator.
 
-**`Error: VectorSpace mismatch`**  
+**`Error: VectorSpace mismatch`**
 The deployed KnowledgeBase was embedded with a different model than the one specified in your Agent spec. Re-weave the KnowledgeBase with the matching embedder, push it, and re-deploy.
 
-**`Error: docsPath not found`**  
+**`Error: docsPath not found`**
 The path in `spec.docsPath` doesn't exist relative to the spec file. Check that the path is correct and the files are present before running `arachne weave`.
 
-**`Error: No embedding provider available`**  
-**`Error: No EmbeddingAgent found`**  
-The `spec.embedder.agentRef` you specified doesn't exist, your tenant has no default EmbeddingAgent configured, and the gateway's `SYSTEM_EMBEDDER_*` env vars are not set. Options: (1) create an EmbeddingAgent in the portal and reference it via `agentRef`, (2) set a tenant default EmbeddingAgent in portal settings, or (3) ask your Loom administrator to configure `SYSTEM_EMBEDDER_PROVIDER`, `SYSTEM_EMBEDDER_MODEL`, and `SYSTEM_EMBEDDER_API_KEY` on the gateway.
+**`Error: No embedding provider available`**
+**`Error: No EmbeddingAgent found`**
+The `spec.embedder.agentRef` you specified doesn't exist, your tenant has no default EmbeddingAgent configured, and the AI Runtime's `SYSTEM_EMBEDDER_*` env vars are not set. Options: (1) create an EmbeddingAgent in the portal and reference it via `agentRef`, (2) set a tenant default EmbeddingAgent in portal settings, or (3) ask your Arachne administrator to configure `SYSTEM_EMBEDDER_PROVIDER`, `SYSTEM_EMBEDDER_MODEL`, and `SYSTEM_EMBEDDER_API_KEY` on the AI Runtime.
 
-**Weave takes too long**  
-Large document sets will take longer. The Gateway streams progress to the CLI. For very large sets, consider splitting your KnowledgeBase into multiple smaller specs.
+**Weave takes too long**
+Large document sets will take longer. The AI Runtime streams progress to the CLI. For very large sets, consider splitting your KnowledgeBase into multiple smaller specs.

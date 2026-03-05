@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Loom Chat — Getting Started</title>
+  <title>Arachne Chat — Getting Started</title>
   <style>
     /* ─── Design Tokens ─────────────────────────────────────────────────────── */
     :root {
@@ -295,7 +295,7 @@
 
   <!-- ─── Header ─────────────────────────────────────────────────────────── -->
   <header>
-    <div class="logo"><span>Loom</span> Chat</div>
+    <div class="logo"><span>Arachne</span> Chat</div>
     <div class="header-meta">Getting-started example — open this file directly in a browser</div>
   </header>
 
@@ -327,7 +327,7 @@
     <div class="empty-state" id="emptyState">
       <div class="icon">💬</div>
       <h2>Start a conversation</h2>
-      <p>Configure your Gateway URL and API Key above, then type a message below to chat through the Loom gateway.</p>
+      <p>Configure your Gateway URL and API Key above, then type a message below to chat through the Arachne gateway.</p>
     </div>
   </div>
 
@@ -346,9 +346,9 @@
 
   <script>
     // ─────────────────────────────────────────────────────────────────────────
-    // Loom Chat — Getting-started example
+    // Arachne Chat — Getting-started example
     //
-    // This file demonstrates how to call the Loom gateway's OpenAI-compatible
+    // This file demonstrates how to call the Arachne gateway's OpenAI-compatible
     // streaming endpoint from a plain browser page with no build tooling.
     //
     // Flow:
@@ -561,7 +561,7 @@
 
       // Validate that an API key has been set.
       if (!apiKey) {
-        appendError('No API key set. Open the Configuration panel above and enter your Loom API key.');
+        appendError('No API key set. Open the Configuration panel above and enter your Arachne API key.');
         return;
       }
 
@@ -581,7 +581,7 @@
       const removeTyping = showTypingIndicator();
 
       try {
-        // POST to the Loom gateway's OpenAI-compatible completions endpoint.
+        // POST to the Arachne gateway's OpenAI-compatible completions endpoint.
         const response = await fetch(`${gatewayUrl}/v1/chat/completions`, {
           method: 'POST',
           headers: {
@@ -627,7 +627,7 @@
 
         // Friendly error for network failures (gateway unreachable, CORS, etc.).
         if (err instanceof TypeError && err.message.includes('fetch')) {
-          appendError(`Could not reach the gateway at "${gatewayUrl}". Is Loom running? Check the URL in Configuration.`);
+          appendError(`Could not reach the gateway at "${gatewayUrl}". Is Arachne running? Check the URL in Configuration.`);
         } else {
           appendError(`Error: ${err.message}`);
         }

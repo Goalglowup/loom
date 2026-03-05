@@ -1,4 +1,4 @@
-# Loom Gateway — Getting Started
+# Arachne AI Runtime — Getting Started
 
 ## Prerequisites
 
@@ -7,7 +7,7 @@
 
 ---
 
-## 1. Start the gateway
+## 1. Start the AI Runtime
 
 ```bash
 # Clone the repo and enter the project root
@@ -19,7 +19,7 @@ npm run seed                 # prints your API key — copy it!
 npm start
 ```
 
-The gateway listens on **http://localhost:3000** by default.
+The AI Runtime listens on **http://localhost:3000** by default.
 
 ---
 
@@ -45,7 +45,7 @@ SET provider_config = '{
 WHERE name = 'dev';
 ```
 
-Restart the gateway (`npm start`) so the provider cache is refreshed.
+Restart the AI Runtime (`npm start`) so the provider cache is refreshed.
 
 ---
 

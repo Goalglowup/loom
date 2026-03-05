@@ -1,16 +1,16 @@
-# Loom Conversations Demo
+# Arachne Conversations Demo
 
-A standalone HTML demo showing how to use Loom's conversation memory feature.
+A standalone HTML demo showing how to use Arachne's conversation memory feature.
 
 ## What is Conversation Memory?
 
-Loom can persist conversation history server-side, allowing the AI to remember context across sessions. This is different from the basic chat example, which keeps history only in the browser.
+Arachne can persist conversation history server-side, allowing the AI to remember context across sessions. This is different from the basic chat example, which keeps history only in the browser.
 
 ## Key Concepts
 
 ### `conversation_id`
 - A unique identifier for a conversation thread
-- Leave blank on first message — the gateway will generate one and return it
+- Leave blank on first message — the AI Runtime will generate one and return it
 - Include on subsequent messages to continue the conversation
 - The AI automatically receives full history from the server
 
@@ -27,9 +27,9 @@ Loom can persist conversation history server-side, allowing the AI to remember c
    open examples/conversations/index.html
    ```
 
-2. **Configure your gateway:**
-   - Gateway URL (default: `http://localhost:3000`)
-   - API Key (create one in the Loom portal)
+2. **Configure your AI Runtime:**
+   - AI Runtime URL (default: `http://localhost:3000`)
+   - API Key (create one in the Arachne portal)
    - Model (e.g., `gpt-4o`, `deepseek-r1:14b`)
 
 3. **Start chatting:**
@@ -48,8 +48,8 @@ Loom can persist conversation history server-side, allowing the AI to remember c
 Unlike the basic chat example which sends the full message history with every request:
 
 1. Client sends only the current message + `conversation_id`
-2. Gateway loads previous messages from the database
-3. Gateway injects history before forwarding to the AI
+2. AI Runtime loads previous messages from the database
+3. AI Runtime injects history before forwarding to the AI
 4. Response includes the `conversation_id` (in body and header)
 5. Client stores the ID for the next message
 
@@ -57,11 +57,11 @@ This approach:
 - Reduces request payload size
 - Keeps server as source of truth
 - Enables cross-device/cross-session memory
-- Works seamlessly with conversation summarization (when threads get long, Loom auto-creates summaries to stay within token limits)
+- Works seamlessly with conversation summarization (when threads get long, Arachne auto-creates summaries to stay within token limits)
 
 ## Enabling Conversations for Your Agent
 
-In the Loom portal, set these properties on your agent:
+In the Arachne portal, set these properties on your agent:
 
 - **Conversations Enabled:** `true`
 - **Conversation Token Limit:** `4000` (or your preferred context window)
@@ -81,7 +81,7 @@ In the Loom portal, set these properties on your agent:
 ```
 
 **Response includes:**
-- Header: `X-Loom-Conversation-ID: <uuid>`
+- Header: `X-Arachne-Conversation-ID: <uuid>`
 - Body: `conversation_id` field (after streaming completes)
 
 The header is available immediately (before reading the stream), so you can display it to the user right away.

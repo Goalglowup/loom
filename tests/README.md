@@ -2,7 +2,7 @@
 
 ## Overview
 
-This directory contains the test infrastructure for Loom, including mock servers, database fixtures, and integration tests.
+This directory contains the test infrastructure for Arachne, including mock servers, database fixtures, and integration tests.
 
 ## Structure
 

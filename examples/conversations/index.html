@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Loom Conversations — Memory Demo</title>
+  <title>Arachne Conversations — Memory Demo</title>
   <style>
     /* ─── Design Tokens ─────────────────────────────────────────────────────── */
     :root {
@@ -331,7 +331,7 @@
 
   <!-- ─── Header ─────────────────────────────────────────────────────────── -->
   <header>
-    <div class="logo"><span>Loom</span> Conversations</div>
+    <div class="logo"><span>Arachne</span> Conversations</div>
     <div class="header-meta">Conversation memory demo — messages persist across sessions</div>
   </header>
 
@@ -380,7 +380,7 @@
       <div class="icon">🧠</div>
       <h2>Conversation Memory</h2>
       <p>
-        Loom remembers your conversations! Each message exchange is stored server-side.
+        Arachne remembers your conversations! Each message exchange is stored server-side.
         Start a conversation below and reload the page — the gateway will restore the context automatically.
       </p>
     </div>
@@ -401,9 +401,9 @@
 
   <script>
     // ─────────────────────────────────────────────────────────────────────────
-    // Loom Conversations — Memory demonstration
+    // Arachne Conversations — Memory demonstration
     //
-    // This example shows how to use Loom's conversation memory feature:
+    // This example shows how to use Arachne's conversation memory feature:
     //
     // 1. **conversation_id**: A unique identifier for a conversation thread.
     //    - Leave blank on first message — the gateway generates one and returns it.
@@ -667,7 +667,7 @@
 
       // Validate that an API key has been set.
       if (!apiKey) {
-        appendError('No API key set. Open the Configuration panel above and enter your Loom API key.');
+        appendError('No API key set. Open the Configuration panel above and enter your Arachne API key.');
         return;
       }
 
@@ -704,7 +704,7 @@
           requestBody.partition_id = partitionId;
         }
 
-        // POST to the Loom gateway's OpenAI-compatible completions endpoint.
+        // POST to the Arachne gateway's OpenAI-compatible completions endpoint.
         const response = await fetch(`${gatewayUrl}/v1/chat/completions`, {
           method: 'POST',
           headers: {
@@ -757,7 +757,7 @@
 
         // Friendly error for network failures (gateway unreachable, CORS, etc.).
         if (err instanceof TypeError && err.message.includes('fetch')) {
-          appendError(`Could not reach the gateway at "${gatewayUrl}". Is Loom running? Check the URL in Configuration.`);
+          appendError(`Could not reach the gateway at "${gatewayUrl}". Is Arachne running? Check the URL in Configuration.`);
         } else {
           appendError(`Error: ${err.message}`);
         }
