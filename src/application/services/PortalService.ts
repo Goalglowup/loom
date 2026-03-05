@@ -120,6 +120,29 @@ export class PortalService {
   }
 
   async getInviteInfo(token: string) {
+    // First check if it's a beta signup invite code
+    const betaResult = await this.rawQuery<{
+      email: string; approved_at: string | null; invite_used_at: string | null;
+    }>(
+      `SELECT email, approved_at, invite_used_at
+       FROM beta_signups
+       WHERE invite_code = $1`,
+      [token],
+    );
+
+    if (betaResult.rows.length > 0) {
+      const beta = betaResult.rows[0];
+      return {
+        tenant_name: 'Arachne', // Beta invites create new tenants
+        expires_at: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString(), // 1 year validity
+        revoked_at: null,
+        max_uses: 1,
+        use_count: beta.invite_used_at ? 1 : 0,
+        tenant_status: 'active',
+      };
+    }
+
+    // Otherwise check for tenant invite
     const result = await this.rawQuery<{
       tenant_name: string; expires_at: string;
       revoked_at: string | null; max_uses: number | null; use_count: number;

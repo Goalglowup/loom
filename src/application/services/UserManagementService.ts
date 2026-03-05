@@ -7,6 +7,7 @@ import { User } from '../../domain/entities/User.js';
 import { Tenant } from '../../domain/entities/Tenant.js';
 import { TenantMembership } from '../../domain/entities/TenantMembership.js';
 import { Invite } from '../../domain/entities/Invite.js';
+import { BetaSignup } from '../../domain/entities/BetaSignup.js';
 import type { CreateUserDto, LoginDto, AcceptInviteDto, AuthResult } from '../dtos/index.js';
 import { generateOrgSlug } from '../../utils/slug.js';
 
@@ -127,6 +128,49 @@ export class UserManagementService {
       throw new Error('Password must be at least 8 characters');
     }
 
+    // First check if this is a beta signup invite code
+    const betaSignup = await this.em.findOne(BetaSignup, { inviteCode: dto.inviteToken });
+
+    if (betaSignup) {
+      // Handle beta invite signup (creates new tenant like self-service signup)
+      if (!betaSignup.approvedAt || !betaSignup.inviteCode) {
+        throw new Error('Beta invite has not been approved');
+      }
+      if (betaSignup.inviteUsedAt) {
+        throw new Error('Beta invite has already been used');
+      }
+      if (betaSignup.email.toLowerCase() !== dto.email.toLowerCase()) {
+        throw new Error('Email does not match beta signup');
+      }
+
+      // Create user and tenant (similar to createUser flow)
+      const normalizedEmail = dto.email.toLowerCase();
+      const passwordHash = await hashPassword(dto.password);
+      const { user, tenant } = this.createUserWithTenant(normalizedEmail, passwordHash);
+
+      // Set tenant name from email domain or default
+      tenant.name = normalizedEmail.split('@')[0] + "'s Org";
+
+      this.em.persist(user);
+      this.em.persist(tenant);
+      await this.assignUniqueSlug(tenant);
+
+      // Mark beta signup as used
+      betaSignup.markAsUsed();
+
+      await this.em.flush();
+
+      const token = signJwt({ sub: user.id, tenantId: tenant.id, role: 'owner', scopes: TENANT_OWNER_SCOPES, orgSlug: tenant.orgSlug ?? null }, PORTAL_JWT_SECRET, 86_400_000);
+      return {
+        token,
+        userId: user.id,
+        tenantId: tenant.id,
+        email: user.email,
+        tenantName: tenant.name,
+      };
+    }
+
+    // Otherwise, check for tenant invite
     const invite = await this.em.findOne(
       Invite,
       { token: dto.inviteToken },
