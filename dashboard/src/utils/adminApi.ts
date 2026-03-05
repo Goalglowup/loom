@@ -70,11 +70,15 @@ export async function adminFetch(path: string, options: RequestInit = {}): Promi
   }
 
   const url = `${ADMIN_BASE}${path}`;
-  const headers = {
-    'Content-Type': 'application/json',
+  const headers: Record<string, string> = {
     ...adminAuthHeaders(),
-    ...options.headers,
+    ...(options.headers as Record<string, string> || {}),
   };
+
+  // Only set Content-Type if there's a body
+  if (options.body && !headers['Content-Type']) {
+    headers['Content-Type'] = 'application/json';
+  }
 
   const response = await fetch(url, { ...options, headers });
 
