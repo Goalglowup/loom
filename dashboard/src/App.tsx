@@ -3,6 +3,8 @@ import Layout from './components/Layout';
 import TracesPage from './pages/TracesPage';
 import AnalyticsPage from './pages/AnalyticsPage';
 import AdminPage from './pages/AdminPage';
+import SettingsPage from './pages/SettingsPage';
+import BetaSignupsPage from './pages/BetaSignupsPage';
 
 function App() {
   return (
@@ -11,6 +13,8 @@ function App() {
         <Route path="/" element={<TracesPage />} />
         <Route path="/analytics" element={<AnalyticsPage />} />
         <Route path="/admin" element={<AdminPage />} />
+        <Route path="/settings" element={<SettingsPage />} />
+        <Route path="/beta-signups" element={<BetaSignupsPage />} />
       </Routes>
     </Layout>
   );

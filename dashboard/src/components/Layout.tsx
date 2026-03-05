@@ -18,23 +18,35 @@ function Layout({ children }: LayoutProps) {
       </header>
       
       <nav className="nav">
-        <Link 
-          to="/" 
+        <Link
+          to="/"
           className={`nav-link ${location.pathname === '/' ? 'active' : ''}`}
         >
           Traces
         </Link>
-        <Link 
-          to="/analytics" 
+        <Link
+          to="/analytics"
           className={`nav-link ${location.pathname === '/analytics' ? 'active' : ''}`}
         >
           Analytics
         </Link>
-        <Link 
-          to="/admin" 
+        <Link
+          to="/admin"
           className={`nav-link ${location.pathname === '/admin' ? 'active' : ''}`}
         >
           Admin
+        </Link>
+        <Link
+          to="/settings"
+          className={`nav-link ${location.pathname === '/settings' ? 'active' : ''}`}
+        >
+          Settings
+        </Link>
+        <Link
+          to="/beta-signups"
+          className={`nav-link ${location.pathname === '/beta-signups' ? 'active' : ''}`}
+        >
+          Beta Signups
         </Link>
       </nav>
 

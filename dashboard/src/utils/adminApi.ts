@@ -25,6 +25,24 @@ export interface AdminProviderConfig {
   apiVersion?: string;
 }
 
+export interface AdminSettings {
+  signupsEnabled: boolean;
+  updatedAt: string;
+  updatedByAdminId: string | null;
+}
+
+export interface AdminBetaSignup {
+  id: string;
+  email: string;
+  name: string | null;
+  inviteCode: string | null;
+  approvedAt: string | null;
+  approvedByAdminId: string | null;
+  inviteUsedAt: string | null;
+  createdAt: string;
+  status: 'pending' | 'approved' | 'used';
+}
+
 export function getAdminToken(): string | null {
   return localStorage.getItem('loom_admin_token');
 }
@@ -67,4 +85,44 @@ export async function adminFetch(path: string, options: RequestInit = {}): Promi
   }
 
   return response;
+}
+
+// Settings API
+export async function getSettings(): Promise<AdminSettings> {
+  const response = await adminFetch('/v1/admin/settings');
+  if (!response.ok) {
+    throw new Error('Failed to fetch settings');
+  }
+  return response.json();
+}
+
+export async function updateSettings(signupsEnabled: boolean): Promise<AdminSettings> {
+  const response = await adminFetch('/v1/admin/settings', {
+    method: 'PUT',
+    body: JSON.stringify({ signupsEnabled }),
+  });
+  if (!response.ok) {
+    throw new Error('Failed to update settings');
+  }
+  return response.json();
+}
+
+// Beta Signups API
+export async function getBetaSignups(): Promise<AdminBetaSignup[]> {
+  const response = await adminFetch('/v1/admin/beta/signups');
+  if (!response.ok) {
+    throw new Error('Failed to fetch beta signups');
+  }
+  const data = await response.json();
+  return data.signups;
+}
+
+export async function approveBetaSignup(id: string): Promise<AdminBetaSignup> {
+  const response = await adminFetch(`/v1/admin/beta/approve/${id}`, {
+    method: 'POST',
+  });
+  if (!response.ok) {
+    throw new Error('Failed to approve beta signup');
+  }
+  return response.json();
 }
