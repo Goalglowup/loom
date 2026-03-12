@@ -10,7 +10,9 @@ export class Trace {
   provider!: string;
   endpoint!: string;
   requestBody!: any;
+  requestIv!: string | null;
   responseBody!: any | null;
+  responseIv!: string | null;
   latencyMs!: number | null;
   ttfbMs!: number | null;
   gatewayOverheadMs!: number | null;

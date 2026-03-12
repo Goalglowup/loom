@@ -58,6 +58,8 @@ const start = async () => {
       logger: true
     });
 
+    traceRecorder.init(em);
+
     const conversationSvc = new ConversationManagementService(em);
     const portalSvc = new PortalService(em);
     const adminSvc = new AdminService(em);

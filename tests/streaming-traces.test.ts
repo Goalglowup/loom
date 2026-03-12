@@ -7,11 +7,10 @@
  * - traceRecorder.record() called exactly once after stream completes
  * - [DONE] termination signal ends the stream cleanly
  * - Stream failure mid-way: current behavior (no trace recorded on error)
- * - Batch flush: 100 traces trigger immediate flush (mocked query)
+ * - Batch flush: 100 traces trigger immediate flush (mocked EM)
  * - Timer flush: traces flush after 5 s even when batch is not full (fake timers)
  * - Fire-and-forget: stream ends without waiting for DB write
  *
- * db.js is always mocked (no real PostgreSQL needed).
  * tracing.js singleton is replaced with spies for SSE tests;
  * the real TraceRecorder class is instantiated directly for batch/timer tests.
  */
@@ -30,11 +29,6 @@ import { pipeline } from 'node:stream/promises';
 
 // ── Module mocks (hoisted by Vitest) ──────────────────────────────────────
 
-vi.mock('../src/db.js', () => ({
-  query: vi.fn().mockResolvedValue({ rows: [], rowCount: 0 }),
-  pool: { end: vi.fn() },
-}));
-
 vi.mock('../src/tracing.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../src/tracing.js')>();
   return {
@@ -45,6 +39,7 @@ vi.mock('../src/tracing.js', async (importOriginal) => {
       record: vi.fn(),
       flush: vi.fn().mockResolvedValue(undefined),
       stop: vi.fn(),
+      init: vi.fn(),
     },
   };
 });
@@ -54,7 +49,6 @@ vi.mock('../src/tracing.js', async (importOriginal) => {
 import { createSSEProxy, type StreamCapture } from '../src/streaming.js';
 import { TraceRecorder } from '../src/tracing.js';
 import { traceRecorder } from '../src/tracing.js';
-import { query } from '../src/db.js';
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -92,6 +86,18 @@ async function pipeThrough(
 
   await pipeline(source, transform, sink);
   return Buffer.concat(chunks);
+}
+
+/** Build a mock EntityManager for TraceRecorder tests. */
+function buildMockEm() {
+  const mockEm: any = {
+    persist: vi.fn(),
+    flush: vi.fn().mockResolvedValue(undefined),
+    fork: vi.fn(),
+    getReference: vi.fn((_Entity: any, id: string) => ({ id })),
+  };
+  mockEm.fork.mockReturnValue(mockEm);
+  return mockEm;
 }
 
 // ── SSE proxy pass-through and capture tests ──────────────────────────────
@@ -177,7 +183,6 @@ describe('createSSEProxy — pass-through and StreamCapture', () => {
   it('stream failure mid-way: traceRecorder.record() is not called (fire-and-forget safety)', async () => {
     // The Transform flush() is only invoked on clean stream end.
     // On upstream error the flush is skipped, so no partial trace is recorded.
-    // TODO: add explicit error-path trace recording for partial streams.
     const proxy = createSSEProxy({
       onComplete: () => {},
       traceContext: {
@@ -246,9 +251,11 @@ describe('TraceRecorder — batch flush and timer flush', () => {
     latencyMs: 100,
   };
 
+  let mockEm: any;
+
   beforeEach(() => {
     process.env.ENCRYPTION_MASTER_KEY = TEST_MASTER_KEY;
-    (query as Mock).mockClear();
+    mockEm = buildMockEm();
   });
 
   afterEach(() => {
@@ -257,8 +264,9 @@ describe('TraceRecorder — batch flush and timer flush', () => {
     vi.useRealTimers();
   });
 
-  it('batch of 100 traces triggers an immediate flush (mocked query)', async () => {
+  it('batch of 100 traces triggers an immediate flush (mocked EM)', async () => {
     recorder = new TraceRecorder();
+    recorder.init(mockEm);
 
     for (let i = 0; i < 100; i++) {
       recorder.record({ ...baseTrace, requestId: `req-${i}` });
@@ -267,25 +275,28 @@ describe('TraceRecorder — batch flush and timer flush', () => {
     // void flush() is fire-and-forget; yield to the microtask queue
     await new Promise((resolve) => setImmediate(resolve));
 
-    expect(query).toHaveBeenCalled();
-    // 100 individual INSERT calls expected (one per row in the flush loop)
-    expect((query as Mock).mock.calls.length).toBeGreaterThanOrEqual(100);
+    expect(mockEm.fork).toHaveBeenCalled();
+    expect(mockEm.persist).toHaveBeenCalled();
+    expect(mockEm.flush).toHaveBeenCalled();
+    // 100 traces persisted
+    expect(mockEm.persist.mock.calls.length).toBeGreaterThanOrEqual(100);
   });
 
   it('timer flush: traces are written after 5 s even when batch is not full', async () => {
     vi.useFakeTimers();
     recorder = new TraceRecorder();
+    recorder.init(mockEm);
 
     // Add fewer than 100 traces
     for (let i = 0; i < 5; i++) {
       recorder.record({ ...baseTrace, requestId: `req-${i}` });
     }
 
-    expect(query).not.toHaveBeenCalled();
+    expect(mockEm.flush).not.toHaveBeenCalled();
 
     // Advance fake clock by FLUSH_INTERVAL_MS (5 000 ms)
     await vi.advanceTimersByTimeAsync(5_000);
 
-    expect(query).toHaveBeenCalled();
+    expect(mockEm.flush).toHaveBeenCalled();
   });
 });

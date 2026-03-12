@@ -1,32 +1,43 @@
 /**
- * Conversations module unit tests
+ * ConversationManagementService unit tests
  *
- * Tests conversationManager methods from src/conversations.ts.
- * Mocks pg.Pool and sets ENCRYPTION_MASTER_KEY for encrypt/decrypt calls.
+ * Tests the MikroORM-based ConversationManagementService.
+ * Mocks EntityManager and sets ENCRYPTION_MASTER_KEY for encrypt/decrypt calls.
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { conversationManager } from '../src/conversations.js';
+import { ConversationManagementService } from '../src/application/services/ConversationManagementService.js';
+import { encryptTraceBody } from '../src/encryption.js';
 
 const TEST_MASTER_KEY = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
 
-/** Build a mock pool that returns responses in sequence. */
-function buildSeqPool(responses: Array<{ rows: unknown[] }>) {
-  let idx = 0;
-  const queryFn = vi.fn().mockImplementation(() => {
-    const resp = responses[idx] ?? { rows: [] };
-    idx++;
-    return Promise.resolve(resp);
-  });
-  return { query: queryFn } as unknown as import('pg').Pool;
+function buildMockEm(overrides: Partial<Record<string, any>> = {}) {
+  const mockEm: any = {
+    findOne: vi.fn().mockResolvedValue(null),
+    find: vi.fn().mockResolvedValue([]),
+    persist: vi.fn(),
+    flush: vi.fn().mockResolvedValue(undefined),
+    fork: vi.fn(),
+    nativeUpdate: vi.fn().mockResolvedValue(0),
+    getReference: vi.fn((_Entity: any, id: string) => ({
+      id,
+      addMessage: vi.fn((role: string, ct: string, iv: string, est: number) => {
+        const msg = { id: 'msg-' + role, conversation: { id }, role, contentEncrypted: ct, contentIv: iv, tokenEstimate: est, traceId: null, snapshotId: null, createdAt: new Date() };
+        return msg;
+      }),
+      createSnapshot: vi.fn((ct: string, iv: string, count: number) => {
+        const snap = { id: 'snap-new', conversation: { id }, summaryEncrypted: ct, summaryIv: iv, messagesArchived: count, createdAt: new Date() };
+        return snap;
+      }),
+    })),
+    ...overrides,
+  };
+  // fork returns a clone with the same mocks
+  mockEm.fork.mockReturnValue(mockEm);
+  return mockEm;
 }
 
-/** Build a mock pool that always rejects. */
-function buildErrPool(message = 'DB error') {
-  return { query: vi.fn().mockRejectedValue(new Error(message)) } as unknown as import('pg').Pool;
-}
-
-describe('conversationManager', () => {
+describe('ConversationManagementService', () => {
   beforeEach(() => {
     process.env.ENCRYPTION_MASTER_KEY = TEST_MASTER_KEY;
   });
@@ -38,45 +49,47 @@ describe('conversationManager', () => {
   // ── getOrCreateConversation ─────────────────────────────────────────────
 
   describe('getOrCreateConversation', () => {
-    it('returns existing conversation and updates last_active_at', async () => {
-      const existingId = 'conv-uuid-existing';
-      const pool = buildSeqPool([
-        { rows: [{ id: existingId }] }, // SELECT existing
-        { rows: [] },                    // UPDATE last_active_at
-      ]);
+    it('returns existing conversation and updates lastActiveAt', async () => {
+      const existingConv = { id: 'conv-uuid-existing', lastActiveAt: new Date('2020-01-01') };
+      const em = buildMockEm({
+        findOne: vi.fn().mockResolvedValue(existingConv),
+      });
 
-      const result = await conversationManager.getOrCreateConversation(
-        pool, 'tenant-1', 'partition-1', 'ext-conv-1', null,
+      const svc = new ConversationManagementService(em);
+      const result = await svc.getOrCreateConversation(
+        'tenant-1', 'partition-1', 'ext-conv-1', null,
       );
 
-      expect(result).toEqual({ id: existingId, isNew: false });
-      expect(pool.query).toHaveBeenCalledTimes(2);
-      const selectSql = (pool.query as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
-      expect(selectSql).toContain('SELECT id FROM conversations');
+      expect(result).toEqual({ id: 'conv-uuid-existing', isNew: false });
+      // lastActiveAt should have been updated
+      expect(existingConv.lastActiveAt.getTime()).toBeGreaterThan(new Date('2020-01-01').getTime());
+      expect(em.flush).toHaveBeenCalled();
     });
 
     it('creates new conversation when none exists', async () => {
-      const newId = 'conv-uuid-new';
-      const pool = buildSeqPool([
-        { rows: [] },               // SELECT returns nothing
-        { rows: [{ id: newId }] }, // INSERT RETURNING
-      ]);
+      const em = buildMockEm({
+        findOne: vi.fn().mockResolvedValue(null),
+      });
 
-      const result = await conversationManager.getOrCreateConversation(
-        pool, 'tenant-1', null, 'ext-conv-2', 'agent-abc',
+      const svc = new ConversationManagementService(em);
+      const result = await svc.getOrCreateConversation(
+        'tenant-1', null, 'ext-conv-2', 'agent-abc',
       );
 
-      expect(result).toEqual({ id: newId, isNew: true });
-      expect(pool.query).toHaveBeenCalledTimes(2);
-      const insertSql = (pool.query as ReturnType<typeof vi.fn>).mock.calls[1][0] as string;
-      expect(insertSql).toContain('INSERT INTO conversations');
+      expect(result.isNew).toBe(true);
+      expect(result.id).toBeDefined();
+      expect(em.persist).toHaveBeenCalled();
+      expect(em.flush).toHaveBeenCalled();
     });
 
-    it('propagates pool errors', async () => {
+    it('propagates errors', async () => {
+      const em = buildMockEm({
+        findOne: vi.fn().mockRejectedValue(new Error('connection refused')),
+      });
+      const svc = new ConversationManagementService(em);
+
       await expect(
-        conversationManager.getOrCreateConversation(
-          buildErrPool('connection refused'), 't1', null, 'ext', null,
-        ),
+        svc.getOrCreateConversation('t1', null, 'ext', null),
       ).rejects.toThrow('connection refused');
     });
   });
@@ -84,38 +97,48 @@ describe('conversationManager', () => {
   // ── storeMessages ───────────────────────────────────────────────────────
 
   describe('storeMessages', () => {
-    it('inserts user and assistant messages in one query', async () => {
-      const pool = buildSeqPool([{ rows: [] }]);
+    it('persists user and assistant messages via forked EM', async () => {
+      const em = buildMockEm();
 
-      await conversationManager.storeMessages(
-        pool, 'tenant-1', 'conv-1', 'Hello!', 'Hi there!', 'trace-abc', null,
+      const svc = new ConversationManagementService(em);
+      await svc.storeMessages(
+        'tenant-1', 'conv-1', 'Hello!', 'Hi there!', 'trace-abc', null,
       );
 
-      expect(pool.query).toHaveBeenCalledTimes(1);
-      const [sql] = (pool.query as ReturnType<typeof vi.fn>).mock.calls[0];
-      expect(sql).toContain('INSERT INTO conversation_messages');
-      expect(sql).toContain("'user'");
-      expect(sql).toContain("'assistant'");
+      expect(em.fork).toHaveBeenCalled();
+      // Two messages persisted
+      expect(em.persist).toHaveBeenCalledTimes(2);
+      expect(em.flush).toHaveBeenCalled();
     });
 
     it('encrypts content before storage (ciphertext differs from plaintext)', async () => {
-      const pool = buildSeqPool([{ rows: [] }]);
+      const messages: any[] = [];
+      const em = buildMockEm({
+        persist: vi.fn((msg: any) => messages.push(msg)),
+      });
 
-      await conversationManager.storeMessages(
-        pool, 'tenant-1', 'conv-1', 'Secret message', 'Secret reply', null, null,
+      const svc = new ConversationManagementService(em);
+      await svc.storeMessages(
+        'tenant-1', 'conv-1', 'Secret message', 'Secret reply', null, null,
       );
 
-      const params = (pool.query as ReturnType<typeof vi.fn>).mock.calls[0][1] as unknown[];
-      // params[1] is userEnc.ciphertext — should not equal the plaintext
-      expect(params[1]).not.toBe('Secret message');
-      expect(params[5]).not.toBe('Secret reply');
+      // The encrypted content should not equal the plaintext
+      const userMsg = messages.find((m: any) => m.role === 'user');
+      const assistantMsg = messages.find((m: any) => m.role === 'assistant');
+      expect(userMsg).toBeDefined();
+      expect(assistantMsg).toBeDefined();
+      expect(userMsg.contentEncrypted).not.toBe('Secret message');
+      expect(assistantMsg.contentEncrypted).not.toBe('Secret reply');
     });
 
-    it('propagates pool errors', async () => {
+    it('propagates errors', async () => {
+      const em = buildMockEm({
+        flush: vi.fn().mockRejectedValue(new Error('insert failed')),
+      });
+      const svc = new ConversationManagementService(em);
+
       await expect(
-        conversationManager.storeMessages(
-          buildErrPool('insert failed'), 't1', 'c1', 'u', 'a', null, null,
-        ),
+        svc.storeMessages('t1', 'c1', 'u', 'a', null, null),
       ).rejects.toThrow('insert failed');
     });
   });
@@ -124,12 +147,13 @@ describe('conversationManager', () => {
 
   describe('loadContext', () => {
     it('returns empty context when no snapshots or messages exist', async () => {
-      const pool = buildSeqPool([
-        { rows: [] }, // snapshot query
-        { rows: [] }, // messages query
-      ]);
+      const em = buildMockEm({
+        findOne: vi.fn().mockResolvedValue(null),
+        find: vi.fn().mockResolvedValue([]),
+      });
 
-      const ctx = await conversationManager.loadContext(pool, 'tenant-1', 'conv-1');
+      const svc = new ConversationManagementService(em);
+      const ctx = await svc.loadContext('tenant-1', 'conv-1');
 
       expect(ctx.messages).toEqual([]);
       expect(ctx.tokenEstimate).toBe(0);
@@ -138,22 +162,22 @@ describe('conversationManager', () => {
     });
 
     it('returns decrypted messages with token estimates', async () => {
-      const { encryptTraceBody } = await import('../src/encryption.js');
       const enc = encryptTraceBody('tenant-1', 'Hello world');
 
-      const pool = buildSeqPool([
-        { rows: [] }, // no snapshot
-        {
-          rows: [{
+      const em = buildMockEm({
+        findOne: vi.fn().mockResolvedValue(null), // no snapshot
+        find: vi.fn().mockResolvedValue([
+          {
             role: 'user',
-            content_encrypted: enc.ciphertext,
-            content_iv: enc.iv,
-            token_estimate: 7,
-          }],
-        },
-      ]);
+            contentEncrypted: enc.ciphertext,
+            contentIv: enc.iv,
+            tokenEstimate: 7,
+          },
+        ]),
+      });
 
-      const ctx = await conversationManager.loadContext(pool, 'tenant-1', 'conv-1');
+      const svc = new ConversationManagementService(em);
+      const ctx = await svc.loadContext('tenant-1', 'conv-1');
 
       expect(ctx.messages).toHaveLength(1);
       expect(ctx.messages[0].role).toBe('user');
@@ -162,31 +186,54 @@ describe('conversationManager', () => {
     });
 
     it('returns snapshot summary when a snapshot exists', async () => {
-      const { encryptTraceBody } = await import('../src/encryption.js');
       const snapEnc = encryptTraceBody('tenant-1', 'Prior conversation summary text');
 
-      const pool = buildSeqPool([
-        {
-          rows: [{
-            id: 'snap-uuid-1',
-            summary_encrypted: snapEnc.ciphertext,
-            summary_iv: snapEnc.iv,
-          }],
-        },
-        { rows: [] }, // no messages beyond snapshot
-      ]);
+      const em = buildMockEm({
+        findOne: vi.fn().mockResolvedValue({
+          id: 'snap-uuid-1',
+          summaryEncrypted: snapEnc.ciphertext,
+          summaryIv: snapEnc.iv,
+        }),
+        find: vi.fn().mockResolvedValue([]), // no messages beyond snapshot
+      });
 
-      const ctx = await conversationManager.loadContext(pool, 'tenant-1', 'conv-1');
+      const svc = new ConversationManagementService(em);
+      const ctx = await svc.loadContext('tenant-1', 'conv-1');
 
       expect(ctx.latestSnapshotId).toBe('snap-uuid-1');
       expect(ctx.latestSnapshotSummary).toBe('Prior conversation summary text');
       expect(ctx.messages).toEqual([]);
     });
 
-    it('propagates pool errors', async () => {
+    it('propagates errors', async () => {
+      const em = buildMockEm({
+        findOne: vi.fn().mockRejectedValue(new Error('load failed')),
+      });
+      const svc = new ConversationManagementService(em);
+
       await expect(
-        conversationManager.loadContext(buildErrPool('load failed'), 'tenant-1', 'conv-1'),
+        svc.loadContext('tenant-1', 'conv-1'),
       ).rejects.toThrow('load failed');
+    });
+  });
+
+  // ── createSnapshot ────────────────────────────────────────────────────
+
+  describe('createSnapshot', () => {
+    it('creates snapshot and archives messages', async () => {
+      const em = buildMockEm();
+      const svc = new ConversationManagementService(em);
+
+      const snapId = await svc.createSnapshot('tenant-1', 'conv-1', 'Summary text', 5);
+
+      expect(snapId).toBe('snap-new');
+      expect(em.persist).toHaveBeenCalled();
+      expect(em.flush).toHaveBeenCalled();
+      expect(em.nativeUpdate).toHaveBeenCalledWith(
+        expect.anything(), // ConversationMessage class
+        { conversation: 'conv-1', snapshotId: null },
+        { snapshotId: 'snap-new' },
+      );
     });
   });
 
@@ -194,7 +241,9 @@ describe('conversationManager', () => {
 
   describe('buildInjectionMessages', () => {
     it('returns empty array for empty context with no snapshot', () => {
-      const result = conversationManager.buildInjectionMessages({
+      const em = buildMockEm();
+      const svc = new ConversationManagementService(em);
+      const result = svc.buildInjectionMessages({
         messages: [],
         tokenEstimate: 0,
         latestSnapshotId: null,
@@ -204,8 +253,10 @@ describe('conversationManager', () => {
     });
 
     it('prepends system summary message when snapshot summary exists', () => {
+      const em = buildMockEm();
+      const svc = new ConversationManagementService(em);
       const messages = [{ role: 'user', content: 'What is 2+2?' }];
-      const result = conversationManager.buildInjectionMessages({
+      const result = svc.buildInjectionMessages({
         messages,
         tokenEstimate: 10,
         latestSnapshotId: 'snap-1',
@@ -220,11 +271,13 @@ describe('conversationManager', () => {
     });
 
     it('returns only messages when no snapshot summary', () => {
+      const em = buildMockEm();
+      const svc = new ConversationManagementService(em);
       const messages = [
         { role: 'user', content: 'question' },
         { role: 'assistant', content: 'answer' },
       ];
-      const result = conversationManager.buildInjectionMessages({
+      const result = svc.buildInjectionMessages({
         messages,
         tokenEstimate: 20,
         latestSnapshotId: null,
@@ -234,7 +287,9 @@ describe('conversationManager', () => {
     });
 
     it('does not prepend system message if snapshot id is set but summary is undefined', () => {
-      const result = conversationManager.buildInjectionMessages({
+      const em = buildMockEm();
+      const svc = new ConversationManagementService(em);
+      const result = svc.buildInjectionMessages({
         messages: [{ role: 'user', content: 'hi' }],
         tokenEstimate: 5,
         latestSnapshotId: 'snap-exists',

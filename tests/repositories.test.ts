@@ -455,13 +455,16 @@ describe('ConversationRepository', () => {
       externalId: 'ext-1',
     };
 
-    it('returns existing conversation when found', async () => {
+    it('returns existing conversation when found and updates lastActiveAt', async () => {
       const existing = makeConversation();
+      existing.lastActiveAt = new Date('2020-01-01');
       vi.mocked(em.findOne).mockResolvedValue(existing);
 
       const result = await repo.findOrCreate(params);
 
-      expect(result).toBe(existing);
+      expect(result.conversation).toBe(existing);
+      expect(result.isNew).toBe(false);
+      expect(existing.lastActiveAt.getTime()).toBeGreaterThan(new Date('2020-01-01').getTime());
       expect(em.persist).not.toHaveBeenCalled();
     });
 
@@ -470,9 +473,10 @@ describe('ConversationRepository', () => {
 
       const result = await repo.findOrCreate(params);
 
-      expect(em.persist).toHaveBeenCalledWith(result);
-      expect(result.externalId).toBe('ext-1');
-      expect(result.id).toBeDefined();
+      expect(result.isNew).toBe(true);
+      expect(em.persist).toHaveBeenCalledWith(result.conversation);
+      expect(result.conversation.externalId).toBe('ext-1');
+      expect(result.conversation.id).toBeDefined();
     });
 
     it('queries with null partition when partitionId is null', async () => {
@@ -502,7 +506,7 @@ describe('ConversationRepository', () => {
 
       const result = await repo.findOrCreate({ ...params, agentId: null });
 
-      expect(result.agent).toBeNull();
+      expect(result.conversation.agent).toBeNull();
     });
   });
 });

@@ -21,13 +21,16 @@ export class ConversationRepository {
     agentId: string | null;
     partitionId: string | null;
     externalId: string;
-  }): Promise<Conversation> {
+  }): Promise<{ conversation: Conversation; isNew: boolean }> {
     const existing = await this.em.findOne(Conversation, {
       tenant: params.tenantId,
       externalId: params.externalId,
       ...(params.partitionId ? { partition: params.partitionId } : { partition: null }),
     });
-    if (existing) return existing;
+    if (existing) {
+      existing.lastActiveAt = new Date();
+      return { conversation: existing, isNew: false };
+    }
 
     const now = new Date();
     const conv = new Conversation();
@@ -42,6 +45,6 @@ export class ConversationRepository {
       ? this.em.getReference(Partition, params.partitionId)
       : null;
     this.em.persist(conv);
-    return conv;
+    return { conversation: conv, isNew: true };
   }
 }

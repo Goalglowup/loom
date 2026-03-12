@@ -10,7 +10,7 @@
  * - IV is stored alongside ciphertext in the trace record
  * - Missing ENCRYPTION_MASTER_KEY env var causes encryption calls to fail with a clear error
  *
- * Mocks query() from src/db.js to capture INSERT parameters — no real DB required.
+ * Uses a mock EntityManager to capture persisted Trace entities — no real DB required.
  */
 
 import {
@@ -20,21 +20,12 @@ import {
   beforeEach,
   afterEach,
   vi,
-  type Mock,
 } from 'vitest';
-
-// ── Module mock ────────────────────────────────────────────────────────────
-
-vi.mock('../src/db.js', () => ({
-  query: vi.fn().mockResolvedValue({ rows: [], rowCount: 0 }),
-  pool: { end: vi.fn() },
-}));
 
 // ── Imports ────────────────────────────────────────────────────────────────
 
 import { TraceRecorder } from '../src/tracing.js';
 import { encryptTraceBody, decryptTraceBody } from '../src/encryption.js';
-import { query } from '../src/db.js';
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
@@ -57,42 +48,38 @@ const PLAIN_RESPONSE = JSON.stringify({
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
-/** Extract INSERT parameters from the first call to the mocked query(). */
-function getInsertParams(callIndex = 0): unknown[] {
-  const calls = (query as Mock).mock.calls;
-  if (calls.length <= callIndex) throw new Error(`query() call[${callIndex}] not found`);
-  return calls[callIndex][1] as unknown[];
+/** Build a mock EntityManager that captures persisted entities. */
+function buildMockEm() {
+  const persisted: any[] = [];
+  const mockEm: any = {
+    persist: vi.fn((entity: any) => { persisted.push(entity); }),
+    flush: vi.fn().mockResolvedValue(undefined),
+    fork: vi.fn(),
+    getReference: vi.fn((_Entity: any, id: string) => ({ id })),
+    _persisted: persisted,
+  };
+  mockEm.fork.mockReturnValue(mockEm);
+  return mockEm;
 }
 
-// Parameter indices in the TraceRecorder INSERT statement:
-//   $1  tenant_id       → index 0
-//   $2  request_id      → index 1
-//   $3  request_id      → index 2
-//   $4  model           → index 3
-//   $5  provider        → index 4
-//   $6  endpoint        → index 5
-//   $7  request_body_ct → index 6  (encrypted ciphertext)
-//   $8  request_iv      → index 7
-//   $9  response_body_ct→ index 8  (encrypted ciphertext)
-//   $10 response_iv     → index 9
-//   $11 latency_ms      → index 10
-const IDX = {
-  tenantId: 0,
-  requestBodyCt: 6,
-  requestIv: 7,
-  responseBodyCt: 8,
-  responseIv: 9,
-} as const;
+/** Get the nth persisted Trace entity. */
+function getPersistedTrace(mockEm: any, index = 0): any {
+  const traces = mockEm._persisted;
+  if (traces.length <= index) throw new Error(`persist() call[${index}] not found`);
+  return traces[index];
+}
 
 // ── Tests ──────────────────────────────────────────────────────────────────
 
 describe('H7: Encryption-at-Rest', () => {
   let recorder: TraceRecorder;
+  let mockEm: any;
 
   beforeEach(() => {
     process.env.ENCRYPTION_MASTER_KEY = TEST_MASTER_KEY;
-    (query as Mock).mockClear();
+    mockEm = buildMockEm();
     recorder = new TraceRecorder();
+    recorder.init(mockEm);
   });
 
   afterEach(() => {
@@ -113,8 +100,8 @@ describe('H7: Encryption-at-Rest', () => {
     });
     await recorder.flush();
 
-    const params = getInsertParams();
-    const storedRequestBody = params[IDX.requestBodyCt] as string;
+    const trace = getPersistedTrace(mockEm);
+    const storedRequestBody = trace.requestBody as string;
 
     expect(storedRequestBody).not.toBe(PLAIN_REQUEST);
     expect(storedRequestBody).toMatch(/^[0-9a-f]+$/i); // hex-encoded ciphertext
@@ -131,8 +118,8 @@ describe('H7: Encryption-at-Rest', () => {
     });
     await recorder.flush();
 
-    const params = getInsertParams();
-    const storedResponseBody = params[IDX.responseBodyCt] as string;
+    const trace = getPersistedTrace(mockEm);
+    const storedResponseBody = trace.responseBody as string;
 
     expect(storedResponseBody).toBeDefined();
     expect(storedResponseBody).not.toBeNull();
@@ -156,8 +143,8 @@ describe('H7: Encryption-at-Rest', () => {
     recorder.record({ ...traceBase, requestId: 'req-iv-2' });
     await recorder.flush();
 
-    const iv1 = getInsertParams(0)[IDX.requestIv] as string;
-    const iv2 = getInsertParams(1)[IDX.requestIv] as string;
+    const iv1 = getPersistedTrace(mockEm, 0).requestIv as string;
+    const iv2 = getPersistedTrace(mockEm, 1).requestIv as string;
 
     expect(iv1).not.toBe(iv2);
     // IVs must be exactly 12 bytes = 24 hex chars
@@ -167,7 +154,7 @@ describe('H7: Encryption-at-Rest', () => {
 
   // ── IV stored alongside ciphertext ────────────────────────────────────
 
-  it('IV is stored alongside ciphertext in the INSERT parameters', async () => {
+  it('IV is stored alongside ciphertext in the persisted Trace entity', async () => {
     recorder.record({
       tenantId: TENANT_1,
       model: 'gpt-4',
@@ -178,11 +165,11 @@ describe('H7: Encryption-at-Rest', () => {
     });
     await recorder.flush();
 
-    const params = getInsertParams();
+    const trace = getPersistedTrace(mockEm);
 
     // Both request and response should have their IVs stored
-    const requestIv = params[IDX.requestIv] as string;
-    const responseIv = params[IDX.responseIv] as string;
+    const requestIv = trace.requestIv as string;
+    const responseIv = trace.responseIv as string;
 
     expect(requestIv).toMatch(/^[0-9a-f]{24}$/i);
     expect(responseIv).toMatch(/^[0-9a-f]{24}$/i);
@@ -211,8 +198,8 @@ describe('H7: Encryption-at-Rest', () => {
     });
     await recorder.flush();
 
-    const ctTenant1 = getInsertParams(0)[IDX.requestBodyCt] as string;
-    const ctTenant2 = getInsertParams(1)[IDX.requestBodyCt] as string;
+    const ctTenant1 = getPersistedTrace(mockEm, 0).requestBody as string;
+    const ctTenant2 = getPersistedTrace(mockEm, 1).requestBody as string;
 
     // Different per-tenant keys produce different ciphertext even for identical plaintext
     expect(ctTenant1).not.toBe(ctTenant2);

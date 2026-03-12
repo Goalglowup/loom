@@ -1,304 +1,297 @@
 /**
  * PortalService — encapsulates all database access for portal routes.
  * Route handlers stay thin: parse HTTP → call PortalService → return DTO.
+ *
+ * Migrated from raw SQL (Knex) to MikroORM entity operations.
+ * Recursive CTEs for tenant chain resolution use em.getConnection().execute().
  */
 import type { EntityManager } from '@mikro-orm/core';
+import { User } from '../../domain/entities/User.js';
+import { Tenant } from '../../domain/entities/Tenant.js';
+import { TenantMembership } from '../../domain/entities/TenantMembership.js';
+import { Agent } from '../../domain/entities/Agent.js';
+import { Invite } from '../../domain/entities/Invite.js';
+import { BetaSignup } from '../../domain/entities/BetaSignup.js';
+import { Trace } from '../../domain/entities/Trace.js';
+import { Partition } from '../../domain/entities/Partition.js';
+import { Conversation } from '../../domain/entities/Conversation.js';
+import { ConversationMessage } from '../../domain/entities/ConversationMessage.js';
+import { ConversationSnapshot } from '../../domain/entities/ConversationSnapshot.js';
+import { randomUUID } from 'node:crypto';
 
 export class PortalService {
   constructor(private readonly em: EntityManager) {}
 
-  private async rawQuery<T extends object = Record<string, unknown>>(sql: string, params: unknown[] = []): Promise<{ rows: T[] }> {
-    const knex = (this.em as any).getKnex();
-    // Convert PostgreSQL placeholders ($1, $2, etc.) to Knex placeholders (?)
-    // But only outside of quoted strings to avoid replacing '$2' in expressions like "'$2 hours'"
-    let convertedSql = sql;
-    for (let i = params.length; i >= 1; i--) {
-      // Match $i that's NOT inside single quotes
-      // This is a simplified approach - splits by quotes and only replaces in non-quoted parts
-      const parts = convertedSql.split("'");
-      for (let j = 0; j < parts.length; j += 2) {
-        // Only replace in parts that are outside quotes (even indices)
-        parts[j] = parts[j].replace(new RegExp(`\\$${i}\\b`, 'g'), '?');
-      }
-      convertedSql = parts.join("'");
-    }
-    const result = await knex.raw(convertedSql, params);
-    return { rows: result.rows as T[] };
-  }
-
   // ── Profile ───────────────────────────────────────────────────────────────
 
   async getMe(userId: string, tenantId: string) {
-    const result = await this.rawQuery<{
-      id: string; email: string; role: string;
-      tenant_id: string; tenant_name: string;
-      provider_config: Record<string, unknown> | null;
-      available_models: string[] | null;
-    }>(
-      `SELECT u.id, u.email, tm.role, t.id AS tenant_id, t.name AS tenant_name, t.provider_config, t.available_models
-       FROM users u
-       JOIN tenant_memberships tm ON tm.user_id = u.id
-       JOIN tenants t ON t.id = tm.tenant_id
-       WHERE u.id = $1 AND t.id = $2`,
-      [userId, tenantId],
+    const membership = await this.em.findOne(
+      TenantMembership,
+      { user: userId, tenant: tenantId },
+      { populate: ['user', 'tenant'] },
     );
-    if (result.rows.length === 0) return null;
+    if (!membership) return null;
 
-    const tenantsResult = await this.rawQuery<{
-      tenant_id: string; tenant_name: string; role: string;
-    }>(
-      `SELECT tm.tenant_id, t.name AS tenant_name, tm.role
-       FROM tenant_memberships tm
-       JOIN tenants t ON tm.tenant_id = t.id
-       WHERE tm.user_id = $1 AND t.status = 'active'
-       ORDER BY tm.joined_at ASC`,
-      [userId],
+    const user = membership.user;
+    const tenant = membership.tenant;
+
+    const allMemberships = await this.em.find(
+      TenantMembership,
+      { user: userId, tenant: { status: 'active' } },
+      { populate: ['tenant'], orderBy: { joinedAt: 'ASC' } },
     );
 
-    const [agentsResult, subtenantsResult] = await Promise.all([
-      this.rawQuery<{ id: string; name: string }>(
-        'SELECT id, name FROM agents WHERE tenant_id = $1 ORDER BY created_at',
-        [tenantId],
-      ),
-      this.rawQuery<{ id: string; name: string; status: string }>(
-        'SELECT id, name, status FROM tenants WHERE parent_id = $1 ORDER BY created_at',
-        [tenantId],
-      ),
+    const [agents, subtenants] = await Promise.all([
+      this.em.find(Agent, { tenant: tenantId }, { orderBy: { createdAt: 'ASC' } }),
+      this.em.find(Tenant, { parentId: tenantId }, { orderBy: { createdAt: 'ASC' } }),
     ]);
 
     return {
-      row: result.rows[0],
-      tenants: tenantsResult.rows,
-      agents: agentsResult.rows,
-      subtenants: subtenantsResult.rows,
+      row: {
+        id: user.id,
+        email: user.email,
+        role: membership.role,
+        tenant_id: tenant.id,
+        tenant_name: tenant.name,
+        provider_config: tenant.providerConfig,
+        available_models: tenant.availableModels,
+      },
+      tenants: allMemberships.map((m) => ({
+        tenant_id: m.tenant.id,
+        tenant_name: m.tenant.name,
+        role: m.role,
+      })),
+      agents: agents.map((a) => ({ id: a.id, name: a.name })),
+      subtenants: subtenants.map((s) => ({ id: s.id, name: s.name, status: s.status })),
     };
   }
 
   // ── Traces ────────────────────────────────────────────────────────────────
 
   async listTraces(tenantId: string, limit: number, cursor?: string) {
-    let result;
-    if (cursor) {
-      result = await this.rawQuery(
-        `SELECT id, tenant_id, model, provider, status_code, latency_ms,
-                prompt_tokens, completion_tokens, ttfb_ms, gateway_overhead_ms, created_at
-         FROM   traces
-         WHERE  tenant_id = $1
-           AND  created_at < $2::timestamptz
-         ORDER  BY created_at DESC
-         LIMIT  $3`,
-        [tenantId, cursor, limit],
-      );
-    } else {
-      result = await this.rawQuery(
-        `SELECT id, tenant_id, model, provider, status_code, latency_ms,
-                prompt_tokens, completion_tokens, ttfb_ms, gateway_overhead_ms, created_at
-         FROM   traces
-         WHERE  tenant_id = $1
-         ORDER  BY created_at DESC
-         LIMIT  $2`,
-        [tenantId, limit],
-      );
-    }
-    return result.rows;
+    const traces = await this.em.find(
+      Trace,
+      {
+        tenant: tenantId,
+        ...(cursor ? { createdAt: { $lt: new Date(cursor) } } : {}),
+      },
+      {
+        orderBy: { createdAt: 'DESC' },
+        limit,
+      },
+    );
+
+    return traces.map((t) => ({
+      id: t.id,
+      tenant_id: (t.tenant as any)?.id ?? tenantId,
+      model: t.model,
+      provider: t.provider,
+      status_code: t.statusCode,
+      latency_ms: t.latencyMs,
+      prompt_tokens: t.promptTokens,
+      completion_tokens: t.completionTokens,
+      ttfb_ms: t.ttfbMs,
+      gateway_overhead_ms: t.gatewayOverheadMs,
+      created_at: t.createdAt,
+    }));
   }
 
   // ── Tenants ───────────────────────────────────────────────────────────────
 
   async listUserTenants(userId: string) {
-    const result = await this.rawQuery<{
-      tenant_id: string; tenant_name: string; role: string; joined_at: string;
-    }>(
-      `SELECT tm.tenant_id, t.name AS tenant_name, tm.role, tm.joined_at
-       FROM tenant_memberships tm
-       JOIN tenants t ON tm.tenant_id = t.id
-       WHERE tm.user_id = $1 AND t.status = 'active'
-       ORDER BY tm.joined_at ASC`,
-      [userId],
+    const memberships = await this.em.find(
+      TenantMembership,
+      { user: userId, tenant: { status: 'active' } },
+      { populate: ['tenant'], orderBy: { joinedAt: 'ASC' } },
     );
-    return result.rows;
+
+    return memberships.map((m) => ({
+      tenant_id: m.tenant.id,
+      tenant_name: m.tenant.name,
+      role: m.role,
+      joined_at: m.joinedAt,
+    }));
   }
 
   async getInviteInfo(token: string) {
     // First check if it's a beta signup invite code.
     // Beta invite codes are UUIDs, while tenant invite tokens are base64url strings.
-    // Only query if the token looks like a UUID to avoid a PostgreSQL uuid cast error.
     const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-    const betaResult = UUID_RE.test(token)
-      ? await this.rawQuery<{
-          email: string; approved_at: string | null; invite_used_at: string | null;
-        }>(
-          `SELECT email, approved_at, invite_used_at
-           FROM beta_signups
-           WHERE invite_code = $1`,
-          [token],
-        )
-      : { rows: [] as { email: string; approved_at: string | null; invite_used_at: string | null }[] };
 
-    if (betaResult.rows.length > 0) {
-      const beta = betaResult.rows[0];
-      return {
-        tenant_name: 'Arachne', // Beta invites create new tenants
-        expires_at: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString(), // 1 year validity
-        revoked_at: null,
-        max_uses: 1,
-        use_count: beta.invite_used_at ? 1 : 0,
-        tenant_status: 'active',
-      };
+    if (UUID_RE.test(token)) {
+      const beta = await this.em.findOne(BetaSignup, { inviteCode: token });
+      if (beta) {
+        return {
+          tenant_name: 'Arachne',
+          expires_at: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString(),
+          revoked_at: null,
+          max_uses: 1,
+          use_count: beta.inviteUsedAt ? 1 : 0,
+          tenant_status: 'active',
+        };
+      }
     }
 
     // Otherwise check for tenant invite
-    const result = await this.rawQuery<{
-      tenant_name: string; expires_at: string;
-      revoked_at: string | null; max_uses: number | null; use_count: number;
-      tenant_status: string;
-    }>(
-      `SELECT t.name AS tenant_name, i.expires_at, i.revoked_at,
-              i.max_uses, i.use_count, t.status AS tenant_status
-       FROM invites i
-       JOIN tenants t ON i.tenant_id = t.id
-       WHERE i.token = $1`,
-      [token],
-    );
-    return result.rows.length > 0 ? result.rows[0] : null;
+    const invite = await this.em.findOne(Invite, { token }, { populate: ['tenant'] });
+    if (!invite) return null;
+
+    return {
+      tenant_name: invite.tenant.name,
+      expires_at: invite.expiresAt,
+      revoked_at: invite.revokedAt,
+      max_uses: invite.maxUses,
+      use_count: invite.useCount,
+      tenant_status: invite.tenant.status,
+    };
   }
 
   async listSubtenants(tenantId: string) {
-    const result = await this.rawQuery<{
-      id: string; name: string; parent_id: string; status: string; created_at: string;
-    }>(
-      'SELECT id, name, parent_id, status, created_at FROM tenants WHERE parent_id = $1 ORDER BY created_at',
-      [tenantId],
+    const tenants = await this.em.find(
+      Tenant,
+      { parentId: tenantId },
+      { orderBy: { createdAt: 'ASC' } },
     );
-    return result.rows;
+
+    return tenants.map((t) => ({
+      id: t.id,
+      name: t.name,
+      parent_id: t.parentId,
+      status: t.status,
+      created_at: t.createdAt,
+    }));
   }
 
   // ── Agents ────────────────────────────────────────────────────────────────
 
   async listAgents(tenantId: string) {
-    const result = await this.rawQuery<{
-      id: string; name: string;
-      provider_config: Record<string, unknown> | null;
-      system_prompt: string | null;
-      skills: unknown[] | null;
-      mcp_endpoints: unknown[] | null;
-      merge_policies: Record<string, unknown>;
-      available_models: string[] | null;
-      conversations_enabled: boolean;
-      conversation_token_limit: number | null;
-      conversation_summary_model: string | null;
-      created_at: string; updated_at: string | null;
-    }>(
-      `SELECT id, name, provider_config, system_prompt, skills, mcp_endpoints, merge_policies,
-              available_models, conversations_enabled, conversation_token_limit,
-              conversation_summary_model, created_at, updated_at
-       FROM agents WHERE tenant_id = $1 ORDER BY created_at`,
-      [tenantId],
+    const agents = await this.em.find(
+      Agent,
+      { tenant: tenantId },
+      { orderBy: { createdAt: 'ASC' } },
     );
-    return result.rows;
+
+    return agents.map((a) => ({
+      id: a.id,
+      name: a.name,
+      provider_config: a.providerConfig,
+      system_prompt: a.systemPrompt,
+      skills: a.skills,
+      mcp_endpoints: a.mcpEndpoints,
+      merge_policies: a.mergePolicies,
+      available_models: a.availableModels,
+      conversations_enabled: a.conversationsEnabled,
+      conversation_token_limit: a.conversationTokenLimit,
+      conversation_summary_model: a.conversationSummaryModel,
+      created_at: a.createdAt,
+      updated_at: a.updatedAt,
+    }));
   }
 
   async getAgent(agentId: string, userId: string) {
-    const result = await this.rawQuery<{
-      id: string; name: string;
-      provider_config: Record<string, unknown> | null;
-      system_prompt: string | null;
-      skills: unknown[] | null;
-      mcp_endpoints: unknown[] | null;
-      merge_policies: Record<string, unknown>;
-      available_models: string[] | null;
-      conversations_enabled: boolean;
-      conversation_token_limit: number | null;
-      conversation_summary_model: string | null;
-      created_at: string; updated_at: string | null;
-    }>(
-      `SELECT a.id, a.name, a.provider_config, a.system_prompt, a.skills, a.mcp_endpoints, a.merge_policies,
-              a.available_models, a.conversations_enabled, a.conversation_token_limit,
-              a.conversation_summary_model, a.created_at, a.updated_at
-       FROM agents a
-       JOIN tenant_memberships tm ON tm.tenant_id = a.tenant_id
-       WHERE a.id = $1 AND tm.user_id = $2`,
-      [agentId, userId],
-    );
-    return result.rows.length > 0 ? result.rows[0] : null;
+    // Find agent where the user has membership in the agent's tenant
+    const agent = await this.em.findOne(Agent, { id: agentId });
+    if (!agent) return null;
+
+    const membership = await this.em.findOne(TenantMembership, {
+      tenant: (agent.tenant as any)?.id ?? agent.tenant,
+      user: userId,
+    });
+    if (!membership) return null;
+
+    return {
+      id: agent.id,
+      name: agent.name,
+      provider_config: agent.providerConfig,
+      system_prompt: agent.systemPrompt,
+      skills: agent.skills,
+      mcp_endpoints: agent.mcpEndpoints,
+      merge_policies: agent.mergePolicies,
+      available_models: agent.availableModels,
+      conversations_enabled: agent.conversationsEnabled,
+      conversation_token_limit: agent.conversationTokenLimit,
+      conversation_summary_model: agent.conversationSummaryModel,
+      created_at: agent.createdAt,
+      updated_at: agent.updatedAt,
+    };
   }
 
   async getAgentResolved(agentId: string, userId: string) {
-    const agentResult = await this.rawQuery<{
-      id: string; name: string; tenant_id: string;
-      provider_config: Record<string, unknown> | null;
-      system_prompt: string | null;
-      skills: unknown[] | null;
-      mcp_endpoints: unknown[] | null;
-      merge_policies: Record<string, unknown>;
-    }>(
-      `SELECT a.id, a.name, a.tenant_id, a.provider_config, a.system_prompt,
-              a.skills, a.mcp_endpoints, a.merge_policies
-       FROM agents a
-       JOIN tenant_memberships tm ON tm.tenant_id = a.tenant_id
-       WHERE a.id = $1 AND tm.user_id = $2`,
-      [agentId, userId],
-    );
-    if (agentResult.rows.length === 0) return null;
+    const agent = await this.em.findOne(Agent, { id: agentId }, { populate: ['tenant'] });
+    if (!agent) return null;
 
-    const agent = agentResult.rows[0];
-    const chainResult = await this.rawQuery<{
-      id: string; name: string;
-      provider_config: Record<string, unknown> | null;
-      system_prompt: string | null;
-      skills: unknown[] | null;
-      mcp_endpoints: unknown[] | null;
-      depth: number;
-    }>(
-      `WITH RECURSIVE tenant_chain AS (
-         SELECT id, name, parent_id, provider_config, system_prompt, skills, mcp_endpoints, 0 AS depth
-         FROM tenants WHERE id = $1
-         UNION ALL
-         SELECT t.id, t.name, t.parent_id, t.provider_config, t.system_prompt, t.skills, t.mcp_endpoints, tc.depth + 1
-         FROM tenants t
-         JOIN tenant_chain tc ON t.id = tc.parent_id
-       )
-       SELECT id, name, provider_config, system_prompt, skills, mcp_endpoints, depth
-       FROM tenant_chain ORDER BY depth ASC`,
-      [agent.tenant_id],
-    );
-    return { agent, tenantChain: chainResult.rows };
+    const tenantId = agent.tenant.id;
+    const membership = await this.em.findOne(TenantMembership, {
+      tenant: tenantId,
+      user: userId,
+    });
+    if (!membership) return null;
+
+    const tenantChain = await this.loadTenantChain(tenantId);
+
+    return {
+      agent: {
+        id: agent.id,
+        name: agent.name,
+        tenant_id: tenantId,
+        provider_config: agent.providerConfig,
+        system_prompt: agent.systemPrompt,
+        skills: agent.skills,
+        mcp_endpoints: agent.mcpEndpoints,
+        merge_policies: agent.mergePolicies,
+      },
+      tenantChain,
+    };
   }
 
   async getAgentForChat(agentId: string, userId: string) {
-    const agentResult = await this.rawQuery<{
-      id: string; name: string; tenant_id: string;
-      provider_config: Record<string, unknown> | null;
-      system_prompt: string | null;
-      skills: unknown[] | null;
-      mcp_endpoints: unknown[] | null;
-      merge_policies: Record<string, unknown>;
-      conversations_enabled: boolean;
-      conversation_token_limit: number | null;
-      conversation_summary_model: string | null;
-    }>(
-      `SELECT a.id, a.name, a.tenant_id, a.provider_config, a.system_prompt, a.skills,
-              a.mcp_endpoints, a.merge_policies, a.conversations_enabled,
-              a.conversation_token_limit, a.conversation_summary_model
-       FROM agents a
-       JOIN tenant_memberships tm ON tm.tenant_id = a.tenant_id
-       WHERE a.id = $1 AND tm.user_id = $2`,
-      [agentId, userId],
-    );
-    if (agentResult.rows.length === 0) return null;
+    const agent = await this.em.findOne(Agent, { id: agentId }, { populate: ['tenant'] });
+    if (!agent) return null;
 
-    const agent = agentResult.rows[0];
-    const chainResult = await this.rawQuery<{
-      id: string; name: string;
-      provider_config: Record<string, unknown> | null;
-      system_prompt: string | null;
-      skills: unknown[] | null;
-      mcp_endpoints: unknown[] | null;
-      depth: number;
-    }>(
+    const tenantId = agent.tenant.id;
+    const membership = await this.em.findOne(TenantMembership, {
+      tenant: tenantId,
+      user: userId,
+    });
+    if (!membership) return null;
+
+    const tenantChain = await this.loadTenantChain(tenantId);
+
+    return {
+      agent: {
+        id: agent.id,
+        name: agent.name,
+        tenant_id: tenantId,
+        provider_config: agent.providerConfig,
+        system_prompt: agent.systemPrompt,
+        skills: agent.skills,
+        mcp_endpoints: agent.mcpEndpoints,
+        merge_policies: agent.mergePolicies,
+        conversations_enabled: agent.conversationsEnabled,
+        conversation_token_limit: agent.conversationTokenLimit,
+        conversation_summary_model: agent.conversationSummaryModel,
+      },
+      tenantChain,
+    };
+  }
+
+  /**
+   * Load the tenant inheritance chain using recursive CTE.
+   * Uses Knex raw query with ? placeholders (single parameter, no reuse issue).
+   */
+  private async loadTenantChain(tenantId: string): Promise<Array<{
+    id: string; name: string;
+    provider_config: Record<string, unknown> | null;
+    system_prompt: string | null;
+    skills: unknown[] | null;
+    mcp_endpoints: unknown[] | null;
+    depth: number;
+  }>> {
+    const knex = (this.em as any).getKnex();
+    const result = await knex.raw(
       `WITH RECURSIVE tenant_chain AS (
          SELECT id, name, parent_id, provider_config, system_prompt, skills, mcp_endpoints, 0 AS depth
-         FROM tenants WHERE id = $1
+         FROM tenants WHERE id = ?
          UNION ALL
          SELECT t.id, t.name, t.parent_id, t.provider_config, t.system_prompt, t.skills, t.mcp_endpoints, tc.depth + 1
          FROM tenants t
@@ -306,25 +299,28 @@ export class PortalService {
        )
        SELECT id, name, provider_config, system_prompt, skills, mcp_endpoints, depth
        FROM tenant_chain ORDER BY depth ASC`,
-      [agent.tenant_id],
+      [tenantId],
     );
-    return { agent, tenantChain: chainResult.rows };
+    return result.rows;
   }
 
   // ── Partitions ────────────────────────────────────────────────────────────
 
   async listPartitions(tenantId: string) {
-    const result = await this.rawQuery<{
-      id: string; parent_id: string | null; external_id: string;
-      title_encrypted: string | null; title_iv: string | null; created_at: string;
-    }>(
-      `SELECT id, parent_id, external_id, title_encrypted, title_iv, created_at
-       FROM partitions
-       WHERE tenant_id = $1
-       ORDER BY created_at ASC`,
-      [tenantId],
+    const partitions = await this.em.find(
+      Partition,
+      { tenant: tenantId },
+      { orderBy: { createdAt: 'ASC' } },
     );
-    return result.rows;
+
+    return partitions.map((p) => ({
+      id: p.id,
+      parent_id: p.parentId,
+      external_id: p.externalId,
+      title_encrypted: p.titleEncrypted,
+      title_iv: p.titleIv,
+      created_at: p.createdAt,
+    }));
   }
 
   async createPartition(
@@ -334,15 +330,23 @@ export class PortalService {
     titleEncrypted: string | null,
     titleIv: string | null,
   ) {
-    const result = await this.rawQuery<{
-      id: string; external_id: string; parent_id: string | null; created_at: string;
-    }>(
-      `INSERT INTO partitions (tenant_id, parent_id, external_id, title_encrypted, title_iv)
-       VALUES ($1, $2, $3, $4, $5)
-       RETURNING id, external_id, parent_id, created_at`,
-      [tenantId, parentId, externalId, titleEncrypted, titleIv],
-    );
-    return result.rows[0];
+    const partition = new Partition();
+    partition.id = randomUUID();
+    partition.tenant = this.em.getReference(Tenant, tenantId);
+    partition.externalId = externalId;
+    partition.parentId = parentId;
+    partition.titleEncrypted = titleEncrypted;
+    partition.titleIv = titleIv;
+    partition.createdAt = new Date();
+    this.em.persist(partition);
+    await this.em.flush();
+
+    return {
+      id: partition.id,
+      external_id: partition.externalId,
+      parent_id: partition.parentId,
+      created_at: partition.createdAt,
+    };
   }
 
   async updatePartition(
@@ -354,84 +358,91 @@ export class PortalService {
       parentId?: string | null;
     },
   ): Promise<boolean> {
-    const sets: string[] = [];
-    const params: unknown[] = [id, tenantId];
+    const partition = await this.em.findOne(Partition, { id, tenant: tenantId });
+    if (!partition) return false;
 
     if (updates.titleEncrypted !== undefined && updates.titleIv !== undefined) {
-      sets.push(`title_encrypted = $${params.length + 1}, title_iv = $${params.length + 2}`);
-      params.push(updates.titleEncrypted, updates.titleIv);
+      partition.titleEncrypted = updates.titleEncrypted;
+      partition.titleIv = updates.titleIv;
     }
     if ('parentId' in updates) {
-      sets.push(`parent_id = $${params.length + 1}`);
-      params.push(updates.parentId);
+      partition.parentId = updates.parentId!;
     }
-    if (sets.length === 0) return false;
 
-    const result = await this.rawQuery(
-      `UPDATE partitions SET ${sets.join(', ')} WHERE id = $1 AND tenant_id = $2 RETURNING id`,
-      params,
-    );
-    return (result.rows.length) > 0;
+    await this.em.flush();
+    return true;
   }
 
   async deletePartition(id: string, tenantId: string): Promise<boolean> {
-    const result = await this.rawQuery(
-      'DELETE FROM partitions WHERE id = $1 AND tenant_id = $2 RETURNING id',
-      [id, tenantId],
-    );
-    return result.rows.length > 0;
+    const partition = await this.em.findOne(Partition, { id, tenant: tenantId });
+    if (!partition) return false;
+    await this.em.removeAndFlush(partition);
+    return true;
   }
 
   // ── Conversations ─────────────────────────────────────────────────────────
 
   async listConversations(tenantId: string, partitionId?: string | null) {
-    const result = await this.rawQuery<{
-      id: string; agent_id: string | null; partition_id: string | null;
-      external_id: string; created_at: string; last_active_at: string;
-    }>(
-      partitionId
-        ? `SELECT c.id, c.agent_id, c.partition_id, c.external_id, c.created_at, c.last_active_at
-           FROM conversations c
-           WHERE c.tenant_id = $1 AND c.partition_id = $2
-           ORDER BY c.last_active_at DESC`
-        : `SELECT c.id, c.agent_id, c.partition_id, c.external_id, c.created_at, c.last_active_at
-           FROM conversations c
-           WHERE c.tenant_id = $1
-           ORDER BY c.last_active_at DESC`,
-      partitionId ? [tenantId, partitionId] : [tenantId],
+    const conversations = await this.em.find(
+      Conversation,
+      {
+        tenant: tenantId,
+        ...(partitionId ? { partition: partitionId } : {}),
+      },
+      { orderBy: { lastActiveAt: 'DESC' } },
     );
-    return result.rows;
+
+    return conversations.map((c) => ({
+      id: c.id,
+      agent_id: (c.agent as any)?.id ?? null,
+      partition_id: (c.partition as any)?.id ?? null,
+      external_id: c.externalId,
+      created_at: c.createdAt,
+      last_active_at: c.lastActiveAt,
+    }));
   }
 
   async getConversation(id: string, tenantId: string) {
-    const convResult = await this.rawQuery<{
-      id: string; agent_id: string | null; partition_id: string | null;
-      external_id: string; created_at: string; last_active_at: string;
-    }>(
-      `SELECT id, agent_id, partition_id, external_id, created_at, last_active_at
-       FROM conversations WHERE id = $1 AND tenant_id = $2`,
-      [id, tenantId],
-    );
-    if (convResult.rows.length === 0) return null;
+    const conv = await this.em.findOne(Conversation, { id, tenant: tenantId });
+    if (!conv) return null;
 
-    const snapResult = await this.rawQuery<{
-      id: string; summary_encrypted: string; summary_iv: string;
-      messages_archived: number; created_at: string;
-    }>(
-      `SELECT id, summary_encrypted, summary_iv, messages_archived, created_at
-       FROM conversation_snapshots WHERE conversation_id = $1 ORDER BY created_at ASC`,
-      [id],
+    const snapshots = await this.em.find(
+      ConversationSnapshot,
+      { conversation: id },
+      { orderBy: { createdAt: 'ASC' } },
     );
 
-    const msgResult = await this.rawQuery<{
-      id: string; role: string; content_encrypted: string; content_iv: string;
-      token_estimate: number | null; snapshot_id: string | null; created_at: string;
-    }>(
-      `SELECT id, role, content_encrypted, content_iv, token_estimate, snapshot_id, created_at
-       FROM conversation_messages WHERE conversation_id = $1 ORDER BY created_at ASC`,
-      [id],
+    const messages = await this.em.find(
+      ConversationMessage,
+      { conversation: id },
+      { orderBy: { createdAt: 'ASC' } },
     );
 
-    return { conv: convResult.rows[0], snapshots: snapResult.rows, messages: msgResult.rows };
+    return {
+      conv: {
+        id: conv.id,
+        agent_id: (conv.agent as any)?.id ?? null,
+        partition_id: (conv.partition as any)?.id ?? null,
+        external_id: conv.externalId,
+        created_at: conv.createdAt,
+        last_active_at: conv.lastActiveAt,
+      },
+      snapshots: snapshots.map((s) => ({
+        id: s.id,
+        summary_encrypted: s.summaryEncrypted,
+        summary_iv: s.summaryIv,
+        messages_archived: s.messagesArchived,
+        created_at: s.createdAt,
+      })),
+      messages: messages.map((m) => ({
+        id: m.id,
+        role: m.role,
+        content_encrypted: m.contentEncrypted,
+        content_iv: m.contentIv,
+        token_estimate: m.tokenEstimate,
+        snapshot_id: m.snapshotId,
+        created_at: m.createdAt,
+      })),
+    };
   }
 }
