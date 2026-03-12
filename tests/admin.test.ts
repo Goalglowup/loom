@@ -164,7 +164,7 @@ function buildMockEm(options: { apiKeys?: Map<string, any>; tenants?: Map<string
   const tenants = options.tenants ?? new Map();
   const providerConfigs = options.providerConfigs ?? new Map();
 
-  return {
+  const mockEm = {
     findOne: vi.fn().mockImplementation(async (_Entity: any, where: any, _opts?: any) => {
       if (where && where.keyHash !== undefined) {
         const key = [...apiKeys.values()].find((k: any) => k.key_hash === where.keyHash && k.status === where.status);
@@ -200,7 +200,14 @@ function buildMockEm(options: { apiKeys?: Map<string, any>; tenants?: Map<string
       }
       return [];
     }),
+    persist: vi.fn(),
+    flush: vi.fn().mockResolvedValue(undefined),
   } as unknown as EntityManager;
+
+  // Add fork() method that returns the same mock
+  (mockEm as any).fork = vi.fn(() => mockEm);
+
+  return mockEm;
 }
 
 async function buildApp(adminService: AdminService, mockEm: EntityManager): Promise<FastifyInstance> {

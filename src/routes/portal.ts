@@ -133,6 +133,7 @@ export function registerPortalRoutes(
           token: result.token,
           user: { id: result.userId, email: result.email },
           tenant: { id: result.tenantId, name: result.tenantName },
+          tenants: [{ id: result.tenantId, name: result.tenantName, role: 'owner' }],
         });
       } catch (err: any) {
         if (err.status === 409) return reply.code(409).send({ error: err.message });
@@ -675,10 +676,11 @@ export function registerPortalRoutes(
       skills?: unknown[];
       mcpEndpoints?: unknown[];
       mergePolicies?: Record<string, unknown>;
+      conversationsEnabled?: boolean;
     };
   }>('/v1/portal/agents', { preHandler: authRequired }, async (request, reply) => {
     const { tenantId } = request.portalUser!;
-    const { name, providerConfig, systemPrompt, skills, mcpEndpoints, mergePolicies } = request.body;
+    const { name, providerConfig, systemPrompt, skills, mcpEndpoints, mergePolicies, conversationsEnabled } = request.body;
 
     if (!name || typeof name !== 'string' || name.trim().length === 0) {
       return reply.code(400).send({ error: 'name is required' });
@@ -693,6 +695,7 @@ export function registerPortalRoutes(
       skills: skills ?? null,
       mcpEndpoints: mcpEndpoints ?? null,
       mergePolicies,
+      conversationsEnabled,
     });
 
     return reply.code(201).send({ agent: formatAgent({

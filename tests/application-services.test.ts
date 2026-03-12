@@ -1,5 +1,7 @@
-import { describe, it, expect, beforeAll, beforeEach, vi } from 'vitest';
-import type { EntityManager } from '@mikro-orm/core';
+import { describe, it, expect, beforeAll, beforeEach, afterAll, vi } from 'vitest';
+import type { EntityManager, MikroORM } from '@mikro-orm/core';
+import { Collection } from '@mikro-orm/core';
+import { defineConfig } from '@mikro-orm/postgresql';
 import { UserManagementService } from '../src/application/services/UserManagementService.js';
 import { TenantManagementService } from '../src/application/services/TenantManagementService.js';
 import { TenantService } from '../src/application/services/TenantService.js';
@@ -9,10 +11,32 @@ import { User } from '../src/domain/entities/User.js';
 import { TenantMembership } from '../src/domain/entities/TenantMembership.js';
 import { ApiKey } from '../src/domain/entities/ApiKey.js';
 import { Invite } from '../src/domain/entities/Invite.js';
+import { BetaSignup } from '../src/domain/entities/BetaSignup.js';
+import { allSchemas } from '../src/domain/schemas/index.js';
 
 vi.mock('../src/providers/registry.js', () => ({
   evictProvider: vi.fn(),
 }));
+
+// Initialize MikroORM metadata for Collection validation
+let orm: MikroORM;
+
+beforeAll(async () => {
+  const { MikroORM } = await import('@mikro-orm/postgresql');
+  orm = await MikroORM.init(
+    defineConfig({
+      entities: allSchemas,
+      dbName: 'test',
+      connect: false, // Don't actually connect to a database
+    })
+  );
+});
+
+afterAll(async () => {
+  if (orm) {
+    await orm.close();
+  }
+});
 
 function buildMockEm(overrides: Partial<Record<string, any>> = {}): EntityManager {
   return {
@@ -40,10 +64,11 @@ function makeTenant(overrides: Partial<Tenant> = {}): Tenant {
     availableModels: null,
     updatedAt: null,
     createdAt: new Date(),
-    agents: [],
-    members: [],
-    invites: [],
   });
+  // Initialize collections properly
+  t.agents = new Collection<Agent>(t);
+  t.members = new Collection<TenantMembership>(t);
+  t.invites = new Collection<Invite>(t);
   Object.assign(t, overrides);
   return t;
 }
@@ -64,8 +89,9 @@ function makeAgent(tenant: Tenant, overrides: Partial<Agent> = {}): Agent {
     conversationSummaryModel: null,
     createdAt: new Date(),
     updatedAt: null,
-    apiKeys: [],
   });
+  // Initialize apiKeys collection properly
+  a.apiKeys = new Collection<ApiKey>(a);
   Object.assign(a, overrides);
   return a;
 }
@@ -300,6 +326,7 @@ describe('UserManagementService', () => {
       const invite = makeValidInvite();
       const em = buildMockEm({
         findOne: vi.fn()
+          // No BetaSignup lookup — 'valid-token' is not a UUID, so it's skipped
           .mockResolvedValueOnce(invite)   // Invite lookup
           .mockResolvedValueOnce(null)     // User lookup (new user)
           .mockResolvedValueOnce(null),    // existing membership check
@@ -319,6 +346,7 @@ describe('UserManagementService', () => {
       const existingUser = makeUser();
       const em = buildMockEm({
         findOne: vi.fn()
+          // No BetaSignup lookup — 'valid-token' is not a UUID, so it's skipped
           .mockResolvedValueOnce(invite)
           .mockResolvedValueOnce(existingUser)
           .mockResolvedValueOnce(null), // no existing membership
@@ -343,6 +371,7 @@ describe('UserManagementService', () => {
     it('throws when invite has expired', async () => {
       const expired = makeValidInvite();
       expired.expiresAt = new Date(Date.now() - 1000);
+      // No BetaSignup lookup — 'valid-token' is not a UUID, so it's skipped
       const em = buildMockEm({ findOne: vi.fn().mockResolvedValue(expired) });
       const svc = new UserManagementService(em);
       await expect(
@@ -353,6 +382,7 @@ describe('UserManagementService', () => {
     it('throws when invite is revoked', async () => {
       const revoked = makeValidInvite();
       revoked.revokedAt = new Date();
+      // No BetaSignup lookup — 'valid-token' is not a UUID, so it's skipped
       const em = buildMockEm({ findOne: vi.fn().mockResolvedValue(revoked) });
       const svc = new UserManagementService(em);
       await expect(
@@ -370,6 +400,7 @@ describe('UserManagementService', () => {
 
     it('throws 400 if invite tenant is not active', async () => {
       const invite = makeValidInvite({ status: 'suspended' });
+      // No BetaSignup lookup — 'valid-token' is not a UUID, so it's skipped
       const em = buildMockEm({ findOne: vi.fn().mockResolvedValue(invite) });
       const svc = new UserManagementService(em);
       await expect(
@@ -387,9 +418,10 @@ describe('UserManagementService', () => {
         role: 'member',
         joinedAt: new Date(),
       });
-      
+
       const em = buildMockEm({
         findOne: vi.fn()
+          // No BetaSignup lookup — 'valid-token' is not a UUID, so it's skipped
           .mockResolvedValueOnce(invite)
           .mockResolvedValueOnce(existingUser)
           .mockResolvedValueOnce(existingMembership),

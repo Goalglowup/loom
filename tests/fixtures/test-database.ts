@@ -10,16 +10,37 @@ export interface TestDatabaseConfig {
   database?: string;
 }
 
+/**
+ * Parse DATABASE_URL to extract connection defaults.
+ * Falls back to postgres/postgres if DATABASE_URL is not set.
+ */
+function parseDbUrl(): { host: string; port: number; user: string; password: string } {
+  const url = process.env.DATABASE_URL;
+  if (!url) return { host: 'localhost', port: 5432, user: 'postgres', password: 'postgres' };
+  try {
+    const parsed = new URL(url);
+    return {
+      host: parsed.hostname || 'localhost',
+      port: Number(parsed.port) || 5432,
+      user: decodeURIComponent(parsed.username) || 'postgres',
+      password: decodeURIComponent(parsed.password) || 'postgres',
+    };
+  } catch {
+    return { host: 'localhost', port: 5432, user: 'postgres', password: 'postgres' };
+  }
+}
+
 export class TestDatabaseFixture {
   private config: Required<TestDatabaseConfig>;
   private client: pg.Client | null = null;
 
   constructor(config: TestDatabaseConfig = {}) {
+    const defaults = parseDbUrl();
     this.config = {
-      host: config.host || process.env.TEST_DB_HOST || 'localhost',
-      port: config.port || Number(process.env.TEST_DB_PORT) || 5432,
-      user: config.user || process.env.TEST_DB_USER || 'postgres',
-      password: config.password || process.env.TEST_DB_PASSWORD || 'postgres',
+      host: config.host || process.env.TEST_DB_HOST || defaults.host,
+      port: config.port || Number(process.env.TEST_DB_PORT) || defaults.port,
+      user: config.user || process.env.TEST_DB_USER || defaults.user,
+      password: config.password || process.env.TEST_DB_PASSWORD || defaults.password,
       database: config.database || process.env.TEST_DB_NAME || 'loom_test'
     };
   }

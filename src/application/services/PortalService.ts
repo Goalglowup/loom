@@ -120,15 +120,20 @@ export class PortalService {
   }
 
   async getInviteInfo(token: string) {
-    // First check if it's a beta signup invite code
-    const betaResult = await this.rawQuery<{
-      email: string; approved_at: string | null; invite_used_at: string | null;
-    }>(
-      `SELECT email, approved_at, invite_used_at
-       FROM beta_signups
-       WHERE invite_code = $1`,
-      [token],
-    );
+    // First check if it's a beta signup invite code.
+    // Beta invite codes are UUIDs, while tenant invite tokens are base64url strings.
+    // Only query if the token looks like a UUID to avoid a PostgreSQL uuid cast error.
+    const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    const betaResult = UUID_RE.test(token)
+      ? await this.rawQuery<{
+          email: string; approved_at: string | null; invite_used_at: string | null;
+        }>(
+          `SELECT email, approved_at, invite_used_at
+           FROM beta_signups
+           WHERE invite_code = $1`,
+          [token],
+        )
+      : { rows: [] as { email: string; approved_at: string | null; invite_used_at: string | null }[] };
 
     if (betaResult.rows.length > 0) {
       const beta = betaResult.rows[0];

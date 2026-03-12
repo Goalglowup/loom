@@ -128,8 +128,14 @@ export class UserManagementService {
       throw new Error('Password must be at least 8 characters');
     }
 
-    // First check if this is a beta signup invite code
-    const betaSignup = await this.em.findOne(BetaSignup, { inviteCode: dto.inviteToken });
+    // First check if this is a beta signup invite code.
+    // Beta invite codes are UUIDs, while tenant invite tokens are base64url strings.
+    // Only query the beta_signups table if the token looks like a UUID, otherwise
+    // PostgreSQL will throw a cast error since the invite_code column is uuid type.
+    const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    const betaSignup = UUID_RE.test(dto.inviteToken)
+      ? await this.em.findOne(BetaSignup, { inviteCode: dto.inviteToken })
+      : null;
 
     if (betaSignup) {
       // Handle beta invite signup (creates new tenant like self-service signup)

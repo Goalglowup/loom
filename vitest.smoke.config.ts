@@ -7,7 +7,7 @@ export default defineConfig({
     environment: 'node',
     include: ['tests/smoke/**/*.smoke.ts'],
     testTimeout: 60000,
-    hookTimeout: 30000,
+    hookTimeout: 120000, // Increased to 2 minutes for browser launch + signup flows
     // Run smoke tests serially — shared browser state, sequential signup flows
     pool: 'forks',
     poolOptions: {

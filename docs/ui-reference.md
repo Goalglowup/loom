@@ -1,6 +1,6 @@
-# Arachne UI Reference
+# Loom UI Reference
 
-_Generated 3/2/2026 from smoke test screenshots._
+_Generated 3/12/2026 from smoke test screenshots._
 
 ## Analytics
 
@@ -42,9 +42,9 @@ _Generated 3/2/2026 from smoke test screenshots._
 
 ## Agents
 
-### Agent created in list
+### Agent created via API
 
-![Agent created in list](screenshots/portal-agent-created.png)
+![Agent created via API](screenshots/portal-agent-created.png)
 
 ### Agent editor form
 

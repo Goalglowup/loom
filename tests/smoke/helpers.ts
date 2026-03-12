@@ -58,6 +58,25 @@ export async function waitForElement(page: Page, selector: string, timeout = 100
   await page.locator(selector).waitFor({ state: 'attached', timeout });
 }
 
+/**
+ * Wait for the React SPA to mount and render content inside #root.
+ * Returns true if the app rendered, false if it timed out (empty #root).
+ */
+export async function waitForAppReady(page: Page, timeout = 10000): Promise<boolean> {
+  try {
+    await page.waitForFunction(
+      () => {
+        const root = document.getElementById('root');
+        return root !== null && root.children.length > 0;
+      },
+      { timeout }
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export async function waitForText(page: Page, selector: string, text: string, timeout = 10000) {
   await page.locator(selector).filter({ hasText: text }).waitFor({ state: 'visible', timeout });
 }
@@ -67,20 +86,44 @@ export async function waitForText(page: Page, selector: string, text: string, ti
 // ---------------------------------------------------------------------------
 export async function adminLogin(page: Page) {
   await page.goto(`${BASE_URL}/dashboard/admin`);
-  await page.locator('input[placeholder="admin"], input[type="text"]').first().fill(ADMIN_USERNAME);
+
+  // Wait for login form to be visible
+  await page.waitForSelector('input[type="text"], input[placeholder*="admin" i], input[type="password"]', { timeout: 5000 });
+
+  await page.locator('input[placeholder="admin"], input[placeholder*="Username" i], input[type="text"]').first().fill(ADMIN_USERNAME);
   await page.locator('input[type="password"]').fill(ADMIN_PASSWORD);
   await page.locator('button[type="submit"]').click();
 
+  // Wait for either the admin panel or force-change-password dialog
+  await page.waitForFunction(
+    () => {
+      const hasAdminHeader = document.querySelector('.admin-header') !== null;
+      const hasForceDialog = document.querySelector('[aria-label="Change Password"]') !== null;
+      const hasTenantsList = document.querySelector('.tenants-list') !== null;
+      const hasAdminPage = document.querySelector('.admin-page') !== null;
+      const hasError = document.body.textContent?.includes('Invalid credentials');
+      return hasAdminHeader || hasForceDialog || hasTenantsList || hasAdminPage || hasError;
+    },
+    { timeout: 60000 }
+  );
+
+  // Check for login error
+  const errorText = await page.locator('.admin-login-error, .error').textContent().catch(() => '');
+  if (errorText) {
+    throw new Error(`Admin login failed: ${errorText}`);
+  }
+
   // Handle force-change-password modal if must_change_password flag is set
   const forceDialog = page.locator('[aria-label="Change Password"]');
-  const isForced = await forceDialog.isVisible({ timeout: 3000 }).catch(() => false);
+  const isForced = await forceDialog.isVisible().catch(() => false);
   if (isForced) {
     await page.locator('[aria-label="New Password"]').fill(ADMIN_PASSWORD);
     await page.locator('[aria-label="Confirm Password"]').fill(ADMIN_PASSWORD);
     await page.locator('[aria-label="Change Password"] button[type="submit"]').click();
-  }
 
-  await waitForUrl(page, /\/dashboard\/admin/, 10000);
+    // Wait for admin panel after password change
+    await page.waitForSelector('.admin-header', { timeout: 10000 });
+  }
 }
 
 export async function portalLogin(page: Page, email: string, password: string): Promise<void> {
@@ -139,12 +182,20 @@ export async function portalSignup(
   }
 
   await page.goto(`${BASE_URL}/signup`);
+
+  // Wait for the signup form to be ready
+  await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
+  await page.waitForTimeout(500);
+
   if (name) {
     const nameInput = page.locator('input[name="tenantName"], input[placeholder*="org" i], input[placeholder*="company" i], input[placeholder*="tenant" i], input[placeholder*="Acme" i], input[placeholder*="corp" i], input[placeholder*="organization" i]').first();
-    const count = await nameInput.count();
-    if (count > 0) await nameInput.fill(name);
+    await nameInput.waitFor({ state: 'visible', timeout: 10000 });
+    await nameInput.fill(name);
   }
+
+  await page.locator('input[type="email"]').waitFor({ state: 'visible', timeout: 10000 });
   await page.locator('input[type="email"]').fill(email);
+  await page.locator('input[type="password"]').waitFor({ state: 'visible', timeout: 10000 });
   await page.locator('input[type="password"]').fill(pass);
   await page.locator('button[type="submit"]').click();
 
@@ -175,7 +226,14 @@ export async function acceptInvite(
   password: string
 ): Promise<void> {
   await page.goto(inviteUrl);
+
+  // Wait for the signup form to be ready
+  await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
+  await page.waitForTimeout(500);
+
+  await page.locator('input[type="email"]').waitFor({ state: 'visible', timeout: 10000 });
   await page.locator('input[type="email"]').fill(email);
+  await page.locator('input[type="password"]').waitFor({ state: 'visible', timeout: 10000 });
   await page.locator('input[type="password"]').fill(password);
   await page.locator('button[type="submit"]').click();
   await waitForUrl(page, /\/app/);

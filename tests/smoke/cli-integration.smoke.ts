@@ -65,7 +65,22 @@ describe('CLI integration smoke tests', () => {
     const loginData = await loginResp.json();
     token = loginData.token;
     tenantId = loginData.tenant.id;
-  }, 30000);
+
+    // Configure the tenant to use a local Ollama provider so that
+    // chat tests work without requiring OPENAI_API_KEY.
+    const settingsResp = await fetch(`${BASE_URL}/v1/portal/settings`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        provider: 'ollama',
+        baseUrl: 'http://localhost:11434',
+      }),
+    });
+    expect(settingsResp.ok).toBe(true);
+  }, 120000);
 
   afterAll(async () => {
     await browser.close();
@@ -168,8 +183,6 @@ spec:
   });
 
   it('agent echoes user input (parrot behavior)', async () => {
-    // Skip this test if no LLM provider is configured
-    // The chat endpoint requires either OPENAI_API_KEY env var or provider config
     const testMessage = 'Hello, this is a test message';
 
     const chatResp = await fetch(`${BASE_URL}/v1/portal/agents/${agentId}/chat`, {
@@ -180,17 +193,12 @@ spec:
       },
       body: JSON.stringify({
         messages: [{ role: 'user', content: testMessage }],
-        model: 'gpt-4o-mini',
+        model: 'gemma3:4b',
       }),
     });
 
     if (!chatResp.ok) {
       const errorText = await chatResp.text();
-      // If no provider is configured, skip this test
-      if (errorText.includes('no provider configured')) {
-        console.warn('Skipping chat test - no LLM provider configured (set OPENAI_API_KEY)');
-        return;
-      }
       console.error('Chat API error:', chatResp.status, errorText);
       throw new Error(`Chat API failed with status ${chatResp.status}: ${errorText}`);
     }
@@ -198,8 +206,13 @@ spec:
     const chatData = await chatResp.json();
     const response = chatData.message?.content || '';
 
-    // The parrot should echo back the same message
-    // We'll check if the response contains the original message
-    expect(response.toLowerCase()).toContain(testMessage.toLowerCase());
-  }, 30000);
+    // The parrot should echo back the test message (or a close paraphrase).
+    // Ollama + Mistral may not always produce a verbatim echo, so we check
+    // for key words from the original message.
+    const lowerResponse = response.toLowerCase();
+    const containsTestMessage =
+      lowerResponse.includes(testMessage.toLowerCase()) ||
+      (lowerResponse.includes('hello') && lowerResponse.includes('test message'));
+    expect(containsTestMessage).toBe(true);
+  }, 60000);
 });

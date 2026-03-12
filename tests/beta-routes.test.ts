@@ -10,10 +10,14 @@ import Fastify from 'fastify';
 import type { FastifyInstance } from 'fastify';
 import { UniqueConstraintViolationException } from '@mikro-orm/core';
 
-const { mockPersistAndFlush, mockFork } = vi.hoisted(() => {
+const { mockPersistAndFlush, mockFindOne, mockFork } = vi.hoisted(() => {
   const mockPersistAndFlush = vi.fn();
-  const mockFork = vi.fn(() => ({ persistAndFlush: mockPersistAndFlush }));
-  return { mockPersistAndFlush, mockFork };
+  const mockFindOne = vi.fn();
+  const mockFork = vi.fn(() => ({
+    persistAndFlush: mockPersistAndFlush,
+    findOne: mockFindOne
+  }));
+  return { mockPersistAndFlush, mockFindOne, mockFork };
 });
 
 vi.mock('../src/orm.js', () => ({
@@ -35,6 +39,8 @@ describe('POST /v1/beta/signup', () => {
   beforeEach(async () => {
     app = await buildApp();
     mockPersistAndFlush.mockClear();
+    mockFindOne.mockClear();
+    mockFindOne.mockResolvedValue(null); // Default: no existing user
   });
 
   afterEach(async () => {
@@ -72,7 +78,7 @@ describe('POST /v1/beta/signup', () => {
     expect(mockPersistAndFlush).toHaveBeenCalledTimes(1);
   });
 
-  it('returns 200 with status:already_registered on duplicate email (23505)', async () => {
+  it('returns 200 with status:registered on duplicate email (23505)', async () => {
     mockPersistAndFlush.mockRejectedValueOnce(new UniqueConstraintViolationException(new Error('duplicate key')));
 
     const res = await app.inject({
@@ -83,7 +89,7 @@ describe('POST /v1/beta/signup', () => {
 
     expect(res.statusCode).toBe(200);
     const body = res.json<{ status: string }>();
-    expect(body.status).toBe('already_registered');
+    expect(body.status).toBe('registered'); // Returns same message to avoid information disclosure
   });
 
   it('returns 400 when email is missing', async () => {

@@ -16,6 +16,11 @@ export { ProviderBaseSchema } from './ProviderBase.schema.js';
 export { OpenAIProviderSchema } from './OpenAIProvider.schema.js';
 export { AzureProviderSchema } from './AzureProvider.schema.js';
 export { OllamaProviderSchema } from './OllamaProvider.schema.js';
+export { VectorSpaceSchema } from './VectorSpace.schema.js';
+export { ArtifactSchema } from './Artifact.schema.js';
+export { ArtifactTagSchema } from './ArtifactTag.schema.js';
+export { KbChunkSchema } from './KbChunk.schema.js';
+export { DeploymentSchema } from './Deployment.schema.js';
 
 import { TenantSchema } from './Tenant.schema.js';
 import { UserSchema } from './User.schema.js';
@@ -35,6 +40,11 @@ import { ProviderBaseSchema } from './ProviderBase.schema.js';
 import { OpenAIProviderSchema } from './OpenAIProvider.schema.js';
 import { AzureProviderSchema } from './AzureProvider.schema.js';
 import { OllamaProviderSchema } from './OllamaProvider.schema.js';
+import { VectorSpaceSchema } from './VectorSpace.schema.js';
+import { ArtifactSchema } from './Artifact.schema.js';
+import { ArtifactTagSchema } from './ArtifactTag.schema.js';
+import { KbChunkSchema } from './KbChunk.schema.js';
+import { DeploymentSchema } from './Deployment.schema.js';
 
 export const allSchemas = [
   TenantSchema,
@@ -55,4 +65,9 @@ export const allSchemas = [
   OpenAIProviderSchema,
   AzureProviderSchema,
   OllamaProviderSchema,
+  VectorSpaceSchema,
+  ArtifactSchema,
+  ArtifactTagSchema,
+  KbChunkSchema,
+  DeploymentSchema,
 ];

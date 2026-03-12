@@ -1,5 +1,9 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
+import dotenv from 'dotenv';
 import { TestDatabaseFixture } from '../fixtures/test-database';
+
+// Load .env so TEST_DB_ENABLED and DATABASE_URL are available
+dotenv.config();
 
 describe('Test Database Fixture', () => {
   let db: TestDatabaseFixture;
