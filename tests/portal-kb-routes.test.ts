@@ -154,11 +154,11 @@ describe('GET /v1/portal/knowledge-bases', () => {
     });
 
     expect(res.statusCode).toBe(200);
-    const body = res.json<{ id: string; name: string }[]>();
-    expect(Array.isArray(body)).toBe(true);
-    expect(body.length).toBe(1);
-    expect(body[0].id).toBe(TEST_KB_ID);
-    expect(body[0].name).toBe('my-docs');
+    const body = res.json<{ knowledgeBases: { id: string; name: string }[] }>();
+    expect(Array.isArray(body.knowledgeBases)).toBe(true);
+    expect(body.knowledgeBases.length).toBe(1);
+    expect(body.knowledgeBases[0].id).toBe(TEST_KB_ID);
+    expect(body.knowledgeBases[0].name).toBe('my-docs');
   });
 
   it('returns 401 without an auth token', async () => {
@@ -179,7 +179,7 @@ describe('GET /v1/portal/knowledge-bases', () => {
     });
 
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toEqual([]);
+    expect(res.json()).toEqual({ knowledgeBases: [] });
   });
 });
 
@@ -319,11 +319,11 @@ describe('GET /v1/portal/deployments', () => {
     });
 
     expect(res.statusCode).toBe(200);
-    const body = res.json<{ id: string; status: string }[]>();
-    expect(Array.isArray(body)).toBe(true);
-    expect(body.length).toBe(1);
-    expect(body[0].id).toBe(TEST_DEPLOYMENT_ID);
-    expect(body[0].status).toBe('READY');
+    const body = res.json<{ deployments: { id: string; status: string }[] }>();
+    expect(Array.isArray(body.deployments)).toBe(true);
+    expect(body.deployments.length).toBe(1);
+    expect(body.deployments[0].id).toBe(TEST_DEPLOYMENT_ID);
+    expect(body.deployments[0].status).toBe('READY');
   });
 
   it('returns 401 without an auth token', async () => {
@@ -344,7 +344,7 @@ describe('GET /v1/portal/deployments', () => {
     });
 
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toEqual([]);
+    expect(res.json()).toEqual({ deployments: [] });
   });
 });
 

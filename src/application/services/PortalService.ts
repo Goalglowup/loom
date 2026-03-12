@@ -183,6 +183,7 @@ export class PortalService {
       conversations_enabled: a.conversationsEnabled,
       conversation_token_limit: a.conversationTokenLimit,
       conversation_summary_model: a.conversationSummaryModel,
+      knowledge_base_ref: a.knowledgeBaseRef,
       created_at: a.createdAt,
       updated_at: a.updatedAt,
     }));
@@ -211,6 +212,7 @@ export class PortalService {
       conversations_enabled: agent.conversationsEnabled,
       conversation_token_limit: agent.conversationTokenLimit,
       conversation_summary_model: agent.conversationSummaryModel,
+      knowledge_base_ref: agent.knowledgeBaseRef,
       created_at: agent.createdAt,
       updated_at: agent.updatedAt,
     };

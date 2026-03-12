@@ -72,6 +72,7 @@ export function registerPortalRoutes(
     conversations_enabled?: boolean;
     conversation_token_limit?: number | null;
     conversation_summary_model?: string | null;
+    knowledge_base_ref?: string | null;
     created_at: string; updated_at: string | null;
   }) {
     return {
@@ -86,6 +87,7 @@ export function registerPortalRoutes(
       conversations_enabled: row.conversations_enabled ?? false,
       conversation_token_limit: row.conversation_token_limit ?? null,
       conversation_summary_model: row.conversation_summary_model ?? null,
+      knowledgeBaseRef: row.knowledge_base_ref ?? null,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     };
@@ -710,6 +712,7 @@ export function registerPortalRoutes(
       conversations_enabled: agent.conversationsEnabled,
       conversation_token_limit: agent.conversationTokenLimit ?? undefined,
       conversation_summary_model: agent.conversationSummaryModel,
+      knowledge_base_ref: agent.knowledgeBaseRef,
       created_at: agent.createdAt,
       updated_at: agent.updatedAt,
     }) });
@@ -786,6 +789,7 @@ export function registerPortalRoutes(
         conversations_enabled: agent.conversationsEnabled,
         conversation_token_limit: agent.conversationTokenLimit ?? undefined,
         conversation_summary_model: agent.conversationSummaryModel,
+        knowledge_base_ref: agent.knowledgeBaseRef,
         created_at: agent.createdAt,
         updated_at: agent.updatedAt,
       }) });
@@ -1271,8 +1275,8 @@ export function registerPortalRoutes(
       { tenant: tenantId, kind: 'KnowledgeBase' },
       { populate: ['tags', 'vectorSpace'], orderBy: { createdAt: 'DESC' } },
     );
-    return reply.send(
-      artifacts.map((a) => ({
+    return reply.send({
+      knowledgeBases: artifacts.map((a) => ({
         id: a.id,
         name: a.name,
         tags: a.tags.map((t: any) => t.tag),
@@ -1282,7 +1286,7 @@ export function registerPortalRoutes(
           ? { provider: (a.vectorSpace as any).provider, model: (a.vectorSpace as any).model, dimensions: (a.vectorSpace as any).dimensions }
           : null,
       })),
-    );
+    });
   });
 
   // ── GET /v1/portal/knowledge-bases/:id ────────────────────────────────────
@@ -1352,8 +1356,8 @@ export function registerPortalRoutes(
     const { tenantId } = request.portalUser!;
     const em = orm.em.fork();
     const deployments = await provisionSvc.listDeployments(tenantId, em);
-    return reply.send(
-      deployments.map((d) => ({
+    return reply.send({
+      deployments: deployments.map((d) => ({
         id: d.id,
         status: d.status,
         environment: d.environment,
@@ -1362,7 +1366,7 @@ export function registerPortalRoutes(
           ? { name: (d.artifact as any).name, tag: (d.artifact as any).version, kind: (d.artifact as any).kind }
           : null,
       })),
-    );
+    });
   });
 
   // ── GET /v1/portal/deployments/:id ───────────────────────────────────────
