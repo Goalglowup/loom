@@ -66,12 +66,12 @@ resource "azurerm_container_app" "gateway" {
       }
 
       env {
-        name        = "MASTER_KEY"
+        name        = "ENCRYPTION_MASTER_KEY"
         secret_name = "master-key"
       }
 
       env {
-        name        = "JWT_SECRET"
+        name        = "PORTAL_JWT_SECRET"
         secret_name = "jwt-secret"
       }
 

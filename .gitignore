@@ -6,3 +6,4 @@ coverage/
 .env.local
 .DS_Store
 .claude/settings.local.json
+testrun.txt
