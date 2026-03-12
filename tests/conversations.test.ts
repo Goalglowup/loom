@@ -226,13 +226,13 @@ describe('ConversationManagementService', () => {
 
       const snapId = await svc.createSnapshot('tenant-1', 'conv-1', 'Summary text', 5);
 
-      expect(snapId).toBe('snap-new');
+      expect(snapId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
       expect(em.persist).toHaveBeenCalled();
       expect(em.flush).toHaveBeenCalled();
       expect(em.nativeUpdate).toHaveBeenCalledWith(
         expect.anything(), // ConversationMessage class
         { conversation: 'conv-1', snapshotId: null },
-        { snapshotId: 'snap-new' },
+        { snapshotId: snapId },
       );
     });
   });

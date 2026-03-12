@@ -6,6 +6,7 @@
  * encryptTraceBody / decryptTraceBody.
  */
 import type { EntityManager } from '@mikro-orm/core';
+import { randomUUID } from 'node:crypto';
 import { encryptTraceBody, decryptTraceBody } from '../../encryption.js';
 import { ConversationRepository } from '../../domain/repositories/ConversationRepository.js';
 import { PartitionRepository } from '../../domain/repositories/PartitionRepository.js';
@@ -126,26 +127,32 @@ export class ConversationManagementService {
   ): Promise<void> {
     // Use a forked EM for fire-and-forget safety
     const forkedEm = this.em.fork();
-    const conv = forkedEm.getReference(Conversation, conversationId);
+    const convRef = forkedEm.getReference(Conversation, conversationId);
 
     const userEnc = encryptTraceBody(tenantId, userContent);
     const assistantEnc = encryptTraceBody(tenantId, assistantContent);
 
-    const userMsg = conv.addMessage(
-      'user',
-      userEnc.ciphertext,
-      userEnc.iv,
-      Math.ceil(userContent.length / 4),
-    );
+    const userMsg = new ConversationMessage();
+    userMsg.id = randomUUID();
+    userMsg.conversation = convRef;
+    userMsg.role = 'user';
+    userMsg.contentEncrypted = userEnc.ciphertext;
+    userMsg.contentIv = userEnc.iv;
+    userMsg.tokenEstimate = Math.ceil(userContent.length / 4);
     userMsg.traceId = traceId;
+    userMsg.snapshotId = null;
+    userMsg.createdAt = new Date();
 
-    const assistantMsg = conv.addMessage(
-      'assistant',
-      assistantEnc.ciphertext,
-      assistantEnc.iv,
-      Math.ceil(assistantContent.length / 4),
-    );
+    const assistantMsg = new ConversationMessage();
+    assistantMsg.id = randomUUID();
+    assistantMsg.conversation = convRef;
+    assistantMsg.role = 'assistant';
+    assistantMsg.contentEncrypted = assistantEnc.ciphertext;
+    assistantMsg.contentIv = assistantEnc.iv;
+    assistantMsg.tokenEstimate = Math.ceil(assistantContent.length / 4);
     assistantMsg.traceId = traceId;
+    assistantMsg.snapshotId = null;
+    assistantMsg.createdAt = new Date();
 
     forkedEm.persist(userMsg);
     forkedEm.persist(assistantMsg);
@@ -158,10 +165,16 @@ export class ConversationManagementService {
     summaryText: string,
     messagesArchived: number,
   ): Promise<string> {
-    const conv = this.em.getReference(Conversation, conversationId);
+    const convRef = this.em.getReference(Conversation, conversationId);
     const enc = encryptTraceBody(tenantId, summaryText);
 
-    const snap = conv.createSnapshot(enc.ciphertext, enc.iv, messagesArchived);
+    const snap = new ConversationSnapshot();
+    snap.id = randomUUID();
+    snap.conversation = convRef;
+    snap.summaryEncrypted = enc.ciphertext;
+    snap.summaryIv = enc.iv;
+    snap.messagesArchived = messagesArchived;
+    snap.createdAt = new Date();
     this.em.persist(snap);
     await this.em.flush();
 
