@@ -18,6 +18,17 @@ variable "app_name" {
   type        = string
 }
 
+variable "ghcr_owner" {
+  description = "GitHub Container Registry owner (org or username, lowercase)"
+  type        = string
+}
+
+variable "ghcr_token" {
+  description = "GitHub PAT with read:packages scope for GHCR authentication"
+  type        = string
+  sensitive   = true
+}
+
 variable "gateway_image" {
   description = "Full container image reference for the gateway"
   type        = string

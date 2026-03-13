@@ -21,6 +21,17 @@ resource "azurerm_container_app" "gateway" {
     identity_ids = [var.identity_id]
   }
 
+  registry {
+    server               = "ghcr.io"
+    username             = var.ghcr_owner
+    password_secret_name = "ghcr-token"
+  }
+
+  secret {
+    name  = "ghcr-token"
+    value = var.ghcr_token
+  }
+
   secret {
     name                = "database-url"
     key_vault_secret_id = var.db_url_secret_id
@@ -114,6 +125,17 @@ resource "azurerm_container_app" "portal" {
   container_app_environment_id = azurerm_container_app_environment.main.id
   resource_group_name          = var.resource_group_name
   revision_mode                = "Single"
+
+  registry {
+    server               = "ghcr.io"
+    username             = var.ghcr_owner
+    password_secret_name = "ghcr-token"
+  }
+
+  secret {
+    name  = "ghcr-token"
+    value = var.ghcr_token
+  }
 
   template {
     min_replicas = 1

@@ -21,6 +21,12 @@ variable "ghcr_owner" {
   type        = string
 }
 
+variable "ghcr_token" {
+  description = "GitHub PAT with read:packages scope for GHCR authentication"
+  type        = string
+  sensitive   = true
+}
+
 variable "gateway_image" {
   description = "Full container image reference for the gateway (e.g. ghcr.io/org/arachne-gateway:sha)"
   type        = string

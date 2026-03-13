@@ -98,6 +98,8 @@ module "container_apps" {
   location                   = azurerm_resource_group.main.location
   environment                = var.environment
   app_name                   = var.app_name
+  ghcr_owner                 = var.ghcr_owner
+  ghcr_token                 = var.ghcr_token
   gateway_image              = var.gateway_image != "" ? var.gateway_image : "ghcr.io/${var.ghcr_owner}/arachne-gateway:latest"
   portal_image               = var.portal_image != "" ? var.portal_image : "ghcr.io/${var.ghcr_owner}/arachne-portal:latest"
   allowed_origins            = var.allowed_origins
