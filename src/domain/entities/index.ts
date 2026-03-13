@@ -19,3 +19,5 @@ export { Deployment } from './Deployment.js';
 export type { DeploymentStatus } from './Deployment.js';
 export { ArtifactTag } from './ArtifactTag.js';
 export { BetaSignup } from './BetaSignup.js';
+export { SmokeTestRun } from './SmokeTestRun.js';
+export type { SmokeTestStatus, SmokeTestTrigger, SmokeTestResult } from './SmokeTestRun.js';

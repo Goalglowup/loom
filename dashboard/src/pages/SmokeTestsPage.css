@@ -1,0 +1,170 @@
+.smoke-tests-page {
+  padding: 2rem;
+}
+
+.smoke-tests-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 2rem;
+}
+
+.smoke-tests-header h1 {
+  color: #1a1a1a;
+  margin: 0;
+}
+
+.run-tests-btn {
+  background-color: #007bff;
+  color: white;
+  border: none;
+  padding: 0.6rem 1.2rem;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.95rem;
+  font-weight: 500;
+  transition: background-color 0.2s;
+}
+
+.run-tests-btn:hover:not(:disabled) {
+  background-color: #0056b3;
+}
+
+.run-tests-btn:disabled {
+  background-color: #6c757d;
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.smoke-table-container {
+  background: white;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.smoke-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.smoke-table th {
+  background: #f5f5f5;
+  padding: 1rem;
+  text-align: left;
+  font-weight: 600;
+  color: #333;
+  border-bottom: 2px solid #e0e0e0;
+}
+
+.smoke-table td {
+  padding: 1rem;
+  border-bottom: 1px solid #e0e0e0;
+  color: #333;
+}
+
+.smoke-row {
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.smoke-row:hover {
+  background: #f9f9f9;
+}
+
+.smoke-row.expanded {
+  background: #f0f4ff;
+}
+
+.smoke-status-passed {
+  background-color: #d4edda;
+  color: #155724;
+}
+
+.smoke-status-failed {
+  background-color: #f8d7da;
+  color: #721c24;
+}
+
+.smoke-status-running {
+  background-color: #fff3cd;
+  color: #856404;
+}
+
+.smoke-status-error {
+  background-color: #f8d7da;
+  color: #721c24;
+}
+
+.count-passed {
+  color: #155724;
+  font-weight: 600;
+}
+
+.count-failed {
+  color: #721c24;
+  font-weight: 600;
+}
+
+.detail-row td {
+  padding: 0 !important;
+  border-bottom: 2px solid #e0e0e0;
+}
+
+.run-detail {
+  padding: 1rem 1.5rem;
+  background: #fafafa;
+}
+
+.run-error {
+  background-color: #f8d7da;
+  border: 1px solid #f5c6cb;
+  color: #721c24;
+  padding: 0.75rem 1rem;
+  border-radius: 4px;
+  margin-bottom: 1rem;
+  font-family: 'Courier New', monospace;
+  font-size: 0.85rem;
+  white-space: pre-wrap;
+}
+
+.results-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.results-table th {
+  background: #eee;
+  padding: 0.5rem 0.75rem;
+  text-align: left;
+  font-weight: 600;
+  color: #555;
+  border-bottom: 1px solid #ddd;
+}
+
+.results-table td {
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid #eee;
+}
+
+.test-name {
+  font-family: 'Courier New', monospace;
+  font-size: 0.85rem;
+}
+
+.error-cell {
+  font-family: 'Courier New', monospace;
+  font-size: 0.8rem;
+  color: #721c24;
+  max-width: 400px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.no-results {
+  color: #666;
+  text-align: center;
+  padding: 1rem;
+}

@@ -45,6 +45,12 @@ variable "allowed_origins" {
   default     = "https://arachne-ai.com"
 }
 
+variable "smoke_runner_image" {
+  description = "Full container image reference for the smoke runner sidecar"
+  type        = string
+  default     = ""
+}
+
 variable "db_admin_login" {
   description = "PostgreSQL admin username"
   type        = string

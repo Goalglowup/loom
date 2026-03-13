@@ -5,6 +5,7 @@ import AnalyticsPage from './pages/AnalyticsPage';
 import AdminPage from './pages/AdminPage';
 import SettingsPage from './pages/SettingsPage';
 import BetaSignupsPage from './pages/BetaSignupsPage';
+import SmokeTestsPage from './pages/SmokeTestsPage';
 
 function App() {
   return (
@@ -15,6 +16,7 @@ function App() {
         <Route path="/admin" element={<AdminPage />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="/beta-signups" element={<BetaSignupsPage />} />
+        <Route path="/smoke-tests" element={<SmokeTestsPage />} />
       </Routes>
     </Layout>
   );

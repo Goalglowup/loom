@@ -21,6 +21,7 @@ export { ArtifactSchema } from './Artifact.schema.js';
 export { ArtifactTagSchema } from './ArtifactTag.schema.js';
 export { KbChunkSchema } from './KbChunk.schema.js';
 export { DeploymentSchema } from './Deployment.schema.js';
+export { SmokeTestRunSchema } from './SmokeTestRun.schema.js';
 
 import { TenantSchema } from './Tenant.schema.js';
 import { UserSchema } from './User.schema.js';
@@ -45,6 +46,7 @@ import { ArtifactSchema } from './Artifact.schema.js';
 import { ArtifactTagSchema } from './ArtifactTag.schema.js';
 import { KbChunkSchema } from './KbChunk.schema.js';
 import { DeploymentSchema } from './Deployment.schema.js';
+import { SmokeTestRunSchema } from './SmokeTestRun.schema.js';
 
 export const allSchemas = [
   TenantSchema,
@@ -70,4 +72,5 @@ export const allSchemas = [
   ArtifactTagSchema,
   KbChunkSchema,
   DeploymentSchema,
+  SmokeTestRunSchema,
 ];

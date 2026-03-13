@@ -10,6 +10,8 @@ import { AdminService } from '../application/services/AdminService.js';
 import { ProviderManagementService } from '../application/services/ProviderManagementService.js';
 import { signJwt } from '../auth/jwtUtils.js';
 import type { CreateProviderDto, UpdateProviderDto } from '../application/dtos/provider.dto.js';
+import { SmokeTestRun } from '../domain/entities/SmokeTestRun.js';
+import { orm } from '../orm.js';
 
 const ADMIN_JWT_SECRET = process.env.ADMIN_JWT_SECRET ?? 'unsafe-dev-secret-change-in-production';
 
@@ -597,5 +599,54 @@ export function registerAdminRoutes(fastify: FastifyInstance, adminService: Admi
       }
     }
   );
+
+  // ===== Smoke Test Routes =====
+
+  const SMOKE_RUNNER_URL = process.env.SMOKE_RUNNER_URL ?? 'http://localhost:3001';
+
+  // GET /v1/admin/smoke-tests — List recent smoke test runs
+  fastify.get<{
+    Querystring: { limit?: string };
+  }>('/v1/admin/smoke-tests', authOpts, async (request, reply) => {
+    const limit = Math.min(parseInt(request.query.limit ?? '20', 10), 100);
+    const smokeEm = orm.em.fork();
+    const runs = await smokeEm.find(
+      SmokeTestRun,
+      {},
+      { orderBy: { startedAt: 'DESC' }, limit }
+    );
+    return reply.send({ runs });
+  });
+
+  // GET /v1/admin/smoke-tests/:id — Get single smoke test run details
+  fastify.get<{ Params: { id: string } }>(
+    '/v1/admin/smoke-tests/:id',
+    authOpts,
+    async (request, reply) => {
+      const smokeEm = orm.em.fork();
+      const run = await smokeEm.findOne(SmokeTestRun, { id: request.params.id });
+      if (!run) {
+        return reply.code(404).send({ error: 'Smoke test run not found' });
+      }
+      return reply.send(run);
+    }
+  );
+
+  // POST /v1/admin/smoke-tests/run — Trigger a new smoke test run
+  fastify.post('/v1/admin/smoke-tests/run', authOpts, async (request, reply) => {
+    try {
+      const resp = await fetch(`${SMOKE_RUNNER_URL}/run`, { method: 'POST' });
+      const data = await resp.json() as { runId?: string; error?: string };
+
+      if (!resp.ok) {
+        return reply.code(resp.status).send(data);
+      }
+
+      return reply.code(202).send({ runId: data.runId, status: 'running' });
+    } catch (err: any) {
+      fastify.log.error({ err }, 'Failed to reach smoke runner');
+      return reply.code(502).send({ error: 'Smoke runner is not reachable' });
+    }
+  });
 }
 

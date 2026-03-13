@@ -74,3 +74,15 @@ variable "admin_jwt_secret_id" {
   description = "Key Vault secret ID for ADMIN_JWT_SECRET"
   type        = string
 }
+
+variable "smoke_runner_image" {
+  description = "Full container image reference for the smoke runner sidecar"
+  type        = string
+  default     = ""
+}
+
+variable "admin_password_secret_id" {
+  description = "Key Vault secret ID for the admin password (used by smoke runner)"
+  type        = string
+  default     = ""
+}

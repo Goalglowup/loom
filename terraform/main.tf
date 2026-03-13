@@ -109,6 +109,8 @@ module "container_apps" {
   master_key_secret_id       = module.keyvault.master_key_secret_id
   jwt_secret_id              = module.keyvault.jwt_secret_id
   admin_jwt_secret_id        = module.keyvault.admin_jwt_secret_id
+  smoke_runner_image         = var.smoke_runner_image != "" ? var.smoke_runner_image : "ghcr.io/${var.ghcr_owner}/arachne-smoke-runner:latest"
+  admin_password_secret_id   = module.keyvault.db_admin_password_secret_id
 }
 
 module "cicd" {

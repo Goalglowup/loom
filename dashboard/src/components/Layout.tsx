@@ -48,6 +48,12 @@ function Layout({ children }: LayoutProps) {
         >
           Beta Signups
         </Link>
+        <Link
+          to="/smoke-tests"
+          className={`nav-link ${location.pathname === '/smoke-tests' ? 'active' : ''}`}
+        >
+          Smoke Tests
+        </Link>
       </nav>
 
       <main className="content">

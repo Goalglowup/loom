@@ -15,6 +15,7 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "test:smoke": "vitest run --project smoke",
+    "test:smoke:live": "npm run test:smoke && npm run smoke:cleanup",
     "seed": "tsx scripts/seed.ts",
     "smoke:cleanup": "tsx scripts/cleanup-smoke-data.ts",
     "build:portal": "cd portal && npm run build",

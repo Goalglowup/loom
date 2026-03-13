@@ -47,5 +47,15 @@ jobs:
             ghcr.io/${{ steps.lower.outputs.owner }}/arachne-portal:latest
             ghcr.io/${{ steps.lower.outputs.owner }}/arachne-portal:${{ github.sha }}
 
+      - name: Build and push smoke runner image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile.smoke-runner
+          push: true
+          tags: |
+            ghcr.io/${{ steps.lower.outputs.owner }}/arachne-smoke-runner:latest
+            ghcr.io/${{ steps.lower.outputs.owner }}/arachne-smoke-runner:${{ github.sha }}
+
       # Note: After first publish, set package visibility to public in GitHub:
-      # Settings → Packages → arachne-gateway / arachne-portal → Change visibility → Public
+      # Settings → Packages → arachne-gateway / arachne-portal / arachne-smoke-runner → Change visibility → Public

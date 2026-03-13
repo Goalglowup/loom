@@ -130,3 +130,57 @@ export async function approveBetaSignup(id: string): Promise<AdminBetaSignup> {
   }
   return response.json();
 }
+
+// Smoke Test Runs API
+
+export interface SmokeTestResultDetail {
+  name: string;
+  suite: string;
+  status: 'passed' | 'failed' | 'skipped';
+  duration_ms: number;
+  error?: string;
+}
+
+export interface SmokeTestRunSummary {
+  id: string;
+  status: 'running' | 'passed' | 'failed' | 'error';
+  triggeredBy: string;
+  total: number | null;
+  passed: number | null;
+  failed: number | null;
+  skipped: number | null;
+  durationMs: number | null;
+  results: SmokeTestResultDetail[] | null;
+  errorMessage: string | null;
+  startedAt: string;
+  completedAt: string | null;
+  createdAt: string;
+}
+
+export async function getSmokeTestRuns(): Promise<SmokeTestRunSummary[]> {
+  const response = await adminFetch('/v1/admin/smoke-tests');
+  if (!response.ok) {
+    throw new Error('Failed to fetch smoke test runs');
+  }
+  const data = await response.json();
+  return data.runs;
+}
+
+export async function triggerSmokeTestRun(): Promise<{ runId: string }> {
+  const response = await adminFetch('/v1/admin/smoke-tests/run', {
+    method: 'POST',
+  });
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}));
+    throw new Error(data.error || 'Failed to trigger smoke test run');
+  }
+  return response.json();
+}
+
+export async function getSmokeTestRun(id: string): Promise<SmokeTestRunSummary> {
+  const response = await adminFetch(`/v1/admin/smoke-tests/${id}`);
+  if (!response.ok) {
+    throw new Error('Failed to fetch smoke test run');
+  }
+  return response.json();
+}

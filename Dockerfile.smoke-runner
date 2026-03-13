@@ -1,0 +1,33 @@
+# Smoke Test Runner Sidecar
+# Based on Playwright image for Chromium support
+FROM mcr.microsoft.com/playwright:v1.49.0-noble
+
+WORKDIR /app
+
+# Install Node.js dependencies
+COPY package*.json ./
+RUN npm ci
+
+# Copy smoke test files
+COPY tests/smoke/ ./tests/smoke/
+COPY vitest.smoke.config.ts ./
+
+# Copy sidecar server
+COPY smoke-runner/ ./smoke-runner/
+
+# Copy cleanup script and related utilities
+COPY scripts/cleanup-smoke-data.ts ./scripts/
+
+# Copy TypeScript config (needed for tsx)
+COPY tsconfig.json ./
+
+# Copy source for any shared imports
+COPY src/ ./src/
+
+# Build TypeScript
+RUN npx tsc --noEmit || true
+
+EXPOSE 3001
+
+# Use tsx to run TypeScript directly
+CMD ["npx", "tsx", "smoke-runner/server.ts"]
