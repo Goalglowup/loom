@@ -16,6 +16,11 @@ variable "app_name" {
   default     = "arachne"
 }
 
+variable "ghcr_owner" {
+  description = "GitHub Container Registry owner (org or username, lowercase)"
+  type        = string
+}
+
 variable "gateway_image" {
   description = "Full container image reference for the gateway (e.g. ghcr.io/org/arachne-gateway:sha)"
   type        = string

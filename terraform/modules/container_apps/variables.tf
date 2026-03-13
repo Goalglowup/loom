@@ -21,13 +21,11 @@ variable "app_name" {
 variable "gateway_image" {
   description = "Full container image reference for the gateway"
   type        = string
-  default     = ""
 }
 
 variable "portal_image" {
   description = "Full container image reference for the portal"
   type        = string
-  default     = ""
 }
 
 variable "allowed_origins" {

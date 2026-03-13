@@ -51,7 +51,7 @@ resource "azurerm_container_app" "gateway" {
 
     container {
       name   = "gateway"
-      image  = var.gateway_image != "" ? var.gateway_image : "mcr.microsoft.com/azuredocs/containerapps-helloworld:latest"
+      image  = var.gateway_image
       cpu    = 0.5
       memory = "1Gi"
 
@@ -121,7 +121,7 @@ resource "azurerm_container_app" "portal" {
 
     container {
       name   = "portal"
-      image  = var.portal_image != "" ? var.portal_image : "mcr.microsoft.com/azuredocs/containerapps-helloworld:latest"
+      image  = var.portal_image
       cpu    = 0.25
       memory = "0.5Gi"
     }

@@ -17,9 +17,8 @@ resource "random_password" "db_admin_password" {
   min_special      = 2
 }
 
-resource "random_password" "master_key" {
-  length  = 64
-  special = false
+resource "random_id" "master_key" {
+  byte_length = 32
 }
 
 resource "random_password" "jwt_secret" {
@@ -85,7 +84,7 @@ resource "azurerm_key_vault_secret" "db_admin_password" {
 
 resource "azurerm_key_vault_secret" "master_key" {
   name         = "master-key"
-  value        = random_password.master_key.result
+  value        = random_id.master_key.hex
   key_vault_id = azurerm_key_vault.main.id
   depends_on   = [azurerm_key_vault_access_policy.deployer]
 }
