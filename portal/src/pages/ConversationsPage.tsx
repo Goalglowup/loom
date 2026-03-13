@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { api } from '../lib/api';
 import type { Partition, Conversation, ConversationDetail } from '../lib/api';
 import { getToken } from '../lib/auth';
@@ -72,6 +72,7 @@ export default function ConversationsPage() {
 
   const [selectedConversation, setSelectedConversation] = useState<ConversationDetail | null>(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
+  const [lastClickedId, setLastClickedId] = useState<string | null>(null);
 
   const [error, setError] = useState('');
 
@@ -150,7 +151,9 @@ export default function ConversationsPage() {
   function handleSelectConversation(conv: Conversation) {
     if (selectedConversation?.id === conv.id) {
       setSelectedConversation(null);
+      setLastClickedId(null);
     } else {
+      setLastClickedId(conv.id);
       fetchConversationDetail(conv.id);
     }
   }
@@ -262,27 +265,92 @@ export default function ConversationsPage() {
                       </td>
                     </tr>
                   ) : (
-                    conversations.map(conv => (
-                      <tr
-                        key={conv.id}
-                        className={`border-b border-gray-800 cursor-pointer transition-colors ${
-                          selectedConversation?.id === conv.id
-                            ? 'bg-indigo-950/40'
-                            : 'hover:bg-gray-800'
-                        }`}
-                        onClick={() => handleSelectConversation(conv)}
-                        tabIndex={0}
-                        onKeyDown={e => e.key === 'Enter' && handleSelectConversation(conv)}
-                        role="button"
-                        aria-label={`View conversation ${conv.external_id}`}
-                      >
-                        <td className="px-4 py-3 text-gray-200 font-mono text-xs">{conv.external_id}</td>
-                        <td className="px-4 py-3 text-gray-400 text-xs">{timeAgo(conv.last_active_at)}</td>
-                        <td className="px-4 py-3 text-gray-400 text-xs text-right tabular-nums">
-                          {conv.message_count ?? '—'}
-                        </td>
-                      </tr>
-                    ))
+                    conversations.map(conv => {
+                      const isExpanded = selectedConversation?.id === conv.id;
+                      return (
+                        <React.Fragment key={conv.id}>
+                          <tr
+                            className={`border-b border-gray-800 cursor-pointer transition-colors ${
+                              isExpanded
+                                ? 'bg-indigo-950/40'
+                                : 'hover:bg-gray-800'
+                            }`}
+                            onClick={() => handleSelectConversation(conv)}
+                            tabIndex={0}
+                            onKeyDown={e => e.key === 'Enter' && handleSelectConversation(conv)}
+                            role="button"
+                            aria-label={`View conversation ${conv.external_id}`}
+                          >
+                            <td className="px-4 py-3 text-gray-200 font-mono text-xs">
+                              <span className="mr-1.5 text-gray-500 text-xs">{isExpanded ? '▾' : '▸'}</span>
+                              {conv.external_id}
+                            </td>
+                            <td className="px-4 py-3 text-gray-400 text-xs">{timeAgo(conv.last_active_at)}</td>
+                            <td className="px-4 py-3 text-gray-400 text-xs text-right tabular-nums">
+                              {conv.message_count ?? '—'}
+                            </td>
+                          </tr>
+                          {(isExpanded || (loadingDetail && selectedConversation === null && lastClickedId === conv.id)) && (
+                            <tr className="border-b border-gray-800">
+                              <td colSpan={3} className="p-0">
+                                <div className="bg-gray-950 px-6 py-4 space-y-3 max-h-96 overflow-y-auto">
+                                  {loadingDetail ? (
+                                    <div className="space-y-3">
+                                      {Array.from({ length: 3 }, (_, i) => (
+                                        <div key={i} className={`flex ${i % 2 === 0 ? 'justify-start' : 'justify-end'}`}>
+                                          <div className="h-12 w-64 bg-gray-800 rounded-xl animate-pulse" />
+                                        </div>
+                                      ))}
+                                    </div>
+                                  ) : selectedConversation && selectedConversation.messages.length === 0 ? (
+                                    <p className="text-gray-500 text-sm text-center py-4">No messages in this conversation</p>
+                                  ) : selectedConversation ? (() => {
+                                    const snapshotSet = getSnapshotSet(selectedConversation);
+                                    let snapshotShown = false;
+                                    return selectedConversation.messages.map((msg, idx) => {
+                                      const showCheckpoint = !snapshotShown && idx > 0 && snapshotSet.size > 0 && idx === Math.floor(selectedConversation.messages.length / 2);
+                                      if (showCheckpoint) snapshotShown = true;
+                                      return (
+                                        <div key={msg.id}>
+                                          {showCheckpoint && (
+                                            <div className="flex items-center gap-3 my-2">
+                                              <div className="flex-1 border-t border-dashed border-gray-700" />
+                                              <span className="text-xs text-gray-500 bg-gray-900 px-2 py-0.5 rounded-full border border-gray-700">
+                                                Summary checkpoint
+                                              </span>
+                                              <div className="flex-1 border-t border-dashed border-gray-700" />
+                                            </div>
+                                          )}
+                                          <div className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                                            <div
+                                              className={`max-w-xl px-4 py-2.5 rounded-2xl text-sm whitespace-pre-wrap break-words ${
+                                                msg.role === 'user'
+                                                  ? 'bg-indigo-600 text-white rounded-br-sm'
+                                                  : 'bg-gray-800 text-gray-100 rounded-bl-sm'
+                                              }`}
+                                            >
+                                              <div className={`text-xs mb-1 font-medium ${msg.role === 'user' ? 'text-indigo-200' : 'text-gray-400'}`}>
+                                                {msg.role}
+                                              </div>
+                                              {msg.content}
+                                              {msg.token_estimate != null && (
+                                                <div className={`text-xs mt-1 ${msg.role === 'user' ? 'text-indigo-300' : 'text-gray-500'}`}>
+                                                  ~{msg.token_estimate} tokens
+                                                </div>
+                                              )}
+                                            </div>
+                                          </div>
+                                        </div>
+                                      );
+                                    });
+                                  })() : null}
+                                </div>
+                              </td>
+                            </tr>
+                          )}
+                        </React.Fragment>
+                      );
+                    })
                   )}
                 </tbody>
               </table>
@@ -301,82 +369,6 @@ export default function ConversationsPage() {
             )}
           </div>
 
-          {/* Message thread */}
-          {selectedConversation || loadingDetail ? (
-            <div className="border-t border-gray-700 bg-gray-950">
-              <div className="px-6 py-3 border-b border-gray-800 flex items-center justify-between">
-                <h2 className="text-sm font-semibold text-gray-300">
-                  {loadingDetail ? 'Loading messages…' : `Thread — ${selectedConversation?.external_id}`}
-                </h2>
-                <button
-                  type="button"
-                  onClick={() => setSelectedConversation(null)}
-                  className="text-gray-500 hover:text-gray-300 text-sm"
-                  aria-label="Close thread"
-                >
-                  ✕
-                </button>
-              </div>
-              <div className="px-6 py-4 space-y-3 max-h-96 overflow-y-auto">
-                {loadingDetail ? (
-                  <div className="space-y-3">
-                    {Array.from({ length: 4 }, (_, i) => (
-                      <div key={i} className={`flex ${i % 2 === 0 ? 'justify-start' : 'justify-end'}`}>
-                        <div className="h-12 w-64 bg-gray-800 rounded-xl animate-pulse" />
-                      </div>
-                    ))}
-                  </div>
-                ) : selectedConversation && selectedConversation.messages.length === 0 ? (
-                  <p className="text-gray-500 text-sm text-center py-6">No messages in this conversation</p>
-                ) : selectedConversation ? (() => {
-                  const snapshotSet = getSnapshotSet(selectedConversation);
-                  let snapshotShown = false;
-                  return selectedConversation.messages.map((msg, idx) => {
-                    // Show summary checkpoint before first message after a snapshot boundary
-                    // Since we don't have per-message snapshot linkage, show it once in middle if snapshots exist
-                    const showCheckpoint = !snapshotShown && idx > 0 && snapshotSet.size > 0 && idx === Math.floor(selectedConversation.messages.length / 2);
-                    if (showCheckpoint) snapshotShown = true;
-                    return (
-                      <div key={msg.id}>
-                        {showCheckpoint && (
-                          <div className="flex items-center gap-3 my-2">
-                            <div className="flex-1 border-t border-dashed border-gray-700" />
-                            <span className="text-xs text-gray-500 bg-gray-900 px-2 py-0.5 rounded-full border border-gray-700">
-                              📝 Summary checkpoint
-                            </span>
-                            <div className="flex-1 border-t border-dashed border-gray-700" />
-                          </div>
-                        )}
-                        <div className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                          <div
-                            className={`max-w-xl px-4 py-2.5 rounded-2xl text-sm whitespace-pre-wrap break-words ${
-                              msg.role === 'user'
-                                ? 'bg-indigo-600 text-white rounded-br-sm'
-                                : 'bg-gray-800 text-gray-100 rounded-bl-sm'
-                            }`}
-                          >
-                            <div className={`text-xs mb-1 font-medium ${msg.role === 'user' ? 'text-indigo-200' : 'text-gray-400'}`}>
-                              {msg.role}
-                            </div>
-                            {msg.content}
-                            {msg.token_estimate != null && (
-                              <div className={`text-xs mt-1 ${msg.role === 'user' ? 'text-indigo-300' : 'text-gray-500'}`}>
-                                ~{msg.token_estimate} tokens
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  });
-                })() : null}
-              </div>
-            </div>
-          ) : conversations.length > 0 ? (
-            <div className="border-t border-gray-800 px-6 py-8 text-center text-gray-500 text-sm bg-gray-950">
-              Select a conversation to view messages
-            </div>
-          ) : null}
         </div>
       </div>
     </div>

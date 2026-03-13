@@ -14,6 +14,8 @@ export class Conversation {
   createdAt!: Date;
   lastActiveAt!: Date;
 
+  messageCount?: number;
+
   messages: ConversationMessage[] = [];
   snapshots: ConversationSnapshot[] = [];
 

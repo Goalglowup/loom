@@ -17,6 +17,12 @@ export const ConversationSchema = new EntitySchema<Conversation>({
     externalId: { type: 'string', columnType: 'varchar(255)', fieldName: 'external_id' },
     createdAt: { type: 'Date', fieldName: 'created_at', onCreate: () => new Date() },
     lastActiveAt: { type: 'Date', fieldName: 'last_active_at' },
+    messageCount: {
+      type: 'number',
+      formula: alias =>
+        `(SELECT count(*) FROM conversation_messages WHERE conversation_id = ${alias}.id)`,
+      lazy: true,
+    },
     messages: { kind: '1:m', entity: () => ConversationMessage, mappedBy: 'conversation', eager: false },
     snapshots: { kind: '1:m', entity: () => ConversationSnapshot, mappedBy: 'conversation', eager: false },
   },

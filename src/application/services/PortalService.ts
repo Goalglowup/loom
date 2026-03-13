@@ -391,7 +391,10 @@ export class PortalService {
         tenant: tenantId,
         ...(partitionId ? { partition: partitionId } : {}),
       },
-      { orderBy: { lastActiveAt: 'DESC' } },
+      {
+        orderBy: { lastActiveAt: 'DESC' },
+        populate: ['messageCount'] as const,
+      },
     );
 
     return conversations.map((c) => ({
@@ -401,6 +404,7 @@ export class PortalService {
       external_id: c.externalId,
       created_at: c.createdAt,
       last_active_at: c.lastActiveAt,
+      message_count: c.messageCount ?? 0,
     }));
   }
 
