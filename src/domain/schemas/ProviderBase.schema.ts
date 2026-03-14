@@ -27,6 +27,11 @@ export const ProviderBaseSchema = new EntitySchema<ProviderBase>({
       fieldName: 'is_default',
       default: false,
     },
+    tenantAvailable: {
+      type: 'boolean',
+      fieldName: 'tenant_available',
+      default: false,
+    },
     apiKey: { type: 'text', fieldName: 'api_key' },
     availableModels: {
       type: 'array',

@@ -12,6 +12,9 @@ export abstract class ProviderBase {
   // Gateway default flag
   isDefault!: boolean;
 
+  // Tenant availability: when true, available to all tenants
+  tenantAvailable!: boolean;
+
   // Configuration (encrypted)
   apiKey!: string;
 
@@ -28,6 +31,7 @@ export abstract class ProviderBase {
       description?: string;
       tenant?: Tenant;
       isDefault?: boolean;
+      tenantAvailable?: boolean;
       availableModels?: string[];
     }
   ) {
@@ -36,6 +40,7 @@ export abstract class ProviderBase {
     this.description = config?.description ?? null;
     this.tenant = config?.tenant ?? null;
     this.isDefault = config?.isDefault ?? false;
+    this.tenantAvailable = config?.tenantAvailable ?? false;
     this.apiKey = apiKey;
     this.availableModels = config?.availableModels ?? [];
     this.createdAt = new Date();

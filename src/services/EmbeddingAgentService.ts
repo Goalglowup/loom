@@ -1,6 +1,7 @@
 import type { EntityManager } from '@mikro-orm/core';
 import { Agent } from '../domain/entities/Agent.js';
 import { Tenant } from '../domain/entities/Tenant.js';
+import { Settings } from '../domain/entities/Settings.js';
 
 export interface EmbeddingAgentConfig {
   provider: string;       // e.g., 'openai'
@@ -28,7 +29,8 @@ export class EmbeddingAgentService {
    * Resolution order:
    * 1. If agentRef provided: look up agent by name in DB, parse its systemPrompt as JSON config.
    * 2. If no agentRef: fall back to SYSTEM_EMBEDDER_PROVIDER + SYSTEM_EMBEDDER_MODEL env vars.
-   * 3. Throw if neither is configured.
+   * 3. Fall back to Settings singleton (admin-configured defaults).
+   * 4. Throw if none is configured.
    */
   async resolveEmbedder(
     agentRef: string | undefined,
@@ -62,19 +64,31 @@ export class EmbeddingAgentService {
     }
 
     // Fall back to environment variables
-    const provider = process.env.SYSTEM_EMBEDDER_PROVIDER;
-    const model = process.env.SYSTEM_EMBEDDER_MODEL;
-    if (!provider || !model) {
-      throw new Error(
-        'No agentRef provided and SYSTEM_EMBEDDER_PROVIDER / SYSTEM_EMBEDDER_MODEL env vars are not set',
-      );
+    const envProvider = process.env.SYSTEM_EMBEDDER_PROVIDER;
+    const envModel = process.env.SYSTEM_EMBEDDER_MODEL;
+    if (envProvider && envModel) {
+      return {
+        provider: envProvider,
+        model: envModel,
+        dimensions: dimensionsForModel(envModel),
+        apiKey: process.env.SYSTEM_EMBEDDER_API_KEY,
+      };
     }
-    return {
-      provider,
-      model,
-      dimensions: dimensionsForModel(model),
-      apiKey: process.env.SYSTEM_EMBEDDER_API_KEY,
-    };
+
+    // Fall back to Settings singleton (admin-configured defaults)
+    const settings = await em.findOne(Settings, { id: 1 });
+    if (settings?.defaultEmbedderProvider && settings?.defaultEmbedderModel) {
+      return {
+        provider: settings.defaultEmbedderProvider,
+        model: settings.defaultEmbedderModel,
+        dimensions: dimensionsForModel(settings.defaultEmbedderModel),
+        apiKey: settings.defaultEmbedderApiKey ?? undefined,
+      };
+    }
+
+    throw new Error(
+      'No embedding config available: no agentRef, no SYSTEM_EMBEDDER env vars, and no admin default configured',
+    );
   }
 
   /**

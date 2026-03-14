@@ -475,7 +475,14 @@ export function registerAdminRoutes(fastify: FastifyInstance, adminService: Admi
   });
 
   // PUT /v1/admin/settings — Update settings
-  fastify.put<{ Body: { signupsEnabled?: boolean } }>(
+  fastify.put<{
+    Body: {
+      signupsEnabled?: boolean;
+      defaultEmbedderProvider?: string | null;
+      defaultEmbedderModel?: string | null;
+      defaultEmbedderApiKey?: string | null;
+    };
+  }>(
     '/v1/admin/settings',
     authOpts,
     async (request, reply) => {
@@ -485,13 +492,16 @@ export function registerAdminRoutes(fastify: FastifyInstance, adminService: Admi
         return reply.code(401).send({ error: 'Unauthorized' });
       }
 
-      const { signupsEnabled } = request.body;
+      const { signupsEnabled, defaultEmbedderProvider, defaultEmbedderModel, defaultEmbedderApiKey } = request.body;
 
-      if (typeof signupsEnabled !== 'boolean') {
+      if (signupsEnabled !== undefined && typeof signupsEnabled !== 'boolean') {
         return reply.code(400).send({ error: 'signupsEnabled must be a boolean' });
       }
 
-      const settings = await adminService.updateSettings(signupsEnabled, adminId);
+      const settings = await adminService.updateSettings(
+        { signupsEnabled, defaultEmbedderProvider, defaultEmbedderModel, defaultEmbedderApiKey },
+        adminId,
+      );
       return reply.send(settings);
     }
   );
@@ -594,6 +604,82 @@ export function registerAdminRoutes(fastify: FastifyInstance, adminService: Admi
       } catch (err: any) {
         if (err.name === 'NotFoundError') {
           return reply.code(404).send({ error: 'Provider not found' });
+        }
+        throw err;
+      }
+    }
+  );
+
+  // ===== Provider Tenant Availability Routes =====
+
+  // PUT /v1/admin/providers/:id/availability — Toggle tenant availability
+  fastify.put<{ Params: { id: string }; Body: { tenantAvailable: boolean } }>(
+    '/v1/admin/providers/:id/availability',
+    authOpts,
+    async (request, reply) => {
+      try {
+        const provider = await providerService.updateTenantAvailability(
+          request.params.id,
+          request.body.tenantAvailable,
+        );
+        return reply.send(provider);
+      } catch (err: any) {
+        if (err.name === 'NotFoundError') {
+          return reply.code(404).send({ error: 'Provider not found' });
+        }
+        throw err;
+      }
+    }
+  );
+
+  // GET /v1/admin/providers/:id/tenants — List tenants with access
+  fastify.get<{ Params: { id: string } }>(
+    '/v1/admin/providers/:id/tenants',
+    authOpts,
+    async (request, reply) => {
+      try {
+        const tenants = await providerService.listProviderTenantAccess(request.params.id);
+        return reply.send({ tenants });
+      } catch (err: any) {
+        if (err.name === 'NotFoundError') {
+          return reply.code(404).send({ error: 'Provider not found' });
+        }
+        throw err;
+      }
+    }
+  );
+
+  // POST /v1/admin/providers/:id/tenants — Grant tenant access
+  fastify.post<{ Params: { id: string }; Body: { tenantId: string } }>(
+    '/v1/admin/providers/:id/tenants',
+    authOpts,
+    async (request, reply) => {
+      try {
+        await providerService.grantTenantAccess(request.params.id, request.body.tenantId);
+        return reply.code(201).send({ message: 'Access granted' });
+      } catch (err: any) {
+        if (err.name === 'NotFoundError') {
+          return reply.code(404).send({ error: 'Provider or tenant not found' });
+        }
+        if (err.status === 400) {
+          return reply.code(400).send({ error: err.message });
+        }
+        throw err;
+      }
+    }
+  );
+
+  // DELETE /v1/admin/providers/:id/tenants/:tenantId — Revoke tenant access
+  fastify.delete<{ Params: { id: string; tenantId: string } }>(
+    '/v1/admin/providers/:id/tenants/:tenantId',
+    authOpts,
+    async (request, reply) => {
+      try {
+        await providerService.revokeTenantAccess(request.params.id, request.params.tenantId);
+        return reply.code(204).send();
+      } catch (err: any) {
+        if (err.name === 'NotFoundError') {
+          return reply.code(404).send({ error: 'Access record not found' });
         }
         throw err;
       }

@@ -678,6 +678,35 @@ export function registerPortalRoutes(
     },
   );
 
+  // ── GET /v1/portal/embedder-info ──────────────────────────────────────────
+  fastify.get('/v1/portal/embedder-info', { preHandler: authRequired }, async (request, reply) => {
+    const embeddingSvc = new EmbeddingAgentService();
+    const { tenantId } = request.portalUser!;
+    try {
+      const config = await embeddingSvc.resolveEmbedder(undefined, tenantId, orm.em.fork());
+      return reply.send({ available: true, provider: config.provider, model: config.model });
+    } catch {
+      return reply.send({ available: false, provider: null, model: null });
+    }
+  });
+
+  // ── GET /v1/portal/available-providers ──────────────────────────────────
+  fastify.get('/v1/portal/available-providers', { preHandler: authRequired }, async (request, reply) => {
+    const { tenantId } = request.portalUser!;
+    const { ProviderManagementService } = await import('../application/services/ProviderManagementService.js');
+    const providerMgmtSvc = new ProviderManagementService(orm.em.fork());
+    const providers = await providerMgmtSvc.listAvailableProvidersForTenant(tenantId);
+    return reply.send({
+      providers: providers.map(p => ({
+        id: p.id,
+        name: p.name,
+        type: p.type,
+        availableModels: p.availableModels,
+        baseUrl: p.baseUrl,
+      })),
+    });
+  });
+
   // ── GET /v1/portal/agents ─────────────────────────────────────────────────
   fastify.get('/v1/portal/agents', { preHandler: authRequired }, async (request, reply) => {
     const { tenantId } = request.portalUser!;

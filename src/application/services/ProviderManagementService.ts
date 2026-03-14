@@ -3,6 +3,8 @@ import { ProviderBase } from '../../domain/entities/ProviderBase.js';
 import { OpenAIProvider } from '../../domain/entities/OpenAIProvider.js';
 import { AzureProvider } from '../../domain/entities/AzureProvider.js';
 import { OllamaProvider } from '../../domain/entities/OllamaProvider.js';
+import { ProviderTenantAccess } from '../../domain/entities/ProviderTenantAccess.js';
+import { Tenant } from '../../domain/entities/Tenant.js';
 import type { CreateProviderDto, UpdateProviderDto, ProviderViewModel } from '../dtos/provider.dto.js';
 import { toProviderViewModel } from '../dtos/provider.dto.js';
 
@@ -145,5 +147,104 @@ export class ProviderManagementService {
     await this.em.flush();
 
     return toProviderViewModel(provider, true);
+  }
+
+  // ── Tenant Availability ────────────────────────────────────────────────────
+
+  /**
+   * Toggle gateway-wide tenant availability
+   */
+  async updateTenantAvailability(providerId: string, tenantAvailable: boolean): Promise<ProviderViewModel> {
+    const provider = await this.em.findOneOrFail(ProviderBase, { id: providerId, tenant: null });
+    provider.tenantAvailable = tenantAvailable;
+    provider.updatedAt = new Date();
+    await this.em.flush();
+    return toProviderViewModel(provider, true);
+  }
+
+  /**
+   * Grant per-tenant access to a gateway provider
+   */
+  async grantTenantAccess(providerId: string, tenantId: string): Promise<void> {
+    const provider = await this.em.findOneOrFail(ProviderBase, { id: providerId, tenant: null });
+    const tenant = await this.em.findOneOrFail(Tenant, { id: tenantId });
+
+    // Check if already exists
+    const existing = await this.em.findOne(ProviderTenantAccess, {
+      provider: providerId,
+      tenant: tenantId,
+    });
+    if (existing) {
+      throw Object.assign(new Error('Tenant already has access to this provider'), { status: 400 });
+    }
+
+    const access = new ProviderTenantAccess(provider, tenant);
+    this.em.persist(access);
+    await this.em.flush();
+  }
+
+  /**
+   * Revoke per-tenant access to a gateway provider
+   */
+  async revokeTenantAccess(providerId: string, tenantId: string): Promise<void> {
+    const access = await this.em.findOneOrFail(ProviderTenantAccess, {
+      provider: providerId,
+      tenant: tenantId,
+    });
+    await this.em.removeAndFlush(access);
+  }
+
+  /**
+   * List tenants with specific access to a gateway provider
+   */
+  async listProviderTenantAccess(providerId: string): Promise<Array<{ id: string; name: string; createdAt: string }>> {
+    await this.em.findOneOrFail(ProviderBase, { id: providerId, tenant: null });
+    const accesses = await this.em.find(
+      ProviderTenantAccess,
+      { provider: providerId },
+      { populate: ['tenant'] },
+    );
+    return accesses.map(a => ({
+      id: a.tenant.id,
+      name: a.tenant.name,
+      createdAt: a.createdAt.toISOString(),
+    }));
+  }
+
+  /**
+   * List gateway providers available to a specific tenant.
+   * A provider is available if tenantAvailable=true OR it has a specific access row.
+   */
+  async listAvailableProvidersForTenant(tenantId: string): Promise<ProviderViewModel[]> {
+    // Get all gateway providers available to all tenants
+    const globalProviders = await this.em.find(ProviderBase, {
+      tenant: null,
+      tenantAvailable: true,
+    });
+
+    // Get providers with specific access grants
+    const accesses = await this.em.find(
+      ProviderTenantAccess,
+      { tenant: tenantId },
+      { populate: ['provider'] },
+    );
+
+    // Merge, dedup by ID
+    const seen = new Set<string>();
+    const result: ProviderViewModel[] = [];
+
+    for (const p of globalProviders) {
+      seen.add(p.id);
+      result.push(toProviderViewModel(p, false));
+    }
+
+    for (const a of accesses) {
+      if (!seen.has(a.provider.id)) {
+        seen.add(a.provider.id);
+        result.push(toProviderViewModel(a.provider, false));
+      }
+    }
+
+    return result;
   }
 }

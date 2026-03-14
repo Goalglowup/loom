@@ -37,6 +37,12 @@ function Layout({ children }: LayoutProps) {
           Admin
         </Link>
         <Link
+          to="/providers"
+          className={`nav-link ${location.pathname === '/providers' ? 'active' : ''}`}
+        >
+          Providers
+        </Link>
+        <Link
           to="/settings"
           className={`nav-link ${location.pathname === '/settings' ? 'active' : ''}`}
         >

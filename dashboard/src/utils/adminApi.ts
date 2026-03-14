@@ -27,6 +27,9 @@ export interface AdminProviderConfig {
 
 export interface AdminSettings {
   signupsEnabled: boolean;
+  defaultEmbedderProvider: string | null;
+  defaultEmbedderModel: string | null;
+  defaultEmbedderApiKey: string | null;
   updatedAt: string;
   updatedByAdminId: string | null;
 }
@@ -100,10 +103,15 @@ export async function getSettings(): Promise<AdminSettings> {
   return response.json();
 }
 
-export async function updateSettings(signupsEnabled: boolean): Promise<AdminSettings> {
+export async function updateSettings(updates: {
+  signupsEnabled?: boolean;
+  defaultEmbedderProvider?: string | null;
+  defaultEmbedderModel?: string | null;
+  defaultEmbedderApiKey?: string | null;
+}): Promise<AdminSettings> {
   const response = await adminFetch('/v1/admin/settings', {
     method: 'PUT',
-    body: JSON.stringify({ signupsEnabled }),
+    body: JSON.stringify(updates),
   });
   if (!response.ok) {
     throw new Error('Failed to update settings');
@@ -182,5 +190,147 @@ export async function getSmokeTestRun(id: string): Promise<SmokeTestRunSummary> 
   if (!response.ok) {
     throw new Error('Failed to fetch smoke test run');
   }
+  return response.json();
+}
+
+// Gateway Provider API
+
+export type ProviderType = 'openai' | 'azure' | 'ollama';
+
+export interface GatewayProvider {
+  id: string;
+  name: string;
+  description: string | null;
+  type: ProviderType;
+  isDefault: boolean;
+  tenantAvailable: boolean;
+  availableModels: string[];
+  baseUrl?: string | null;
+  deployment?: string;
+  apiVersion?: string;
+  apiKey?: string;
+  createdAt: string;
+  updatedAt: string | null;
+}
+
+export interface CreateGatewayProviderDto {
+  name: string;
+  description?: string;
+  type: ProviderType;
+  apiKey: string;
+  baseUrl?: string;
+  deployment?: string;
+  apiVersion?: string;
+  availableModels?: string[];
+}
+
+export interface UpdateGatewayProviderDto {
+  name?: string;
+  description?: string;
+  apiKey?: string;
+  baseUrl?: string;
+  deployment?: string;
+  apiVersion?: string;
+  availableModels?: string[];
+}
+
+export interface ProviderTenantAccessEntry {
+  id: string;
+  name: string;
+  createdAt: string;
+}
+
+export async function listGatewayProviders(): Promise<GatewayProvider[]> {
+  const response = await adminFetch('/v1/admin/providers');
+  if (!response.ok) throw new Error('Failed to fetch providers');
+  return response.json();
+}
+
+export async function getGatewayProvider(id: string): Promise<GatewayProvider> {
+  const response = await adminFetch(`/v1/admin/providers/${id}`);
+  if (!response.ok) throw new Error('Failed to fetch provider');
+  return response.json();
+}
+
+export async function createGatewayProvider(dto: CreateGatewayProviderDto): Promise<GatewayProvider> {
+  const response = await adminFetch('/v1/admin/providers', {
+    method: 'POST',
+    body: JSON.stringify(dto),
+  });
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}));
+    throw new Error(data.error || 'Failed to create provider');
+  }
+  return response.json();
+}
+
+export async function updateGatewayProvider(id: string, dto: UpdateGatewayProviderDto): Promise<GatewayProvider> {
+  const response = await adminFetch(`/v1/admin/providers/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(dto),
+  });
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}));
+    throw new Error(data.error || 'Failed to update provider');
+  }
+  return response.json();
+}
+
+export async function deleteGatewayProvider(id: string): Promise<void> {
+  const response = await adminFetch(`/v1/admin/providers/${id}`, {
+    method: 'DELETE',
+  });
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}));
+    throw new Error(data.error || 'Failed to delete provider');
+  }
+}
+
+export async function setGatewayDefault(id: string): Promise<GatewayProvider> {
+  const response = await adminFetch(`/v1/admin/providers/${id}/default`, {
+    method: 'POST',
+  });
+  if (!response.ok) throw new Error('Failed to set default provider');
+  return response.json();
+}
+
+export async function updateProviderAvailability(id: string, tenantAvailable: boolean): Promise<GatewayProvider> {
+  const response = await adminFetch(`/v1/admin/providers/${id}/availability`, {
+    method: 'PUT',
+    body: JSON.stringify({ tenantAvailable }),
+  });
+  if (!response.ok) throw new Error('Failed to update provider availability');
+  return response.json();
+}
+
+export async function listProviderTenants(id: string): Promise<ProviderTenantAccessEntry[]> {
+  const response = await adminFetch(`/v1/admin/providers/${id}/tenants`);
+  if (!response.ok) throw new Error('Failed to fetch provider tenants');
+  const data = await response.json();
+  return data.tenants;
+}
+
+export async function grantProviderTenantAccess(providerId: string, tenantId: string): Promise<void> {
+  const response = await adminFetch(`/v1/admin/providers/${providerId}/tenants`, {
+    method: 'POST',
+    body: JSON.stringify({ tenantId }),
+  });
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}));
+    throw new Error(data.error || 'Failed to grant access');
+  }
+}
+
+export async function revokeProviderTenantAccess(providerId: string, tenantId: string): Promise<void> {
+  const response = await adminFetch(`/v1/admin/providers/${providerId}/tenants/${tenantId}`, {
+    method: 'DELETE',
+  });
+  if (!response.ok) throw new Error('Failed to revoke access');
+}
+
+// Tenant list for tenant picker
+export async function listAdminTenants(): Promise<{ tenants: AdminTenant[]; total: number }> {
+  const response = await adminFetch('/v1/admin/tenants?limit=200');
+  if (!response.ok) throw new Error('Failed to fetch tenants');
   return response.json();
 }

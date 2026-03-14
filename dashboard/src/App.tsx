@@ -6,6 +6,7 @@ import AdminPage from './pages/AdminPage';
 import SettingsPage from './pages/SettingsPage';
 import BetaSignupsPage from './pages/BetaSignupsPage';
 import SmokeTestsPage from './pages/SmokeTestsPage';
+import ProvidersPage from './pages/ProvidersPage';
 
 function App() {
   return (
@@ -14,6 +15,7 @@ function App() {
         <Route path="/" element={<TracesPage />} />
         <Route path="/analytics" element={<AnalyticsPage />} />
         <Route path="/admin" element={<AdminPage />} />
+        <Route path="/providers" element={<ProvidersPage />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="/beta-signups" element={<BetaSignupsPage />} />
         <Route path="/smoke-tests" element={<SmokeTestsPage />} />

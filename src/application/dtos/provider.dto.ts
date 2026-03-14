@@ -11,6 +11,7 @@ export interface ProviderViewModel {
   description: string | null;
   type: ProviderType;
   isDefault: boolean;
+  tenantAvailable: boolean;
   availableModels: string[];
 
   // Type-specific fields (nullable for other types)
@@ -71,6 +72,7 @@ export function toProviderViewModel(p: ProviderBase, includeSecrets: boolean = f
     description: p.description,
     type,
     isDefault: p.isDefault,
+    tenantAvailable: p.tenantAvailable,
     availableModels: p.availableModels,
     createdAt: p.createdAt.toISOString(),
     updatedAt: p.updatedAt ? p.updatedAt.toISOString() : null,

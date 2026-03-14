@@ -27,6 +27,11 @@ export default function KnowledgeBasesPage() {
   const [dragOver, setDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Embedder info
+  const [embedderAvailable, setEmbedderAvailable] = useState<boolean | null>(null);
+  const [embedderProvider, setEmbedderProvider] = useState<string | null>(null);
+  const [embedderModel, setEmbedderModel] = useState<string | null>(null);
+
   const token = getToken()!;
 
   const loadKbs = useCallback(async () => {
@@ -40,7 +45,18 @@ export default function KnowledgeBasesPage() {
     }
   }, [token]);
 
-  useEffect(() => { loadKbs(); }, [loadKbs]);
+  const loadEmbedderInfo = useCallback(async () => {
+    try {
+      const info = await api.getEmbedderInfo(token);
+      setEmbedderAvailable(info.available);
+      setEmbedderProvider(info.provider);
+      setEmbedderModel(info.model);
+    } catch {
+      setEmbedderAvailable(false);
+    }
+  }, [token]);
+
+  useEffect(() => { loadKbs(); loadEmbedderInfo(); }, [loadKbs, loadEmbedderInfo]);
 
   async function handleDelete(id: string) {
     if (!confirm('Delete this knowledge base? This cannot be undone.')) return;
@@ -122,6 +138,19 @@ export default function KnowledgeBasesPage() {
         <div className="bg-gray-900 border border-gray-700 rounded-xl p-6 space-y-4">
           <h2 className="text-lg font-semibold text-white">Create Knowledge Base</h2>
 
+          {/* Embedder info */}
+          {embedderAvailable === false && (
+            <div className="bg-yellow-950/30 border border-yellow-800 rounded-lg px-4 py-3 text-yellow-400 text-sm">
+              No embedding model configured. Ask your administrator to configure a default embedder in gateway settings.
+            </div>
+          )}
+          {embedderAvailable === true && embedderProvider && embedderModel && (
+            <div className="bg-gray-800 rounded-lg px-4 py-2 text-sm text-gray-400 flex items-center gap-2">
+              <span>Embedding model:</span>
+              <span className="text-gray-200 font-mono text-xs">{embedderProvider} / {embedderModel}</span>
+            </div>
+          )}
+
           <div>
             <label className="block text-sm font-medium text-gray-300 mb-1">Name</label>
             <input
@@ -194,7 +223,7 @@ export default function KnowledgeBasesPage() {
 
           <button
             onClick={handleCreate}
-            disabled={creating || !createName.trim() || createFiles.length === 0}
+            disabled={creating || !createName.trim() || createFiles.length === 0 || embedderAvailable === false}
             className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:hover:bg-blue-600 text-white text-sm rounded-lg transition-colors"
           >
             {creating ? 'Creating... (chunking & embedding)' : 'Create'}

@@ -160,7 +160,7 @@ describe('EmbeddingAgentService.resolveEmbedder', () => {
     const em = buildMockEm();
 
     await expect(service.resolveEmbedder(undefined, 'tenant-1', em))
-      .rejects.toThrow('SYSTEM_EMBEDDER_PROVIDER / SYSTEM_EMBEDDER_MODEL env vars are not set');
+      .rejects.toThrow('No embedding config available');
   });
 
   it('uses explicit dimensions from agent config when provided', async () => {

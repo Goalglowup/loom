@@ -9,6 +9,7 @@ export interface TenantProviderConfig {
   baseUrl?: string;       // OpenAI base URL or Azure endpoint
   deployment?: string;    // Azure deployment name
   apiVersion?: string;    // Azure API version (e.g. 2024-02-01)
+  gatewayProviderId?: string; // Reference to a gateway provider entity
 }
 
 export interface MergePolicy {

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { api } from '../lib/api';
-import type { Agent, AgentInput, AgentMergePolicies, Skill, McpEndpoint, ResolvedAgentConfig, KnowledgeBase } from '../lib/api';
+import type { Agent, AgentInput, AgentMergePolicies, Skill, McpEndpoint, ResolvedAgentConfig, KnowledgeBase, AvailableProvider } from '../lib/api';
 import { getToken } from '../lib/auth';
 import ModelListEditor from './ModelListEditor';
 import { COMMON_MODELS } from '../lib/models';
@@ -61,8 +61,21 @@ export default function AgentEditor({ agent, onSave, onCancel }: AgentEditorProp
   const [conversationSummaryModel, setConversationSummaryModel] = useState(agent?.conversation_summary_model ?? '');
   const [knowledgeBaseRef, setKnowledgeBaseRef] = useState<string | null>(agent?.knowledgeBaseRef ?? null);
 
+  // Provider selection
+  const [selectedProviderId, setSelectedProviderId] = useState<string>(() => {
+    const cfg = agent?.providerConfig;
+    if (cfg && typeof cfg === 'object' && 'gatewayProviderId' in cfg) {
+      return cfg.gatewayProviderId as string;
+    }
+    return '';
+  });
+
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+
+  // Available providers
+  const [availableProviders, setAvailableProviders] = useState<AvailableProvider[]>([]);
+  const [loadingProviders, setLoadingProviders] = useState(false);
 
   // Knowledge bases
   const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBase[]>([]);
@@ -80,7 +93,19 @@ export default function AgentEditor({ agent, onSave, onCancel }: AgentEditorProp
     }
   }, [token]);
 
-  useEffect(() => { loadKbs(); }, [loadKbs]);
+  const loadProviders = useCallback(async () => {
+    setLoadingProviders(true);
+    try {
+      const { providers } = await api.getAvailableProviders(token);
+      setAvailableProviders(providers);
+    } catch {
+      // non-fatal — provider section just shows empty
+    } finally {
+      setLoadingProviders(false);
+    }
+  }, [token]);
+
+  useEffect(() => { loadKbs(); loadProviders(); }, [loadKbs, loadProviders]);
   const [showResolved, setShowResolved] = useState(false);
   const [resolved, setResolved] = useState<ResolvedAgentConfig | null>(null);
   const [loadingResolved, setLoadingResolved] = useState(false);
@@ -109,6 +134,12 @@ export default function AgentEditor({ agent, onSave, onCancel }: AgentEditorProp
       setConversationTokenLimit(agent.conversation_token_limit ?? 4000);
       setConversationSummaryModel(agent.conversation_summary_model ?? '');
       setKnowledgeBaseRef(agent.knowledgeBaseRef ?? null);
+      const cfg = agent.providerConfig;
+      if (cfg && typeof cfg === 'object' && 'gatewayProviderId' in cfg) {
+        setSelectedProviderId(cfg.gatewayProviderId as string);
+      } else {
+        setSelectedProviderId('');
+      }
     }
   }, [agent]);
 
@@ -118,8 +149,15 @@ export default function AgentEditor({ agent, onSave, onCancel }: AgentEditorProp
     setSaving(true);
     setError('');
     try {
+      // Build provider config based on selection
+      let providerConfig: Record<string, unknown> | null = null;
+      if (selectedProviderId) {
+        providerConfig = { gatewayProviderId: selectedProviderId };
+      }
+
       const data: AgentInput = {
         name: name.trim(),
+        providerConfig,
         systemPrompt: systemPrompt.trim() || null,
         skills: skills.length ? skills : null,
         mcpEndpoints: mcpEndpoints.length ? mcpEndpoints : null,
@@ -223,6 +261,39 @@ export default function AgentEditor({ agent, onSave, onCancel }: AgentEditorProp
           />
         </div>
       </section>
+
+      {/* Provider */}
+      {availableProviders.length > 0 && (
+        <section className="space-y-3">
+          <h3 className="text-sm font-semibold text-gray-300 uppercase tracking-wide">Provider</h3>
+          <p className="text-xs text-gray-500">Select a gateway provider or use the tenant default</p>
+          <select
+            value={selectedProviderId}
+            onChange={e => setSelectedProviderId(e.target.value)}
+            disabled={loadingProviders}
+            className="w-full bg-gray-950 border border-gray-700 rounded-lg px-3 py-2 text-gray-100 focus:outline-none focus:border-indigo-500 text-sm disabled:opacity-60"
+          >
+            <option value="">Tenant Default</option>
+            {availableProviders.map(p => (
+              <option key={p.id} value={p.id}>
+                {p.name} ({p.type}{p.availableModels.length > 0 ? ` - ${p.availableModels.length} models` : ''})
+              </option>
+            ))}
+          </select>
+          {loadingProviders && <p className="text-xs text-gray-500 mt-1 animate-pulse">Loading providers...</p>}
+          {selectedProviderId && (() => {
+            const selected = availableProviders.find(p => p.id === selectedProviderId);
+            if (selected && selected.availableModels.length > 0) {
+              return (
+                <div className="text-xs text-gray-500 mt-1">
+                  Available models: {selected.availableModels.join(', ')}
+                </div>
+              );
+            }
+            return null;
+          })()}
+        </section>
+      )}
 
       {/* System Prompt */}
       <section className="space-y-3">

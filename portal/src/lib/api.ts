@@ -180,6 +180,14 @@ export const api = {
   deployArtifact: (token: string, body: { org: string; name: string; tag: string; env: string }) =>
     request<{ deployment: Deployment }>('POST', '/v1/registry/deploy', body, token),
 
+  // Embedder info
+  getEmbedderInfo: (token: string) =>
+    request<{ available: boolean; provider: string | null; model: string | null }>('GET', '/v1/portal/embedder-info', undefined, token),
+
+  // Available providers
+  getAvailableProviders: (token: string) =>
+    request<{ providers: AvailableProvider[] }>('GET', '/v1/portal/available-providers', undefined, token),
+
   // Conversations
   getConversations: (token: string, partitionId?: string) => {
     const params = partitionId ? `?partition_id=${encodeURIComponent(partitionId)}` : '';
@@ -366,6 +374,14 @@ export interface ConversationMessage {
 export interface ConversationDetail extends Conversation {
   messages: ConversationMessage[];
   snapshots?: { id: string; messages_archived: number; created_at: string }[];
+}
+
+export interface AvailableProvider {
+  id: string;
+  name: string;
+  type: 'openai' | 'azure' | 'ollama';
+  availableModels: string[];
+  baseUrl?: string | null;
 }
 
 export interface ResolvedAgentConfig {
