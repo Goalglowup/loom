@@ -68,6 +68,7 @@
   },
   "main": "index.js",
   "workspaces": [
-    "cli"
+    "cli",
+    "packages/chat"
   ]
 }
