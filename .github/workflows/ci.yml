@@ -4,6 +4,7 @@ on:
   pull_request:
     branches:
       - main
+      - develop
 
 jobs:
   test:
@@ -33,6 +34,9 @@ jobs:
       - name: Build CLI
         run: npm run build --if-present
         working-directory: cli
+
+      - name: Build @arachne/chat
+        run: npm run build -w packages/chat
 
   lint:
     name: Lint
