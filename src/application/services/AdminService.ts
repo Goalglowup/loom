@@ -88,6 +88,9 @@ export interface BetaSignupRow {
 
 export interface SettingsRow {
   signupsEnabled: boolean;
+  defaultEmbedderProvider: string | null;
+  defaultEmbedderModel: string | null;
+  defaultEmbedderApiKey: string | null;
   updatedAt: string;
   updatedByAdminId: string | null;
 }
@@ -438,12 +441,23 @@ export class AdminService {
 
     return {
       signupsEnabled: settings.signupsEnabled,
+      defaultEmbedderProvider: settings.defaultEmbedderProvider,
+      defaultEmbedderModel: settings.defaultEmbedderModel,
+      defaultEmbedderApiKey: settings.defaultEmbedderApiKey ? '••••••••' : null,
       updatedAt: settings.updatedAt.toISOString(),
       updatedByAdminId: settings.updatedByAdminId,
     };
   }
 
-  async updateSettings(signupsEnabled: boolean, adminId: string): Promise<SettingsRow> {
+  async updateSettings(
+    updates: {
+      signupsEnabled?: boolean;
+      defaultEmbedderProvider?: string | null;
+      defaultEmbedderModel?: string | null;
+      defaultEmbedderApiKey?: string | null;
+    },
+    adminId: string,
+  ): Promise<SettingsRow> {
     const repo = this.em.getRepository(Settings);
     let settings = await repo.findOne({ id: 1 });
 
@@ -451,11 +465,30 @@ export class AdminService {
       settings = new Settings();
     }
 
-    settings.updateSignupsEnabled(signupsEnabled, adminId);
+    if (updates.signupsEnabled !== undefined) {
+      settings.updateSignupsEnabled(updates.signupsEnabled, adminId);
+    }
+
+    if (
+      updates.defaultEmbedderProvider !== undefined ||
+      updates.defaultEmbedderModel !== undefined ||
+      updates.defaultEmbedderApiKey !== undefined
+    ) {
+      settings.updateEmbedderConfig(
+        updates.defaultEmbedderProvider ?? settings.defaultEmbedderProvider,
+        updates.defaultEmbedderModel ?? settings.defaultEmbedderModel,
+        updates.defaultEmbedderApiKey ?? settings.defaultEmbedderApiKey,
+        adminId,
+      );
+    }
+
     await this.em.persistAndFlush(settings);
 
     return {
       signupsEnabled: settings.signupsEnabled,
+      defaultEmbedderProvider: settings.defaultEmbedderProvider,
+      defaultEmbedderModel: settings.defaultEmbedderModel,
+      defaultEmbedderApiKey: settings.defaultEmbedderApiKey ? '••••••••' : null,
       updatedAt: settings.updatedAt.toISOString(),
       updatedByAdminId: settings.updatedByAdminId,
     };
