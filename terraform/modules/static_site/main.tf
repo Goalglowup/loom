@@ -54,7 +54,11 @@ resource "azurerm_dns_cname_record" "site_www" {
 }
 
 # Apex domain validation TXT record
+# Only created when the validation token is available (non-empty).
+# First apply: custom domain creates in Validating state, token may be empty.
+# Second apply: token is populated, TXT record is created, validation completes.
 resource "azurerm_dns_txt_record" "site_validation" {
+  count               = azurerm_static_web_app_custom_domain.site.validation_token != "" ? 1 : 0
   name                = "@"
   zone_name           = local.dns_zone
   resource_group_name = var.dns_resource_group_name
