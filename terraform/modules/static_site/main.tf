@@ -23,7 +23,10 @@ resource "azurerm_key_vault_secret" "swa_deploy_token" {
 resource "azurerm_static_web_app_custom_domain" "dev_site" {
   static_web_app_id = azurerm_static_web_app.dev_site.id
   domain_name       = var.dns_zone_name_dev
-  validation_type   = "cname-delegation"
+  validation_type   = "dns-txt-token"
+
+  # TXT record must exist before custom domain validation
+  depends_on = [azurerm_dns_txt_record.dev_site_validation]
 }
 
 # CNAME for www.arachne-ai.dev → static web app default hostname
