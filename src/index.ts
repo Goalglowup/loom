@@ -269,13 +269,21 @@ const start = async () => {
         const upstreamStartMs = Date.now();
         const response = await provider.proxy(proxyReq);
 
-        // Set response headers
+        // Forward upstream headers, but skip hop-by-hop and framing headers
+        // so Fastify can properly serialize JSON object responses.
+        const skipHeaders = new Set(['content-type', 'content-length', 'transfer-encoding', 'connection']);
         for (const [key, value] of Object.entries(response.headers)) {
-          reply.header(key, value);
+          if (!skipHeaders.has(key.toLowerCase())) {
+            reply.header(key, value);
+          }
         }
 
         // Handle streaming response — pipe through SSE proxy for trace capture
         if (response.stream) {
+          // For streaming, we need the original content-type (text/event-stream)
+          if (response.headers['content-type']) {
+            reply.header('content-type', response.headers['content-type']);
+          }
           const sseProxy = createSSEProxy({
             onComplete: () => {},
             traceContext: tenant

@@ -10,6 +10,7 @@ export interface TenantProviderConfig {
   deployment?: string;    // Azure deployment name
   apiVersion?: string;    // Azure API version (e.g. 2024-02-01)
   gatewayProviderId?: string; // Reference to a gateway provider entity
+  deploymentMap?: Record<string, string>; // Azure: model name → deployment name
 }
 
 export interface MergePolicy {
