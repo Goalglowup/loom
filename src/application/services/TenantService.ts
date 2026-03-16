@@ -30,7 +30,7 @@ function resolveArrayChain(arrays: any[][], nameOf: (item: any) => string | unde
 export class TenantService {
   constructor(private readonly em: EntityManager) {}
 
-  async loadByApiKey(rawKey: string): Promise<TenantContext> {
+  async loadByApiKey(rawKey: string): Promise<{ context: TenantContext; expiresAt: Date | null }> {
     const keyHash = createHash('sha256').update(rawKey).digest('hex');
 
     const apiKey = await this.em.findOne(
@@ -40,6 +40,11 @@ export class TenantService {
     );
 
     if (!apiKey) throw new Error('Invalid API key');
+
+    // Check expiry — a non-null expiresAt in the past means the key is expired
+    if (apiKey.expiresAt && apiKey.expiresAt.getTime() < Date.now()) {
+      throw new Error('API key has expired');
+    }
 
     const tenant = apiKey.tenant as Tenant;
     if (tenant.status !== 'active') throw new Error('Tenant is not active');
@@ -114,19 +119,22 @@ export class TenantService {
     };
 
     return {
-      tenantId: tenant.id,
-      name: tenant.name,
-      agentId: agent?.id ?? undefined,
-      knowledgeBaseRef: agent?.knowledgeBaseRef ?? undefined,
-      providerConfig: resolvedProviderConfig,
-      agentSystemPrompt: agent?.systemPrompt ?? undefined,
-      agentSkills: agent?.skills ?? undefined,
-      agentMcpEndpoints: agent?.mcpEndpoints ?? undefined,
-      mergePolicies,
-      resolvedSystemPrompt,
-      resolvedSkills: resolvedSkills.length ? resolvedSkills : undefined,
-      resolvedMcpEndpoints: resolvedMcpEndpoints.length ? resolvedMcpEndpoints : undefined,
-      agentConfig,
+      context: {
+        tenantId: tenant.id,
+        name: tenant.name,
+        agentId: agent?.id ?? undefined,
+        knowledgeBaseRef: agent?.knowledgeBaseRef ?? undefined,
+        providerConfig: resolvedProviderConfig,
+        agentSystemPrompt: agent?.systemPrompt ?? undefined,
+        agentSkills: agent?.skills ?? undefined,
+        agentMcpEndpoints: agent?.mcpEndpoints ?? undefined,
+        mergePolicies,
+        resolvedSystemPrompt,
+        resolvedSkills: resolvedSkills.length ? resolvedSkills : undefined,
+        resolvedMcpEndpoints: resolvedMcpEndpoints.length ? resolvedMcpEndpoints : undefined,
+        agentConfig,
+      },
+      expiresAt: apiKey.expiresAt ?? null,
     };
   }
 }

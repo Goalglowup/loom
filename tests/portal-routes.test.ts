@@ -125,8 +125,14 @@ function buildMockTenantMgmtSvc(): TenantManagementService {
     createApiKey: vi.fn().mockResolvedValue({
       id: 'key-uuid', name: 'Test Key', keyPrefix: 'loom_test', status: 'active',
       createdAt: new Date().toISOString(), rawKey: 'loom_test_secret', agentId: TEST_AGENT_ID, agentName: TEST_AGENT_NAME,
+      expiresAt: null, rotatedFromId: null,
     }),
     revokeApiKey: vi.fn().mockResolvedValue({ keyHash: 'hash123' }),
+    rotateApiKey: vi.fn().mockResolvedValue({
+      id: 'new-key-uuid', name: 'Test Key', keyPrefix: 'loom_new_', status: 'active',
+      createdAt: new Date().toISOString(), rawKey: 'loom_new_secret', agentId: TEST_AGENT_ID, agentName: TEST_AGENT_NAME,
+      expiresAt: null, rotatedFromId: 'key-uuid',
+    }),
     createAgent: vi.fn().mockImplementation((tenantId: string, dto: any) => Promise.resolve({
       id: 'new-agent-id', tenantId, name: dto.name, providerConfig: dto.providerConfig,
       systemPrompt: dto.systemPrompt, skills: dto.skills, mcpEndpoints: dto.mcpEndpoints,
@@ -825,6 +831,225 @@ describe('PATCH /v1/portal/settings (org name & slug)', () => {
       url: '/v1/portal/settings',
       headers: { authorization: `Bearer ${authToken(TEST_USER_ID, TEST_TENANT_ID, 'member')}` },
       payload: { name: 'Test' },
+    });
+    expect(res.statusCode).toBe(403);
+  });
+});
+
+// ── POST /v1/portal/api-keys (with expiresAt) ──────────────────────────────
+
+describe('POST /v1/portal/api-keys (with expiresAt)', () => {
+  let app: FastifyInstance;
+
+  beforeEach(async () => {
+    process.env.ENCRYPTION_MASTER_KEY = TEST_MASTER_KEY;
+    app = await buildApp();
+  });
+
+  afterEach(async () => {
+    await app.close();
+    delete process.env.ENCRYPTION_MASTER_KEY;
+  });
+
+  it('creates API key with expiresAt and returns it in the response', async () => {
+    const futureDate = new Date(Date.now() + 86_400_000).toISOString();
+    const tenantMgmtSvc = buildMockTenantMgmtSvc();
+    (tenantMgmtSvc.createApiKey as any).mockResolvedValue({
+      id: 'key-uuid', name: 'Expiring Key', keyPrefix: 'loom_test', status: 'active',
+      createdAt: new Date().toISOString(), rawKey: 'loom_test_secret',
+      agentId: TEST_AGENT_ID, agentName: TEST_AGENT_NAME,
+      expiresAt: futureDate, rotatedFromId: null,
+    });
+    const localApp = await buildApp(buildMockPortalSvc(), buildMockConvSvc(), buildMockUserMgmtSvc(), tenantMgmtSvc);
+
+    const res = await localApp.inject({
+      method: 'POST',
+      url: '/v1/portal/api-keys',
+      headers: { authorization: `Bearer ${authToken()}` },
+      payload: { name: 'Expiring Key', agentId: TEST_AGENT_ID, expiresAt: futureDate },
+    });
+
+    expect(res.statusCode).toBe(201);
+    const body = res.json();
+    expect(body.expiresAt).toBe(futureDate);
+    expect(tenantMgmtSvc.createApiKey).toHaveBeenCalledWith(
+      TEST_TENANT_ID, TEST_AGENT_ID,
+      { name: 'Expiring Key', expiresAt: futureDate },
+    );
+    await localApp.close();
+  });
+
+  it('rejects expiresAt in the past with 400', async () => {
+    const pastDate = new Date(Date.now() - 60_000).toISOString();
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/portal/api-keys',
+      headers: { authorization: `Bearer ${authToken()}` },
+      payload: { name: 'Expired Key', agentId: TEST_AGENT_ID, expiresAt: pastDate },
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toContain('future date');
+  });
+
+  it('rejects invalid expiresAt format with 400', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/portal/api-keys',
+      headers: { authorization: `Bearer ${authToken()}` },
+      payload: { name: 'Bad Date', agentId: TEST_AGENT_ID, expiresAt: 'not-a-date' },
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toContain('valid ISO date');
+  });
+});
+
+// ── GET /v1/portal/api-keys (includes expiry fields) ────────────────────────
+
+describe('GET /v1/portal/api-keys (includes expiry fields)', () => {
+  let app: FastifyInstance;
+
+  beforeEach(async () => {
+    process.env.ENCRYPTION_MASTER_KEY = TEST_MASTER_KEY;
+    const tenantMgmtSvc = buildMockTenantMgmtSvc();
+    (tenantMgmtSvc.listApiKeys as any).mockResolvedValue([
+      {
+        id: 'key-1', name: 'Key One', keyPrefix: 'loom_test', status: 'active',
+        createdAt: new Date().toISOString(), agentId: TEST_AGENT_ID, agentName: TEST_AGENT_NAME,
+        expiresAt: '2027-01-01T00:00:00.000Z', rotatedFromId: null,
+      },
+      {
+        id: 'key-2', name: 'Key Two', keyPrefix: 'loom_test2', status: 'active',
+        createdAt: new Date().toISOString(), agentId: TEST_AGENT_ID, agentName: TEST_AGENT_NAME,
+        expiresAt: null, rotatedFromId: 'key-1',
+      },
+    ]);
+    app = await buildApp(buildMockPortalSvc(), buildMockConvSvc(), buildMockUserMgmtSvc(), tenantMgmtSvc);
+  });
+
+  afterEach(async () => {
+    await app.close();
+    delete process.env.ENCRYPTION_MASTER_KEY;
+  });
+
+  it('includes expiresAt and rotatedFromId in response', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/portal/api-keys',
+      headers: { authorization: `Bearer ${authToken()}` },
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.apiKeys).toHaveLength(2);
+    expect(body.apiKeys[0].expiresAt).toBe('2027-01-01T00:00:00.000Z');
+    expect(body.apiKeys[0].rotatedFromId).toBeNull();
+    expect(body.apiKeys[1].expiresAt).toBeNull();
+    expect(body.apiKeys[1].rotatedFromId).toBe('key-1');
+  });
+});
+
+// ── POST /v1/portal/api-keys/:id/rotate ─────────────────────────────────────
+
+describe('POST /v1/portal/api-keys/:id/rotate', () => {
+  let app: FastifyInstance;
+  let tenantMgmtSvc: TenantManagementService;
+
+  beforeEach(async () => {
+    process.env.ENCRYPTION_MASTER_KEY = TEST_MASTER_KEY;
+    tenantMgmtSvc = buildMockTenantMgmtSvc();
+    app = await buildApp(buildMockPortalSvc(), buildMockConvSvc(), buildMockUserMgmtSvc(), tenantMgmtSvc);
+  });
+
+  afterEach(async () => {
+    await app.close();
+    delete process.env.ENCRYPTION_MASTER_KEY;
+  });
+
+  it('creates a new key linked to the old key via rotatedFromId', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/portal/api-keys/key-uuid/rotate',
+      headers: { authorization: `Bearer ${authToken()}` },
+      payload: {},
+    });
+
+    expect(res.statusCode).toBe(201);
+    const body = res.json();
+    expect(body.id).toBe('new-key-uuid');
+    expect(body.key).toBe('loom_new_secret');
+    expect(body.rotatedFromId).toBe('key-uuid');
+    expect(tenantMgmtSvc.rotateApiKey).toHaveBeenCalledWith(
+      TEST_TENANT_ID, 'key-uuid',
+      { name: undefined, expiresAt: undefined },
+    );
+  });
+
+  it('accepts optional name and expiresAt for the new key', async () => {
+    const futureDate = new Date(Date.now() + 86_400_000).toISOString();
+    (tenantMgmtSvc.rotateApiKey as any).mockResolvedValue({
+      id: 'rotated-key', name: 'Custom Name', keyPrefix: 'loom_rot_', status: 'active',
+      createdAt: new Date().toISOString(), rawKey: 'loom_rotated_secret',
+      agentId: TEST_AGENT_ID, agentName: TEST_AGENT_NAME,
+      expiresAt: futureDate, rotatedFromId: 'key-uuid',
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/portal/api-keys/key-uuid/rotate',
+      headers: { authorization: `Bearer ${authToken()}` },
+      payload: { name: 'Custom Name', expiresAt: futureDate },
+    });
+
+    expect(res.statusCode).toBe(201);
+    const body = res.json();
+    expect(body.name).toBe('Custom Name');
+    expect(body.expiresAt).toBe(futureDate);
+  });
+
+  it('returns 404 when old key does not exist', async () => {
+    (tenantMgmtSvc.rotateApiKey as any).mockRejectedValue(new Error('not found'));
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/portal/api-keys/nonexistent-id/rotate',
+      headers: { authorization: `Bearer ${authToken()}` },
+      payload: {},
+    });
+
+    expect(res.statusCode).toBe(404);
+    expect(res.json().error).toContain('API key not found');
+  });
+
+  it('returns 400 when expiresAt is in the past', async () => {
+    const pastDate = new Date(Date.now() - 60_000).toISOString();
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/portal/api-keys/key-uuid/rotate',
+      headers: { authorization: `Bearer ${authToken()}` },
+      payload: { expiresAt: pastDate },
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toContain('future date');
+  });
+
+  it('returns 401 without auth token', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/portal/api-keys/key-uuid/rotate',
+      payload: {},
+    });
+    expect(res.statusCode).toBe(401);
+  });
+
+  it('returns 403 for non-owner', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/portal/api-keys/key-uuid/rotate',
+      headers: { authorization: `Bearer ${authToken(TEST_USER_ID, TEST_TENANT_ID, 'member')}` },
+      payload: {},
     });
     expect(res.statusCode).toBe(403);
   });

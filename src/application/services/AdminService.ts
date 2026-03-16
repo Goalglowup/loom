@@ -293,6 +293,8 @@ export class AdminService {
       status: 'active',
       createdAt: now,
       rawKey,
+      expiresAt: null,
+      rotatedFromId: null,
     });
     await this.em.persistAndFlush(apiKey);
     return {

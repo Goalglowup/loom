@@ -52,6 +52,8 @@ export interface ApiKeyViewModel {
   createdAt: string;
   agentId: string;
   agentName: string;
+  expiresAt: string | null;
+  rotatedFromId: string | null;
 }
 
 export interface ApiKeyCreatedViewModel extends ApiKeyViewModel {
@@ -60,4 +62,5 @@ export interface ApiKeyCreatedViewModel extends ApiKeyViewModel {
 
 export interface CreateApiKeyDto {
   name?: string;
+  expiresAt?: string;
 }
