@@ -1026,10 +1026,11 @@ describe('TenantService', () => {
 
       const em = buildMockEm({ findOne: vi.fn().mockResolvedValue(apiKeyRecord) });
       const svc = new TenantService(em);
-      const ctx = await svc.loadByApiKey('loom_sk_testkey');
-      expect(ctx.tenantId).toBe('tenant-1');
-      expect(ctx.agentId).toBe('agent-1');
-      expect(ctx.name).toBe('Test Tenant');
+      const result = await svc.loadByApiKey('loom_sk_testkey');
+      expect(result.context.tenantId).toBe('tenant-1');
+      expect(result.context.agentId).toBe('agent-1');
+      expect(result.context.name).toBe('Test Tenant');
+      expect(result.expiresAt).toBeNull();
     });
 
     it('throws "Invalid API key" when key not found', async () => {

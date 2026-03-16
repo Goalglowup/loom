@@ -89,8 +89,13 @@ class LRUCache<K, V> {
   }
 }
 
+interface CachedTenant {
+  context: TenantContext;
+  expiresAt: Date | null;
+}
+
 // Shared cache — 1 000 tenants; adjust if tenant count grows significantly
-const tenantCache = new LRUCache<string, TenantContext>(1000);
+const tenantCache = new LRUCache<string, CachedTenant>(1000);
 
 function hashApiKey(rawKey: string): string {
   return createHash('sha256').update(rawKey).digest('hex');
@@ -136,10 +141,22 @@ export function registerAuthMiddleware(fastify: FastifyInstance): void {
     const keyHash = hashApiKey(rawKey);
 
     // LRU cache hit — no DB query needed
-    let tenant = tenantCache.get(keyHash);
+    let cached = tenantCache.get(keyHash);
 
-    if (!tenant) {
-      let found: TenantContext | null = null;
+    // Evict expired keys from cache
+    if (cached && cached.expiresAt && cached.expiresAt.getTime() < Date.now()) {
+      tenantCache.invalidate(keyHash);
+      return reply.code(401).send({
+        error: {
+          message: 'API key has expired.',
+          type: 'invalid_request_error',
+          code: 'expired_api_key',
+        },
+      });
+    }
+
+    if (!cached) {
+      let found: { context: TenantContext; expiresAt: Date | null } | null = null;
       try {
         const tenantService = new TenantService(request.em);
         found = await tenantService.loadByApiKey(rawKey);
@@ -148,11 +165,11 @@ export function registerAuthMiddleware(fastify: FastifyInstance): void {
       }
       if (found) {
         tenantCache.set(keyHash, found);
-        tenant = found;
+        cached = found;
       }
     }
 
-    if (!tenant) {
+    if (!cached) {
       return reply.code(401).send({
         error: {
           message: 'Invalid API key.',
@@ -162,7 +179,7 @@ export function registerAuthMiddleware(fastify: FastifyInstance): void {
       });
     }
 
-    request.tenant = tenant;
+    request.tenant = cached.context;
   });
 }
 

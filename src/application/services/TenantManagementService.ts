@@ -21,6 +21,7 @@ import type {
   UpdateAgentDto,
   ApiKeyViewModel,
   ApiKeyCreatedViewModel,
+  ApiKeyRotatedViewModel,
   CreateApiKeyDto,
 } from '../dtos/agent.dto.js';
 
@@ -67,6 +68,8 @@ function toApiKeyViewModel(k: ApiKey): ApiKeyViewModel {
     createdAt: k.createdAt.toISOString(),
     agentId: (k.agent as any)?.id ?? '',
     agentName: (k.agent as any)?.name ?? '',
+    expiresAt: k.expiresAt ? k.expiresAt.toISOString() : null,
+    rotatedFromId: k.rotatedFromId ?? null,
   };
 }
 
@@ -229,9 +232,33 @@ export class TenantManagementService {
   ): Promise<ApiKeyCreatedViewModel> {
     const agent = await this.em.findOneOrFail(Agent, { id: agentId, tenant: tenantId }, { populate: ['tenant', 'apiKeys'] });
     const { entity: apiKey, rawKey } = agent.createApiKey(dto.name ?? 'Default Key');
+    if (dto.expiresAt) {
+      apiKey.expiresAt = new Date(dto.expiresAt);
+    }
     this.em.persist(apiKey);
     await this.em.flush();
     return { ...toApiKeyViewModel(apiKey), rawKey };
+  }
+
+  async rotateApiKey(
+    tenantId: string,
+    keyId: string,
+    dto: CreateApiKeyDto = {},
+  ): Promise<ApiKeyRotatedViewModel> {
+    const oldKey = await this.em.findOneOrFail(
+      ApiKey,
+      { id: keyId, tenant: tenantId },
+      { populate: ['agent', 'agent.tenant', 'agent.apiKeys'] },
+    );
+    const agent = oldKey.agent as Agent;
+    const { entity: newKey, rawKey } = agent.createApiKey(dto.name ?? oldKey.name);
+    newKey.rotatedFromId = oldKey.id;
+    if (dto.expiresAt) {
+      newKey.expiresAt = new Date(dto.expiresAt);
+    }
+    this.em.persist(newKey);
+    await this.em.flush();
+    return { ...toApiKeyViewModel(newKey), rawKey, oldKeyHash: oldKey.keyHash };
   }
 
   async revokeApiKey(tenantId: string, keyId: string): Promise<{ keyHash: string }> {

@@ -305,18 +305,20 @@ export function registerPortalRoutes(
         createdAt: row.createdAt,
         agentId: row.agentId,
         agentName: row.agentName,
+        expiresAt: row.expiresAt,
+        rotatedFromId: row.rotatedFromId,
       })),
     });
   });
 
   // ── POST /v1/portal/api-keys ──────────────────────────────────────────────
-  fastify.post<{ Body: { name: string; agentId: string } }>(
+  fastify.post<{ Body: { name: string; agentId: string; expiresAt?: string } }>(
     '/v1/portal/api-keys',
     { preHandler: ownerRequired },
     async (request, reply) => {
       const tenantMgmtSvc = new TenantManagementService(request.em);
       const { tenantId } = request.portalUser!;
-      const { name, agentId } = request.body;
+      const { name, agentId, expiresAt } = request.body;
 
       if (!name || typeof name !== 'string' || name.trim().length === 0) {
         return reply.code(400).send({ error: 'API key name is required' });
@@ -325,7 +327,18 @@ export function registerPortalRoutes(
         return reply.code(400).send({ error: 'agentId is required' });
       }
 
-      const result = await tenantMgmtSvc.createApiKey(tenantId, agentId, { name });
+      // Validate expiresAt is a future date if provided
+      if (expiresAt !== undefined) {
+        const parsed = new Date(expiresAt);
+        if (isNaN(parsed.getTime())) {
+          return reply.code(400).send({ error: 'expiresAt must be a valid ISO date string' });
+        }
+        if (parsed.getTime() <= Date.now()) {
+          return reply.code(400).send({ error: 'expiresAt must be a future date' });
+        }
+      }
+
+      const result = await tenantMgmtSvc.createApiKey(tenantId, agentId, { name, expiresAt });
       if (!result) {
         return reply.code(400).send({ error: 'Invalid agentId' });
       }
@@ -337,7 +350,49 @@ export function registerPortalRoutes(
         keyPrefix: result.keyPrefix,
         status: result.status,
         createdAt: result.createdAt,
+        expiresAt: result.expiresAt,
       });
+    },
+  );
+
+  // ── POST /v1/portal/api-keys/:id/rotate ─────────────────────────────────
+  fastify.post<{ Params: { id: string }; Body: { name?: string; expiresAt?: string } }>(
+    '/v1/portal/api-keys/:id/rotate',
+    { preHandler: ownerRequired },
+    async (request, reply) => {
+      const tenantMgmtSvc = new TenantManagementService(request.em);
+      const { tenantId } = request.portalUser!;
+      const { id: keyId } = request.params;
+      const { name, expiresAt } = request.body ?? {};
+
+      // Validate expiresAt is a future date if provided
+      if (expiresAt !== undefined) {
+        const parsed = new Date(expiresAt);
+        if (isNaN(parsed.getTime())) {
+          return reply.code(400).send({ error: 'expiresAt must be a valid ISO date string' });
+        }
+        if (parsed.getTime() <= Date.now()) {
+          return reply.code(400).send({ error: 'expiresAt must be a future date' });
+        }
+      }
+
+      try {
+        const result = await tenantMgmtSvc.rotateApiKey(tenantId, keyId, { name, expiresAt });
+        // Invalidate old key from LRU cache so it must re-authenticate via DB
+        invalidateCachedKey(result.oldKeyHash);
+        return reply.code(201).send({
+          id: result.id,
+          name: result.name,
+          key: result.rawKey,
+          keyPrefix: result.keyPrefix,
+          status: result.status,
+          createdAt: result.createdAt,
+          expiresAt: result.expiresAt,
+          rotatedFromId: result.rotatedFromId,
+        });
+      } catch {
+        return reply.code(404).send({ error: 'API key not found' });
+      }
     },
   );
 

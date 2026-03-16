@@ -34,7 +34,12 @@ export interface TenantContext {
   keyId: string;
 }
 
-type KeyStore = Map<string, TenantContext>;
+interface CachedTenant {
+  context: TenantContext;
+  expiresAt: Date | null;
+}
+
+type KeyStore = Map<string, { context: TenantContext; expiresAt: Date | null }>;
 
 /** Minimal LRU cache (bounded Map using insertion-order eviction). */
 class LRUCache<K, V> {
@@ -65,6 +70,10 @@ class LRUCache<K, V> {
     this.lookupCount.set(key, 0);
   }
 
+  invalidate(key: K): void {
+    this.cache.delete(key);
+  }
+
   hits(key: K): number {
     return this.lookupCount.get(key) ?? 0;
   }
@@ -88,7 +97,7 @@ class LRUCache<K, V> {
 function buildAuthGateway(
   port: number,
   keyStore: KeyStore,
-  lruCache: LRUCache<string, TenantContext>
+  lruCache: LRUCache<string, CachedTenant>
 ): FastifyInstance {
   const app = Fastify({ logger: false });
 
@@ -114,19 +123,30 @@ function buildAuthGateway(
     }
 
     // Check LRU cache first
-    let tenant = lruCache.get(apiKey);
-    if (!tenant) {
+    let cached = lruCache.get(apiKey);
+
+    // Evict expired keys from cache
+    if (cached && cached.expiresAt && cached.expiresAt.getTime() < Date.now()) {
+      lruCache.invalidate(apiKey);
+      return reply.code(401).send({ error: { message: 'API key has expired', type: 'auth_error', code: 'expired_api_key' } });
+    }
+
+    if (!cached) {
       // Fall back to key store (simulates DB lookup in real impl)
       const stored = keyStore.get(apiKey);
       if (!stored) {
         return reply.code(401).send({ error: { message: 'Invalid API key', type: 'auth_error' } });
       }
-      tenant = stored;
-      lruCache.set(apiKey, tenant);
+      // Check expiry on initial load (mirrors TenantService.loadByApiKey behavior)
+      if (stored.expiresAt && stored.expiresAt.getTime() < Date.now()) {
+        return reply.code(401).send({ error: { message: 'API key has expired', type: 'auth_error', code: 'expired_api_key' } });
+      }
+      cached = stored;
+      lruCache.set(apiKey, cached);
     }
 
     // Attach tenant context to request
-    (request as any).tenant = tenant;
+    (request as any).tenant = cached.context;
   });
 
   // Echo endpoint — returns the tenant context attached by auth middleware
@@ -142,17 +162,21 @@ function buildAuthGateway(
 const VALID_KEY = 'sk-loom-valid-key-abc123';
 const VALID_KEY_2 = 'sk-loom-valid-key-def456';
 const INVALID_KEY = 'sk-loom-bogus-key-xyz';
+const EXPIRED_KEY = 'sk-loom-expired-key-ghi789';
+const FUTURE_EXPIRY_KEY = 'sk-loom-future-expiry-jkl012';
 
 const keyStore: KeyStore = new Map([
-  [VALID_KEY, { tenantId: 'tenant-001', keyId: 'key-001' }],
-  [VALID_KEY_2, { tenantId: 'tenant-002', keyId: 'key-002' }],
+  [VALID_KEY, { context: { tenantId: 'tenant-001', keyId: 'key-001' }, expiresAt: null }],
+  [VALID_KEY_2, { context: { tenantId: 'tenant-002', keyId: 'key-002' }, expiresAt: null }],
+  [EXPIRED_KEY, { context: { tenantId: 'tenant-003', keyId: 'key-003' }, expiresAt: new Date(Date.now() - 60_000) }],
+  [FUTURE_EXPIRY_KEY, { context: { tenantId: 'tenant-004', keyId: 'key-004' }, expiresAt: new Date(Date.now() + 86_400_000) }],
 ]);
 
 // ── tests ─────────────────────────────────────────────────────────────────────
 
 describe('auth — valid key passes through with tenant context', () => {
   let app: FastifyInstance;
-  let lru: LRUCache<string, TenantContext>;
+  let lru: LRUCache<string, CachedTenant>;
 
   beforeAll(async () => {
     lru = new LRUCache(100);
@@ -213,7 +237,7 @@ describe('auth — invalid or missing key returns 401', () => {
   let app: FastifyInstance;
 
   beforeAll(async () => {
-    const lru = new LRUCache<string, TenantContext>(100);
+    const lru = new LRUCache<string, CachedTenant>(100);
     app = buildAuthGateway(3022, keyStore, lru);
     await app.listen({ port: 3022, host: '127.0.0.1' });
   });
@@ -291,7 +315,7 @@ describe('auth — invalid or missing key returns 401', () => {
 
 describe('auth — LRU cache behaviour', () => {
   let app: FastifyInstance;
-  let lru: LRUCache<string, TenantContext>;
+  let lru: LRUCache<string, CachedTenant>;
 
   beforeAll(async () => {
     lru = new LRUCache(100);
@@ -337,8 +361,8 @@ describe('auth — LRU cache behaviour', () => {
   });
 
   it('cache evicts oldest entry when max size is reached', () => {
-    const tinyCache = new LRUCache<string, TenantContext>(2);
-    const ctx = (id: string): TenantContext => ({ tenantId: id, keyId: id });
+    const tinyCache = new LRUCache<string, CachedTenant>(2);
+    const ctx = (id: string): CachedTenant => ({ context: { tenantId: id, keyId: id }, expiresAt: null });
 
     tinyCache.set('key-a', ctx('a'));
     tinyCache.set('key-b', ctx('b'));
@@ -352,8 +376,8 @@ describe('auth — LRU cache behaviour', () => {
   });
 
   it('accessing a key should refresh its LRU position (most-recently-used stays)', () => {
-    const tinyCache = new LRUCache<string, TenantContext>(2);
-    const ctx = (id: string): TenantContext => ({ tenantId: id, keyId: id });
+    const tinyCache = new LRUCache<string, CachedTenant>(2);
+    const ctx = (id: string): CachedTenant => ({ context: { tenantId: id, keyId: id }, expiresAt: null });
 
     tinyCache.set('key-a', ctx('a'));
     tinyCache.set('key-b', ctx('b'));
@@ -374,7 +398,7 @@ describe('auth — multi-tenant isolation', () => {
   let app: FastifyInstance;
 
   beforeAll(async () => {
-    const lru = new LRUCache<string, TenantContext>(100);
+    const lru = new LRUCache<string, CachedTenant>(100);
     app = buildAuthGateway(3024, keyStore, lru);
     await app.listen({ port: 3024, host: '127.0.0.1' });
   });
@@ -401,5 +425,77 @@ describe('auth — multi-tenant isolation', () => {
 
     expect(data1.tenant.tenantId).not.toBe(data2.tenant.tenantId);
     expect(data1.tenant.keyId).not.toBe(data2.tenant.keyId);
+  });
+});
+
+describe('auth — API key expiry', () => {
+  let app: FastifyInstance;
+  let lru: LRUCache<string, CachedTenant>;
+
+  beforeAll(async () => {
+    lru = new LRUCache(100);
+    app = buildAuthGateway(3025, keyStore, lru);
+    await app.listen({ port: 3025, host: '127.0.0.1' });
+  });
+
+  afterAll(async () => {
+    await app.close();
+  });
+
+  it('expired key should return 401 with expired_api_key code', async () => {
+    const res = await fetch('http://127.0.0.1:3025/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'x-api-key': EXPIRED_KEY },
+      body: JSON.stringify({}),
+    });
+
+    expect(res.status).toBe(401);
+    const data = await res.json();
+    expect(data.error.code).toBe('expired_api_key');
+    expect(data.error.message).toContain('expired');
+  });
+
+  it('key with future expiresAt should pass through normally', async () => {
+    const res = await fetch('http://127.0.0.1:3025/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'x-api-key': FUTURE_EXPIRY_KEY },
+      body: JSON.stringify({}),
+    });
+
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.tenant.tenantId).toBe('tenant-004');
+  });
+
+  it('key with null expiresAt (never expires) should pass through', async () => {
+    const res = await fetch('http://127.0.0.1:3025/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'x-api-key': VALID_KEY },
+      body: JSON.stringify({}),
+    });
+
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.tenant.tenantId).toBe('tenant-001');
+  });
+
+  it('expired key in cache should be evicted and return 401', async () => {
+    // Pre-populate cache with an expired entry
+    const expiredCached: CachedTenant = {
+      context: { tenantId: 'tenant-cached-expired', keyId: 'key-cached-expired' },
+      expiresAt: new Date(Date.now() - 1000),
+    };
+    lru.set('sk-cached-expired', expiredCached);
+    expect(lru.size()).toBeGreaterThan(0);
+
+    const res = await fetch('http://127.0.0.1:3025/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'x-api-key': 'sk-cached-expired' },
+      body: JSON.stringify({}),
+    });
+
+    expect(res.status).toBe(401);
+    const data = await res.json();
+    expect(data.error.code).toBe('expired_api_key');
   });
 });
