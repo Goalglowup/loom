@@ -72,7 +72,7 @@ function parseYamlValue(raw: string): string | number | boolean | null {
   return stripped;
 }
 
-function parseSimpleYaml(content: string): Record<string, unknown> {
+export function parseSimpleYaml(content: string): Record<string, unknown> {
   const root: Record<string, unknown> = {};
   const stack: Array<{ obj: Record<string, unknown>; indent: number }> = [
     { obj: root, indent: -1 },
