@@ -117,7 +117,9 @@ describe('push command', () => {
       if (capturedBody) {
         expect(capturedBody.get('name')).toBe('test-agent');
         expect(capturedBody.get('kind')).toBe('Agent');
-        expect(capturedBody.get('sha256')).toBe('deadbeef');
+        // sha256 is intentionally NOT sent — manifest sha256 is a content hash
+        // that doesn't match the full bundle hash the gateway computes
+        expect(capturedBody.get('sha256')).toBeNull();
         expect(capturedBody.get('chunkCount')).toBe('10');
         expect(capturedBody.get('tag')).toBe('latest');
       }

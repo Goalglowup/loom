@@ -74,7 +74,9 @@ export const pushCommand = new Command('push')
     form.append('tag', options.tag);
     form.append('name', manifest.name);
     form.append('kind', manifest.kind);
-    if (manifest.sha256) form.append('sha256', manifest.sha256);
+    // Don't send manifest.sha256 — it's a content hash computed before the
+    // manifest was added to the bundle. The gateway computes its own SHA-256
+    // from the full .orb file, so they will never match.
     if (manifest.chunkCount) form.append('chunkCount', String(manifest.chunkCount));
 
     const res = await fetch(`${gatewayUrl}/v1/registry/push`, {
