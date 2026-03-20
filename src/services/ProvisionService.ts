@@ -6,7 +6,7 @@ import { REGISTRY_SCOPES } from '../auth/registryScopes.js';
 import { RUNTIME_JWT_SECRET } from '../auth/secrets.js';
 import { RegistryService } from './RegistryService.js';
 import { extractFileFromTar } from '../lib/tar.js';
-import { parseSimpleYaml } from './WeaveService.js';
+import { parseSimpleYaml } from '../lib/yaml.js';
 import { Deployment } from '../domain/entities/Deployment.js';
 import { Tenant } from '../domain/entities/Tenant.js';
 import { Artifact } from '../domain/entities/Artifact.js';
@@ -185,7 +185,9 @@ export function extractAgentMetadata(
 ): Record<string, unknown> | null {
   if (!artifact.bundleData || artifact.bundleData.length === 0) return null;
 
-  const tarBuf = gunzipSync(artifact.bundleData);
+  // Cap decompressed size at 50 MB to prevent OOM from crafted bundles
+  const MAX_DECOMPRESSED_SIZE = 50 * 1024 * 1024;
+  const tarBuf = gunzipSync(artifact.bundleData, { maxOutputLength: MAX_DECOMPRESSED_SIZE });
 
   // Try spec.json first (structured JSON from server-side weave)
   const specJsonBuf = extractFileFromTar(tarBuf, 'spec.json');
@@ -263,15 +265,28 @@ function extractYamlBlockScalar(yaml: string, key: string): string | null {
     const lineIndent = line.length - line.trimStart().length;
     if (lineIndent <= baseIndent) break; // Dedented: end of block
 
-    collected.push(line.trimStart());
+    collected.push(line);
   }
 
   if (collected.length === 0) return null;
 
+  // Strip common indentation (preserve relative indentation within block)
+  let minIndent = Infinity;
+  for (const line of collected) {
+    if (line === '') continue;
+    const indent = line.length - line.trimStart().length;
+    if (indent < minIndent) minIndent = indent;
+  }
+  if (!isFinite(minIndent)) minIndent = 0;
+
+  const normalized = collected.map((line) =>
+    line === '' ? '' : line.slice(minIndent),
+  );
+
   // Trim trailing empty lines
-  while (collected.length > 0 && collected[collected.length - 1] === '') {
-    collected.pop();
+  while (normalized.length > 0 && normalized[normalized.length - 1] === '') {
+    normalized.pop();
   }
 
-  return collected.join('\n');
+  return normalized.join('\n');
 }

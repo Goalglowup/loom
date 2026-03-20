@@ -8,7 +8,7 @@ import { gzipSync } from 'node:zlib';
 import type { EntityManager } from '@mikro-orm/core';
 import { WeaveService } from '../src/services/WeaveService.js';
 import { RegistryService } from '../src/services/RegistryService.js';
-import { ProvisionService, extractAgentMetadata } from '../src/services/ProvisionService.js';
+import { ProvisionService } from '../src/services/ProvisionService.js';
 import { Artifact } from '../src/domain/entities/Artifact.js';
 import { Tenant } from '../src/domain/entities/Tenant.js';
 import { Deployment } from '../src/domain/entities/Deployment.js';
