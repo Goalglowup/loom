@@ -240,7 +240,7 @@ function buildMetadata(spec: Record<string, unknown>): Record<string, unknown> |
  * deeper than the key). Returns null if not found.
  */
 function extractYamlBlockScalar(yaml: string, key: string): string | null {
-  const lines = yaml.split('\n');
+  const lines = yaml.split(/\r?\n/);
   const pattern = new RegExp(`^(\\s*)${key}:\\s*\\|\\s*$`);
   let collecting = false;
   let baseIndent = 0;
