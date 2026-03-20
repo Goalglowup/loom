@@ -166,7 +166,7 @@ export function registerAuthMiddleware(fastify: FastifyInstance): void {
           });
         }
 
-        const context = await resolveRuntimeContext(payload, em);
+        const context = await resolveRuntimeContext(payload, request.em);
         if (context) {
           request.tenant = context;
           return;
@@ -300,7 +300,7 @@ async function resolveRuntimeContext(
     let currentParentId: string | null = tenant.parentId;
     let hops = 0;
     while (currentParentId && hops < 10) {
-      const parent = await em.findOne(Tenant, { id: currentParentId });
+      const parent: Tenant | null = await em.findOne(Tenant, { id: currentParentId });
       if (!parent) break;
       chain.push({
         providerConfig: parent.providerConfig,
