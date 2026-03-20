@@ -5,6 +5,7 @@ import { initCommand } from './commands/init.js';
 import { weaveCommand } from './commands/weave.js';
 import { pushCommand } from './commands/push.js';
 import { deployCommand } from './commands/deploy.js';
+import { chatCommand } from './commands/chat.js';
 
 const program = new Command();
 
@@ -18,5 +19,6 @@ program.addCommand(loginCommand);
 program.addCommand(weaveCommand);
 program.addCommand(pushCommand);
 program.addCommand(deployCommand);
+program.addCommand(chatCommand);
 
 program.parse(process.argv);
