@@ -62,7 +62,8 @@ const start = async () => {
     });
 
     // Global error handler: log full error server-side, return sanitized response to client
-    fastify.setErrorHandler((error, request, reply) => {
+    fastify.setErrorHandler((err, request, reply) => {
+      const error = err as Error & { statusCode?: number };
       const statusCode = error.statusCode ?? 500;
       fastify.log.error({ err: error, reqId: request.id }, 'Unhandled error');
 

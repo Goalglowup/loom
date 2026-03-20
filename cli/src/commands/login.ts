@@ -57,10 +57,10 @@ export const loginCommand = new Command('login')
   .description('Authenticate with an Arachne gateway')
   .argument('[url]', 'Gateway URL (defaults to ARACHNE_GATEWAY_URL env var)')
   .action(async (url?: string) => {
-    const gatewayUrl = url
-      ?? process.env.ARACHNE_GATEWAY_URL
-      ?? (await prompt(`Gateway URL (${DEFAULT_GATEWAY}): `)).trim()
-      || DEFAULT_GATEWAY;
+    let gatewayUrl = url ?? process.env.ARACHNE_GATEWAY_URL;
+    if (!gatewayUrl) {
+      gatewayUrl = (await prompt(`Gateway URL (${DEFAULT_GATEWAY}): `)).trim() || DEFAULT_GATEWAY;
+    }
 
     const email = await prompt('Email: ');
     const password = await promptPassword('Password: ');
