@@ -1,6 +1,7 @@
 import { Command } from 'commander';
 import * as readline from 'readline';
 import { writeConfig } from '../config.js';
+import { handleApiError } from '../lib/errors.js';
 
 function prompt(question: string): Promise<string> {
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
@@ -77,9 +78,7 @@ export const loginCommand = new Command('login')
     }
 
     if (!res.ok) {
-      const body = await res.text();
-      console.error(`Error: ${res.status} ${body}`);
-      process.exit(1);
+      handleApiError(res.status, await res.text());
     }
 
     const data = await res.json() as { token: string; expiresAt?: string };

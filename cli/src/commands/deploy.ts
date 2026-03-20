@@ -1,5 +1,6 @@
 import { Command } from 'commander';
 import { getGatewayUrl, getToken } from '../config.js';
+import { handleApiError } from '../lib/errors.js';
 
 function parseArtifactRef(ref: string): { org: string; name: string; tag: string } {
   const match = ref.match(/^([^/]+)\/([^:]+)(?::(.+))?$/);
@@ -51,9 +52,7 @@ export const deployCommand = new Command('deploy')
     });
 
     if (!res.ok) {
-      const body = await res.text();
-      console.error(`Error: ${res.status} ${body}`);
-      process.exit(1);
+      handleApiError(res.status, await res.text());
     }
 
     const data = await res.json() as { deploymentId: string; status: string; runtimeToken?: string };

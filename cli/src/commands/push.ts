@@ -4,6 +4,7 @@ import { resolve, basename } from 'path';
 import { gunzipSync } from 'zlib';
 import { getGatewayUrl, getToken } from '../config.js';
 import { extractFileFromTar } from '../lib/tar.js';
+import { handleApiError } from '../lib/errors.js';
 
 interface OrbManifest {
   name: string;
@@ -86,9 +87,7 @@ export const pushCommand = new Command('push')
     });
 
     if (!res.ok) {
-      const body = await res.text();
-      console.error(`Error: ${res.status} ${body}`);
-      process.exit(1);
+      handleApiError(res.status, await res.text());
     }
 
     const data = await res.json() as { ref: string };
