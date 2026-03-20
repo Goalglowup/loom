@@ -4,6 +4,7 @@ import multipart from '@fastify/multipart';
 import { registryAuth } from '../middleware/registryAuth.js';
 import { RegistryService } from '../services/RegistryService.js';
 import { ProvisionService } from '../services/ProvisionService.js';
+import { Tenant } from '../domain/entities/Tenant.js';
 
 const REGISTRY_JWT_SECRET =
   process.env.REGISTRY_JWT_SECRET ??
@@ -61,10 +62,17 @@ export function registerRegistryRoutes(fastify: FastifyInstance): void {
     const registryUser = (request as any).registryUser;
     const em = request.em;
 
+    // Resolve org from JWT or fall back to tenant's orgSlug in DB
+    let org = registryUser.orgSlug;
+    if (!org) {
+      const tenant = await em.findOne(Tenant, { id: registryUser.tenantId });
+      org = tenant?.orgSlug ?? registryUser.tenantId;
+    }
+
     const result = await registryService.push(
       {
         tenantId: registryUser.tenantId,
-        org: registryUser.orgSlug,
+        org,
         name,
         tag,
         kind,
