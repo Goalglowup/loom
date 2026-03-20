@@ -3,6 +3,7 @@ import { Collection } from '@mikro-orm/core';
 import { Agent } from './Agent.js';
 import { TenantMembership } from './TenantMembership.js';
 import { Invite } from './Invite.js';
+import { generateOrgSlug } from '../../utils/slug.js';
 import type { User } from './User.js';
 
 export class Tenant {
@@ -24,9 +25,10 @@ export class Tenant {
   members = new Collection<TenantMembership>(this);
   invites = new Collection<Invite>(this);
 
-  constructor(owner: User, name: string) {
+  constructor(name: string, options?: { owner?: User; orgSlug?: string }) {
     this.id = randomUUID();
     this.name = name;
+    this.orgSlug = options?.orgSlug ?? generateOrgSlug(name);
     this.parentId = null;
     this.providerConfig = null;
     this.systemPrompt = null;
@@ -37,7 +39,9 @@ export class Tenant {
     this.availableModels = null;
     this.updatedAt = new Date();
     this.createdAt = new Date();
-    this.addMembership(owner, 'owner');
+    if (options?.owner) {
+      this.addMembership(options.owner, 'owner');
+    }
   }
 
   createAgent(name: string, config?: Partial<Agent>): Agent {
@@ -61,7 +65,7 @@ export class Tenant {
   createSubtenant(name: string): Tenant {
     const ownerMembership = this.members.find(m => m.role === 'owner');
     if (!ownerMembership) throw new Error('Cannot create subtenant: parent tenant has no owner member');
-    const child = new Tenant(ownerMembership.user, name);
+    const child = new Tenant(name, { owner: ownerMembership.user });
     child.parentId = this.id;
     for (const m of this.members) {
       if (m.user !== ownerMembership.user) {

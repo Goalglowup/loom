@@ -34,7 +34,7 @@ export class UserManagementService {
 
   private createUserWithTenant(email: string, passwordHash: string, tenantName?: string): { user: User; tenant: Tenant } {
     const user = new User(email, passwordHash);
-    const tenant = new Tenant(user, tenantName ?? `${email.split('@')[0]}'s Workspace`);
+    const tenant = new Tenant(tenantName ?? `${email.split('@')[0]}'s Workspace`, { owner: user });
     tenant.createAgent('Default');
     return { user, tenant };
   }

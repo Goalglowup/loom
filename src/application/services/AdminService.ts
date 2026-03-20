@@ -8,7 +8,6 @@ import type { EntityManager } from '@mikro-orm/core';
 import { Tenant } from '../../domain/entities/Tenant.js';
 import { ApiKey } from '../../domain/entities/ApiKey.js';
 import { Trace } from '../../domain/entities/Trace.js';
-import { generateOrgSlug } from '../../utils/slug.js';
 import { AdminUser } from '../../domain/entities/AdminUser.js';
 import { BetaSignup } from '../../domain/entities/BetaSignup.js';
 import { Settings } from '../../domain/entities/Settings.js';
@@ -153,25 +152,15 @@ export class AdminService {
   // ── Tenants ───────────────────────────────────────────────────────────────
 
   async createTenant(name: string): Promise<TenantRow> {
-    const repo = this.em.getRepository(Tenant);
-    const now = new Date();
-    const tenant = repo.create({
-      name,
-      orgSlug: generateOrgSlug(name),
-      status: 'active',
-      createdAt: now,
-      updatedAt: now,
-      agents: [],
-      members: [],
-      invites: [],
-    });
-    await this.em.persistAndFlush(tenant);
+    const tenant = new Tenant(name);
+    this.em.persist(tenant);
+    await this.em.flush();
     return {
       id: tenant.id,
       name: tenant.name,
       status: tenant.status,
       created_at: tenant.createdAt.toISOString(),
-      updated_at: (tenant.updatedAt ?? now).toISOString(),
+      updated_at: tenant.updatedAt.toISOString(),
     };
   }
 

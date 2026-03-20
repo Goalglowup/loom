@@ -7,7 +7,7 @@ export function createSystemDefaultAgent(): Agent {
   // System user (owner)
   const systemUser = new User('system@localhost', '');
   // System tenant
-  const systemTenant = new Tenant(systemUser, 'System Tenant');
+  const systemTenant = new Tenant('System Tenant', { owner: systemUser });
   // System agent
   const systemAgent = systemTenant.createAgent('system-default', {
     kind: 'inference',
