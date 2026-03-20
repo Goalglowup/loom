@@ -61,6 +61,27 @@ const start = async () => {
       request.em?.clear();
     });
 
+    // Global error handler: log full error server-side, return sanitized response to client
+    fastify.setErrorHandler((error, request, reply) => {
+      const statusCode = error.statusCode ?? 500;
+      fastify.log.error({ err: error, reqId: request.id }, 'Unhandled error');
+
+      if (statusCode >= 500) {
+        return reply.code(statusCode).send({
+          statusCode,
+          error: 'Internal Server Error',
+          message: 'An unexpected error occurred. Please try again or contact support.',
+        });
+      }
+
+      // 4xx errors: return the message but strip stack traces
+      return reply.code(statusCode).send({
+        statusCode,
+        error: error.name ?? 'Error',
+        message: error.message,
+      });
+    });
+
     traceRecorder.init(orm.em);
 
     registerAuthMiddleware(fastify);
