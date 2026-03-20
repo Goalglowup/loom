@@ -14,7 +14,7 @@ export function registryAuth(requiredScope: string, secret: string) {
 
     const token = authHeader.slice(7);
     try {
-      const payload = verifyJwt<{ scopes?: string[]; [key: string]: unknown }>(token, secret);
+      const payload = verifyJwt<{ scopes?: string[]; orgSlug?: string; tenantId: string; [key: string]: unknown }>(token, secret);
       const scopes: string[] = payload.scopes ?? [];
 
       if (!scopes.includes(requiredScope)) {
@@ -22,6 +22,10 @@ export function registryAuth(requiredScope: string, secret: string) {
           error: 'Insufficient permissions',
           required: requiredScope,
         });
+      }
+
+      if (!payload.orgSlug) {
+        return reply.code(401).send({ error: 'Token missing orgSlug. Please re-login.' });
       }
 
       // Attach decoded payload to request for downstream use

@@ -62,17 +62,16 @@ export function registerRegistryRoutes(fastify: FastifyInstance): void {
     const registryUser = (request as any).registryUser;
     const em = request.em;
 
-    // Resolve org from JWT or fall back to tenant's orgSlug in DB
-    let org = registryUser.orgSlug;
-    if (!org) {
-      const tenant = await em.findOne(Tenant, { id: registryUser.tenantId });
-      org = tenant?.orgSlug ?? registryUser.tenantId;
+    // Validate JWT orgSlug matches tenant in DB
+    const tenant = await em.findOne(Tenant, { id: registryUser.tenantId });
+    if (!tenant || tenant.orgSlug !== registryUser.orgSlug) {
+      return reply.code(403).send({ error: 'Token orgSlug does not match tenant. Please re-login.' });
     }
 
     const result = await registryService.push(
       {
         tenantId: registryUser.tenantId,
-        org,
+        org: tenant.orgSlug,
         name,
         tag,
         kind,
@@ -92,6 +91,7 @@ export function registerRegistryRoutes(fastify: FastifyInstance): void {
   }, async (request, reply) => {
     const registryUser = (request as any).registryUser;
     const org = (request.query as any).org ?? registryUser.orgSlug;
+    // orgSlug guaranteed non-null by registryAuth middleware
     const em = request.em;
 
     const artifacts = await registryService.list(registryUser.tenantId, org, em);

@@ -63,7 +63,9 @@ async function buildApp(): Promise<FastifyInstance> {
   // Per-request EM forking (simulated for tests)
   app.decorateRequest('em', null as any);
   app.addHook('onRequest', async (request) => {
-    request.em = {} as any;
+    request.em = {
+      findOne: vi.fn().mockResolvedValue({ id: TENANT_ID, orgSlug: ORG_SLUG }),
+    } as any;
   });
   registerRegistryRoutes(app);
   await app.ready();
@@ -654,5 +656,75 @@ describe('DELETE /v1/registry/deployments/:id', () => {
       headers: { authorization: `Bearer ${readToken}` },
     });
     expect(res.statusCode).toBe(403);
+  });
+});
+
+// ── orgSlug validation ──────────────────────────────────────────────────────
+
+describe('orgSlug validation', () => {
+  let app: FastifyInstance;
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    app = await buildApp();
+  });
+
+  afterEach(async () => { await app.close(); });
+
+  it('returns 401 when JWT has null orgSlug', async () => {
+    const nullSlugToken = signJwt(
+      { sub: 'user-1', tenantId: TENANT_ID, orgSlug: null, scopes: ['artifact:read'] },
+      REGISTRY_SECRET,
+      86_400_000,
+    );
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/registry/list',
+      headers: { authorization: `Bearer ${nullSlugToken}` },
+    });
+
+    expect(res.statusCode).toBe(401);
+    expect(res.json().error).toMatch(/orgSlug/);
+  });
+
+  it('returns 401 when JWT has no orgSlug field', async () => {
+    const noSlugToken = signJwt(
+      { sub: 'user-1', tenantId: TENANT_ID, scopes: ['artifact:read'] },
+      REGISTRY_SECRET,
+      86_400_000,
+    );
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/registry/list',
+      headers: { authorization: `Bearer ${noSlugToken}` },
+    });
+
+    expect(res.statusCode).toBe(401);
+    expect(res.json().error).toMatch(/orgSlug/);
+  });
+
+  it('returns 403 when JWT orgSlug does not match tenant in DB', async () => {
+    const mismatchToken = signJwt(
+      { sub: 'user-1', tenantId: TENANT_ID, orgSlug: 'wrong-slug', scopes: ['registry:push'] },
+      REGISTRY_SECRET,
+      86_400_000,
+    );
+
+    const form = new FormData();
+    form.append('bundle', new Blob([Buffer.from('fake')]), 'test.orb');
+    form.append('name', 'test');
+    form.append('kind', 'Agent');
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/registry/push',
+      headers: { authorization: `Bearer ${mismatchToken}` },
+      payload: form,
+    });
+
+    expect(res.statusCode).toBe(403);
+    expect(res.json().error).toMatch(/orgSlug/);
   });
 });
