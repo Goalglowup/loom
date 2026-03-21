@@ -100,6 +100,7 @@ export class ProvisionService {
         tenantId: input.tenantId,
         artifactId: artifact.id,
         deploymentId: deployment.id,
+        tokenVersion: deployment.tokenVersion,
         scopes: [REGISTRY_SCOPES.RUNTIME_ACCESS],
       },
       RUNTIME_JWT_SECRET,
@@ -153,11 +154,14 @@ export class ProvisionService {
       ? deployment.artifact
       : deployment.artifact.id;
 
+    deployment.tokenVersion += 1;
+
     const runtimeToken = signJwt(
       {
         tenantId,
         artifactId,
         deploymentId: deployment.id,
+        tokenVersion: deployment.tokenVersion,
         scopes: [REGISTRY_SCOPES.RUNTIME_ACCESS],
       },
       RUNTIME_JWT_SECRET,

@@ -397,6 +397,7 @@ describe('ProvisionService', () => {
       expect(claims.artifactId).toBe(artifact.id);
       expect(claims.deploymentId).toBe(result.deploymentId);
       expect(claims.scopes).toContain('runtime:access');
+      expect(claims.tokenVersion).toBe(1);
     });
 
     it('returns FAILED (no deployment row) when artifact not found', async () => {
@@ -652,6 +653,7 @@ spec:
         tenantId: string;
         artifactId: string;
         deploymentId: string;
+        tokenVersion: number;
         scopes: string[];
       }>(result!.runtimeToken, RUNTIME_JWT_SECRET);
 
@@ -659,6 +661,36 @@ spec:
       expect(claims.artifactId).toBe(artifact.id);
       expect(claims.deploymentId).toBe(deployment.id);
       expect(claims.scopes).toContain('runtime:access');
+      expect(claims.tokenVersion).toBe(2);
+    });
+
+    it('increments tokenVersion so the old token version no longer matches', async () => {
+      const svc = new ProvisionService({} as unknown as RegistryService);
+      const tenant = makeTenant({ id: tenantId });
+      const artifact = makeArtifact(tenant);
+      const deployment = new Deployment(tenant, artifact, 'production');
+      deployment.markReady('old-runtime-token');
+
+      expect(deployment.tokenVersion).toBe(1);
+
+      const em = buildMockEm({
+        findOne: vi.fn().mockResolvedValue(deployment),
+      });
+
+      const result = await svc.rotateToken(deployment.id, tenantId, em);
+
+      // tokenVersion on the deployment entity should be incremented
+      expect(deployment.tokenVersion).toBe(2);
+
+      // The new token should carry tokenVersion=2
+      const newClaims = verifyJwt<{ tokenVersion: number }>(
+        result!.runtimeToken,
+        RUNTIME_JWT_SECRET,
+      );
+      expect(newClaims.tokenVersion).toBe(2);
+
+      // An old token with tokenVersion=1 would not match deployment.tokenVersion (2)
+      // This is validated at auth time in resolveRuntimeContext
     });
 
     it('returns null when deployment is not found', async () => {
