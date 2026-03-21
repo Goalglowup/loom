@@ -68,33 +68,17 @@ export class ProvisionService {
       }
     }
 
-    // 3. Upsert: reuse existing deployment slot if one exists for this tenant + name
+    // 3. Create a new deployment (Docker-style: each deploy is a new slot)
     const tenant = await em.findOneOrFail(Tenant, { id: input.tenantId });
     const environment = input.environment ?? 'production';
-    const deploymentName = input.name ?? `${artifact.name}-${environment}`;
 
-    const existing = await em.findOne(Deployment, {
-      tenant: input.tenantId,
-      name: deploymentName,
-    });
-
-    let deployment: Deployment;
-    if (existing) {
-      existing.artifact = artifact;
-      existing.status = 'PENDING';
-      existing.errorMessage = null;
-      existing.environment = environment;
-      existing.updatedAt = new Date();
-      deployment = existing;
-    } else {
-      deployment = new Deployment(
-        tenant,
-        artifact,
-        environment,
-        input.name,
-      );
-      em.persist(deployment);
-    }
+    const deployment = new Deployment(
+      tenant,
+      artifact,
+      environment,
+      input.name,
+    );
+    em.persist(deployment);
     await em.flush();
 
     // 4. Validate KB readiness: KnowledgeBase artifacts must have chunks loaded
