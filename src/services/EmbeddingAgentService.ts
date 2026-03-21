@@ -204,6 +204,9 @@ export class EmbeddingAgentService {
 
     if (config.provider === 'azure') {
       const baseUrl = config.baseUrl ?? '';
+      if (!baseUrl) {
+        throw new Error('Azure embedding provider requires a baseUrl (e.g., https://<resource>.openai.azure.com)');
+      }
       const deployment = config.deployment ?? config.model;
       const apiVersion = config.apiVersion ?? '2024-02-01';
       url = `${baseUrl}/openai/deployments/${deployment}/embeddings?api-version=${apiVersion}`;

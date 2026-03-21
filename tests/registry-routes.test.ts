@@ -956,6 +956,20 @@ describe('GET /v1/registry/embedding-providers', () => {
     expect(res.json().providers).toEqual([]);
   });
 
+  it('returns 500 when resolveEmbedder throws an unexpected error', async () => {
+    mockEmbeddingInstance.resolveEmbedder.mockRejectedValue(
+      new Error('Connection refused'),
+    );
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/registry/embedding-providers',
+      headers: { authorization: `Bearer ${readToken}` },
+    });
+
+    expect(res.statusCode).toBe(500);
+  });
+
   it('returns 401 when authorization header is missing', async () => {
     const res = await app.inject({ method: 'GET', url: '/v1/registry/embedding-providers' });
     expect(res.statusCode).toBe(401);
@@ -1038,6 +1052,36 @@ describe('POST /v1/registry/embeddings', () => {
     expect(res.json().error).toMatch(/non-empty array/i);
   });
 
+  it('returns 400 when texts contains a non-string element', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/registry/embeddings',
+      headers: {
+        authorization: `Bearer ${readToken}`,
+        'content-type': 'application/json',
+      },
+      payload: JSON.stringify({ texts: ['hello', 42] }),
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toMatch(/texts\[1\] is not a string/);
+  });
+
+  it('returns 400 when texts contains only whitespace strings', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/registry/embeddings',
+      headers: {
+        authorization: `Bearer ${readToken}`,
+        'content-type': 'application/json',
+      },
+      payload: JSON.stringify({ texts: ['  ', '\t', ''] }),
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toMatch(/non-empty string/i);
+  });
+
   it('returns 401 when authorization header is missing', async () => {
     const res = await app.inject({
       method: 'POST',
@@ -1048,7 +1092,7 @@ describe('POST /v1/registry/embeddings', () => {
     expect(res.statusCode).toBe(401);
   });
 
-  it('accepts deploy:write scope for embeddings', async () => {
+  it('rejects deploy:write scope for embedding-providers', async () => {
     mockEmbeddingInstance.resolveEmbedder.mockResolvedValue({
       provider: 'openai',
       model: 'text-embedding-3-small',
