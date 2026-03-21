@@ -68,15 +68,33 @@ export class ProvisionService {
       }
     }
 
-    // 3. Create Deployment entity with status PENDING
+    // 3. Upsert: reuse existing deployment slot if one exists for this tenant + name
     const tenant = await em.findOneOrFail(Tenant, { id: input.tenantId });
-    const deployment = new Deployment(
-      tenant,
-      artifact,
-      input.environment ?? 'production',
-      input.name,
-    );
-    em.persist(deployment);
+    const environment = input.environment ?? 'production';
+    const deploymentName = input.name ?? `${artifact.name}-${environment}`;
+
+    const existing = await em.findOne(Deployment, {
+      tenant: input.tenantId,
+      name: deploymentName,
+    });
+
+    let deployment: Deployment;
+    if (existing) {
+      existing.artifact = artifact;
+      existing.status = 'PENDING';
+      existing.errorMessage = null;
+      existing.environment = environment;
+      existing.updatedAt = new Date();
+      deployment = existing;
+    } else {
+      deployment = new Deployment(
+        tenant,
+        artifact,
+        environment,
+        input.name,
+      );
+      em.persist(deployment);
+    }
     await em.flush();
 
     // 4. Validate KB readiness: KnowledgeBase artifacts must have chunks loaded

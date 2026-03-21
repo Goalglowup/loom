@@ -568,6 +568,47 @@ spec:
       expect(Object.keys(artifact.metadata)).toHaveLength(0);
     });
 
+    it('re-deploying same agent to same environment updates existing deployment (upsert)', async () => {
+      const tenant = makeTenant({ id: tenantId });
+      const artifact1 = makeArtifact(tenant, { id: 'artifact-v1', kind: 'Agent', name: 'my-agent' });
+      const artifact2 = makeArtifact(tenant, { id: 'artifact-v2', kind: 'Agent', name: 'my-agent' });
+
+      // Simulate existing deployment from first deploy
+      const existingDeployment = new Deployment(tenant, artifact1, 'production');
+      existingDeployment.markReady('old-token');
+      const originalId = existingDeployment.id;
+
+      const mockRegistrySvc = {
+        resolve: vi.fn().mockResolvedValue(artifact2),
+      } as unknown as RegistryService;
+      const svc = new ProvisionService(mockRegistrySvc);
+
+      // findOne returns the existing deployment (upsert lookup hit)
+      const em = buildMockEm({
+        findOne: vi.fn().mockResolvedValue(existingDeployment),
+        findOneOrFail: vi.fn().mockResolvedValue(tenant),
+      });
+
+      const result = await svc.deploy(
+        {
+          tenantId,
+          artifactRef: { org: 'myorg', name: 'my-agent', tag: 'latest' },
+          environment: 'production',
+          requestingUserId: 'user-1',
+        },
+        em,
+      );
+
+      expect(result.status).toBe('READY');
+      expect(result.deploymentId).toBe(originalId);
+      expect(result.runtimeToken).toBeTruthy();
+      expect(result.runtimeToken).not.toBe('old-token');
+      // Should NOT have called em.persist (reusing existing entity)
+      expect(em.persist).not.toHaveBeenCalled();
+      // The existing deployment's artifact should be updated to v2
+      expect(existingDeployment.artifact).toBe(artifact2);
+    });
+
     it('returns FAILED when KnowledgeBase artifact has 0 chunks', async () => {
       const tenant = makeTenant({ id: tenantId });
       const artifact = makeArtifact(tenant, { kind: 'KnowledgeBase' });
