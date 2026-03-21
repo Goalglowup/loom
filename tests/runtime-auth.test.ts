@@ -13,6 +13,7 @@ import { describe, it, expect, beforeAll, afterAll, vi, beforeEach } from 'vites
 import Fastify from 'fastify';
 import type { FastifyInstance } from 'fastify';
 import jwt from 'jsonwebtoken';
+import { resolveRuntimeContext } from '../src/auth.js';
 
 // We test the auth logic by building a minimal Fastify app that mimics the
 // gateway's auth middleware behavior with runtime JWT support.
@@ -446,5 +447,89 @@ describe('runtime-auth: tokenVersion invalidation', () => {
     });
 
     expect(res.status).toBe(200);
+  });
+});
+
+// ── resolveRuntimeContext unit tests ────────────────────────────────────────
+
+describe('resolveRuntimeContext: knowledgeBaseRef from artifact metadata', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  function buildMockEm(deployment: any, tenant: any) {
+    return {
+      findOne: vi.fn().mockImplementation((entity: any, filter: any, opts?: any) => {
+        // First call: Deployment lookup (has populate option)
+        if (opts?.populate) return Promise.resolve(deployment);
+        // Second call: Tenant lookup
+        return Promise.resolve(tenant);
+      }),
+    } as any;
+  }
+
+  it('includes knowledgeBaseRef from artifact metadata on the returned TenantContext', async () => {
+    const deployment = {
+      id: 'deploy-001',
+      status: 'READY',
+      artifact: {
+        metadata: {
+          systemPrompt: 'You are helpful.',
+          knowledgeBaseRef: 'my-kb',
+        },
+      },
+    };
+    const tenant = {
+      id: 'tenant-001',
+      name: 'Test Tenant',
+      status: 'active',
+      parentId: null,
+      providerConfig: { provider: 'openai', apiKey: 'sk-test' },
+      systemPrompt: null,
+      skills: null,
+      mcpEndpoints: null,
+    };
+
+    const mockEm = buildMockEm(deployment, tenant);
+
+    const ctx = await resolveRuntimeContext(
+      { tenantId: 'tenant-001', artifactId: 'artifact-001', deploymentId: 'deploy-001' },
+      mockEm,
+    );
+
+    expect(ctx).not.toBeNull();
+    expect(ctx!.knowledgeBaseRef).toBe('my-kb');
+  });
+
+  it('returns undefined knowledgeBaseRef when artifact metadata has no KB ref', async () => {
+    const deployment = {
+      id: 'deploy-002',
+      status: 'READY',
+      artifact: {
+        metadata: {
+          systemPrompt: 'Hello',
+        },
+      },
+    };
+    const tenant = {
+      id: 'tenant-002',
+      name: 'No-KB Tenant',
+      status: 'active',
+      parentId: null,
+      providerConfig: null,
+      systemPrompt: null,
+      skills: null,
+      mcpEndpoints: null,
+    };
+
+    const mockEm = buildMockEm(deployment, tenant);
+
+    const ctx = await resolveRuntimeContext(
+      { tenantId: 'tenant-002', artifactId: 'artifact-002', deploymentId: 'deploy-002' },
+      mockEm,
+    );
+
+    expect(ctx).not.toBeNull();
+    expect(ctx!.knowledgeBaseRef).toBeUndefined();
   });
 });

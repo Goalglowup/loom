@@ -253,7 +253,7 @@ export async function invalidateAllKeysForTenant(tenantId: string, em: EntityMan
  * TenantContext using the artifact metadata for agent config and the tenant
  * parent chain for provider resolution.
  */
-async function resolveRuntimeContext(
+export async function resolveRuntimeContext(
   payload: { tenantId: string; artifactId: string; deploymentId: string; tokenVersion?: number },
   em: EntityManager,
 ): Promise<TenantContext | null> {
@@ -333,6 +333,7 @@ async function resolveRuntimeContext(
     agentSystemPrompt: systemPrompt,
     agentSkills: skills,
     agentMcpEndpoints: mcpEndpoints,
+    knowledgeBaseRef: meta.knowledgeBaseRef ?? undefined,
     mergePolicies: { system_prompt: 'prepend', skills: 'merge' },
     resolvedSystemPrompt,
     agentConfig: {
