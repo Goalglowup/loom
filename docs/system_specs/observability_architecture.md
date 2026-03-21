@@ -1,5 +1,7 @@
 # Observability Architecture
 
+> Tracked by Epic [#161](https://github.com/Synaptic-Weave/arachne/issues/161)
+
 **Status:** Draft
 **Author:** Arachne Team
 **Last Updated:** 2026-03-16

@@ -1,5 +1,7 @@
 # Queue Technology Spike: Durable Trace Recording
 
+> Tracked by Spike [#162](https://github.com/Synaptic-Weave/arachne/issues/162)
+
 **Status:** Draft
 **Author:** Spike investigation
 **Date:** 2026-03-16

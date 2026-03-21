@@ -1,5 +1,7 @@
 # Arachne Workspace Specification
 
+> Tracked by Epic [#163](https://github.com/Synaptic-Weave/arachne/issues/163)
+
 ## Status
 
 Draft -- MVP Specification

@@ -1,5 +1,7 @@
 # Arachne Tool Package Format Specification (MVP)
 
+> Tracked by Epic [#160](https://github.com/Synaptic-Weave/arachne/issues/160)
+
 ## Status
 
 Draft -- MVP Specification
