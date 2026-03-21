@@ -532,4 +532,76 @@ describe('resolveRuntimeContext: knowledgeBaseRef from artifact metadata', () =>
     expect(ctx).not.toBeNull();
     expect(ctx!.knowledgeBaseRef).toBeUndefined();
   });
+
+  it('resolves skills and mcpEndpoints from artifact metadata', async () => {
+    const deployment = {
+      id: 'deploy-003',
+      status: 'READY',
+      artifact: {
+        metadata: {
+          systemPrompt: 'You are helpful.',
+          skills: [{ type: 'function', function: { name: 'search', parameters: {} } }],
+          mcpEndpoints: [{ url: 'https://mcp.example.com', name: 'example' }],
+        },
+      },
+    };
+    const tenant = {
+      id: 'tenant-003',
+      name: 'Skills Tenant',
+      status: 'active',
+      parentId: null,
+      providerConfig: { provider: 'openai', apiKey: 'sk-test' },
+      systemPrompt: null,
+      skills: null,
+      mcpEndpoints: null,
+    };
+
+    const mockEm = buildMockEm(deployment, tenant);
+
+    const ctx = await resolveRuntimeContext(
+      { tenantId: 'tenant-003', artifactId: 'artifact-003', deploymentId: 'deploy-003' },
+      mockEm,
+    );
+
+    expect(ctx).not.toBeNull();
+    expect(ctx!.resolvedSkills).toEqual([
+      { type: 'function', function: { name: 'search', parameters: {} } },
+    ]);
+    expect(ctx!.resolvedMcpEndpoints).toEqual([
+      { url: 'https://mcp.example.com', name: 'example' },
+    ]);
+  });
+
+  it('returns undefined resolvedSkills and resolvedMcpEndpoints when absent from metadata', async () => {
+    const deployment = {
+      id: 'deploy-004',
+      status: 'READY',
+      artifact: {
+        metadata: {
+          systemPrompt: 'Hello',
+        },
+      },
+    };
+    const tenant = {
+      id: 'tenant-004',
+      name: 'No-Tools Tenant',
+      status: 'active',
+      parentId: null,
+      providerConfig: null,
+      systemPrompt: null,
+      skills: null,
+      mcpEndpoints: null,
+    };
+
+    const mockEm = buildMockEm(deployment, tenant);
+
+    const ctx = await resolveRuntimeContext(
+      { tenantId: 'tenant-004', artifactId: 'artifact-004', deploymentId: 'deploy-004' },
+      mockEm,
+    );
+
+    expect(ctx).not.toBeNull();
+    expect(ctx!.resolvedSkills).toBeUndefined();
+    expect(ctx!.resolvedMcpEndpoints).toBeUndefined();
+  });
 });

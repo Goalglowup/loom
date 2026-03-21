@@ -324,6 +324,10 @@ export async function resolveRuntimeContext(
     chain.find((c) => c.providerConfig != null)?.providerConfig ?? undefined;
   const resolvedSystemPrompt =
     chain.find((c) => c.systemPrompt != null)?.systemPrompt ?? undefined;
+  const resolvedSkills =
+    chain.find((c) => c.skills != null)?.skills ?? undefined;
+  const resolvedMcpEndpoints =
+    chain.find((c) => c.mcpEndpoints != null)?.mcpEndpoints ?? undefined;
 
   return {
     tenantId: tenant.id,
@@ -336,6 +340,8 @@ export async function resolveRuntimeContext(
     knowledgeBaseRef: meta.knowledgeBaseRef ?? undefined,
     mergePolicies: { system_prompt: 'prepend', skills: 'merge' },
     resolvedSystemPrompt,
+    resolvedSkills,
+    resolvedMcpEndpoints,
     agentConfig: {
       conversations_enabled: meta.conversations_enabled ?? false,
       conversation_token_limit: meta.conversation_token_limit ?? 4000,
