@@ -12,50 +12,98 @@ function handleApiError(res: Response, body: string): void {
   }
 }
 
+interface DeploymentInfo {
+  id: string;
+  name: string;
+  status: string;
+  runtimeToken: string | null;
+  artifact?: { name?: string };
+}
+
 async function resolveDeployment(
   gatewayUrl: string,
   token: string,
   name: string,
 ): Promise<{ runtimeToken: string; deploymentId: string } | null> {
-  // List all deployments and filter by artifact name client-side
-  // (the by-name endpoint may not exist yet)
-  const res = await fetch(`${gatewayUrl}/v1/registry/deployments`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
+  const headers = { Authorization: `Bearer ${token}` };
 
-  if (!res.ok) {
-    const body = await res.text();
-    handleApiError(res, body);
-    return null;
-  }
-
-  const deployments = (await res.json()) as Array<{
-    id: string;
-    status: string;
-    runtimeToken: string | null;
-    artifact?: { name?: string };
-  }>;
-
-  const match = deployments.find(
-    (d) => d.artifact?.name === name && d.status === 'READY',
+  // 1. Try exact match by deployment name
+  const byNameRes = await fetch(
+    `${gatewayUrl}/v1/registry/deployments/by-name/${encodeURIComponent(name)}`,
+    { headers },
   );
 
-  if (!match) {
-    const any = deployments.find((d) => d.artifact?.name === name);
-    if (any) {
-      console.error(`Error: deployment "${name}" exists but status is ${any.status} (expected READY).`);
-    } else {
-      console.error(`Error: no deployment found with name "${name}". Run: arachne deploy <org>/${name}`);
+  if (byNameRes.ok) {
+    const deployment = (await byNameRes.json()) as DeploymentInfo;
+    return validateDeployment(deployment, name);
+  }
+
+  // 2. If not found by deployment name, try matching by artifact name
+  if (byNameRes.status === 404) {
+    const listRes = await fetch(`${gatewayUrl}/v1/registry/deployments`, { headers });
+    if (!listRes.ok) {
+      const body = await listRes.text();
+      handleApiError(listRes, body);
+      return null;
     }
+
+    const deployments = (await listRes.json()) as DeploymentInfo[];
+
+    // Match by artifact name: try exact match first, then strip org prefix
+    // (artifact names are stored without org, e.g. "my-agent" not "org/my-agent")
+    const bareName = name.includes('/') ? name.split('/').pop()! : name;
+    const matches = deployments.filter(
+      (d) => d.artifact?.name === name || d.artifact?.name === bareName,
+    );
+
+    if (matches.length === 1) {
+      return validateDeployment(matches[0], name);
+    }
+
+    if (matches.length > 1) {
+      const ready = matches.filter((d) => d.status === 'READY');
+      if (ready.length === 1) {
+        return validateDeployment(ready[0], name);
+      }
+      if (ready.length > 1) {
+        console.error(`Error: multiple READY deployments found for artifact "${bareName}":`);
+        for (const d of ready) {
+          console.error(`  ${d.name} (${d.status})`);
+        }
+        console.error(`\nSpecify the deployment name: arachne chat <deployment-name>`);
+        return null;
+      }
+      // All non-READY
+      console.error(`Error: deployments found for artifact "${bareName}" but none are READY:`);
+      for (const d of matches) {
+        console.error(`  ${d.name} (${d.status})`);
+      }
+      return null;
+    }
+
+    console.error(`Error: no deployment found matching "${name}". Run: arachne list`);
     return null;
   }
 
-  if (!match.runtimeToken) {
+  // Other error
+  const body = await byNameRes.text();
+  handleApiError(byNameRes, body);
+  return null;
+}
+
+function validateDeployment(
+  deployment: DeploymentInfo,
+  name: string,
+): { runtimeToken: string; deploymentId: string } | null {
+  if (deployment.status !== 'READY') {
+    console.error(`Error: deployment "${name}" exists but status is ${deployment.status} (expected READY).`);
+    return null;
+  }
+  if (!deployment.runtimeToken) {
     console.error(`Error: deployment "${name}" has no runtime token.`);
     return null;
   }
-
-  return { runtimeToken: match.runtimeToken, deploymentId: match.id };
+  return { runtimeToken: deployment.runtimeToken, deploymentId: deployment.id };
 }
 
 async function sendChat(
@@ -88,7 +136,7 @@ async function sendChat(
 
 export const chatCommand = new Command('chat')
   .description('Chat with a deployed agent')
-  .argument('<name>', 'Deployment name (artifact name)')
+  .argument('<name>', 'Deployment name or artifact name')
   .option('-m, --message <message>', 'Send a single message (one-shot mode)')
   .option('--model <model>', 'Model to use', 'gpt-4.1')
   .action(async (name: string, options: { message?: string; model: string }) => {
