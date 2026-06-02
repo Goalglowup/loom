@@ -23,7 +23,7 @@ async function request<T>(
 
   if (res.status === 204) {
     if (!res.ok) throw new Error('Request failed');
-    return {} as T;
+    return undefined as unknown as T;
   }
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || data.message || 'Request failed');

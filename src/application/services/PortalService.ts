@@ -186,11 +186,16 @@ export class PortalService {
       }
     }
 
-    // Also check for tenant's provider (via providerConfig.gatewayProviderId)
-    const tenant = await this.em.findOne(Tenant, { id: tenantId });
-    const tenantProviderId = this.getTenantProviderId(tenant);
-    if (tenantProviderId) {
-      providerIds.add(tenantProviderId);
+    // Walk tenant chain so subtenants inherit provider from parent tenants.
+    const tenantChain = await this.loadTenantChain(tenantId);
+    const effectiveTenantProviderId = tenantChain
+      .map(t => {
+        const fkId = (t as any).default_provider_id as string | null;
+        return fkId ?? this.extractProviderId(t.provider_config);
+      })
+      .find(Boolean) ?? null;
+    if (effectiveTenantProviderId) {
+      providerIds.add(effectiveTenantProviderId);
     }
 
     const providerModelsMap = new Map<string, string[]>();
@@ -212,8 +217,8 @@ export class PortalService {
         const pid = this.getAgentProviderId(a);
         if (pid && providerModelsMap.has(pid)) {
           effectiveModels = providerModelsMap.get(pid)!;
-        } else if (tenantProviderId && providerModelsMap.has(tenantProviderId)) {
-          effectiveModels = providerModelsMap.get(tenantProviderId)!;
+        } else if (effectiveTenantProviderId && providerModelsMap.has(effectiveTenantProviderId)) {
+          effectiveModels = providerModelsMap.get(effectiveTenantProviderId)!;
         }
       }
 
@@ -270,28 +275,31 @@ export class PortalService {
 
   /**
    * Extract the effective provider ID from a providerConfig object.
+   * Returns null if cfg is not an object, lacks gatewayProviderId, or the value is not a non-empty string.
    */
   private extractProviderId(cfg: any): string | null {
     if (cfg && typeof cfg === 'object' && 'gatewayProviderId' in cfg) {
-      return (cfg as Record<string, unknown>).gatewayProviderId as string ?? null;
+      const val = cfg.gatewayProviderId;
+      return typeof val === 'string' && val.length > 0 ? val : null;
     }
     return null;
   }
 
   /**
    * Extract the effective provider ID for an agent.
-   * Checks agent.providerId first, then falls back to providerConfig.gatewayProviderId.
+   * Prefers `agent.providerId` (first-class FK), falls back to `providerConfig.gatewayProviderId`.
    */
   private getAgentProviderId(agent: Agent): string | null {
-    return this.extractProviderId(agent.providerConfig);
+    return agent.providerId ?? this.extractProviderId(agent.providerConfig);
   }
 
   /**
-   * Extract the provider ID from a tenant's providerConfig.
+   * Extract the provider ID from a tenant.
+   * Prefers `tenant.defaultProviderId` (first-class FK), falls back to `providerConfig.gatewayProviderId`.
    */
   private getTenantProviderId(tenant: Tenant | null): string | null {
     if (!tenant) return null;
-    return this.extractProviderId(tenant.providerConfig);
+    return tenant.defaultProviderId ?? this.extractProviderId(tenant.providerConfig);
   }
 
   /**
@@ -308,10 +316,15 @@ export class PortalService {
     if (agentProviderId) providerIds.push(agentProviderId);
 
     const tenantId = (agent.tenant as any)?.id ?? agent.tenant;
-    const tenant = await this.em.findOne(Tenant, { id: tenantId });
-    const tenantProviderId = this.getTenantProviderId(tenant);
-    if (tenantProviderId && tenantProviderId !== agentProviderId) {
-      providerIds.push(tenantProviderId);
+    const tenantChain = await this.loadTenantChain(tenantId);
+    const effectiveTenantProviderId = tenantChain
+      .map(t => {
+        const fkId = (t as any).default_provider_id as string | null;
+        return fkId ?? this.extractProviderId(t.provider_config);
+      })
+      .find(Boolean) ?? null;
+    if (effectiveTenantProviderId && effectiveTenantProviderId !== agentProviderId) {
+      providerIds.push(effectiveTenantProviderId);
     }
 
     for (const pid of providerIds) {
@@ -393,6 +406,7 @@ export class PortalService {
   private async loadTenantChain(tenantId: string): Promise<Array<{
     id: string; name: string;
     provider_config: Record<string, unknown> | null;
+    default_provider_id: string | null;
     system_prompt: string | null;
     skills: unknown[] | null;
     mcp_endpoints: unknown[] | null;
@@ -401,14 +415,14 @@ export class PortalService {
     const knex = (this.em as any).getKnex();
     const result = await knex.raw(
       `WITH RECURSIVE tenant_chain AS (
-         SELECT id, name, parent_id, provider_config, system_prompt, skills, mcp_endpoints, 0 AS depth
+         SELECT id, name, parent_id, provider_config, default_provider_id, system_prompt, skills, mcp_endpoints, 0 AS depth
          FROM tenants WHERE id = ?
          UNION ALL
-         SELECT t.id, t.name, t.parent_id, t.provider_config, t.system_prompt, t.skills, t.mcp_endpoints, tc.depth + 1
+         SELECT t.id, t.name, t.parent_id, t.provider_config, t.default_provider_id, t.system_prompt, t.skills, t.mcp_endpoints, tc.depth + 1
          FROM tenants t
          JOIN tenant_chain tc ON t.id = tc.parent_id
        )
-       SELECT id, name, provider_config, system_prompt, skills, mcp_endpoints, depth
+       SELECT id, name, provider_config, default_provider_id, system_prompt, skills, mcp_endpoints, depth
        FROM tenant_chain ORDER BY depth ASC`,
       [tenantId],
     );
