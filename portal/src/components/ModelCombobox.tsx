@@ -37,12 +37,14 @@ export default function ModelCombobox({ value, onChange, options, placeholder = 
           type="button"
           onClick={() => !disabled && setOpen(!open)}
           disabled={disabled}
+          aria-haspopup="listbox"
+          aria-expanded={open}
           className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-200 focus:outline-none focus:border-indigo-500 w-48 disabled:opacity-50 text-left truncate"
         >
           {value || placeholder}
         </button>
         {open && (
-          <div className="absolute z-50 top-full left-0 mt-1 w-48 bg-gray-800 border border-gray-700 rounded-lg shadow-lg overflow-hidden">
+          <div className="absolute z-50 top-full left-0 mt-1 w-48 bg-gray-800 border border-gray-700 rounded-lg shadow-lg overflow-hidden" role="listbox">
             {options.length > 5 && (
               <input
                 type="text"
@@ -57,6 +59,8 @@ export default function ModelCombobox({ value, onChange, options, placeholder = 
               <button
                 key={opt}
                 type="button"
+                role="option"
+                aria-selected={opt === value}
                 onMouseDown={e => {
                   e.preventDefault();
                   onChange(opt);
