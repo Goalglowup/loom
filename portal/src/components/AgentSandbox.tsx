@@ -32,9 +32,11 @@ export default function AgentSandbox({ agent, onClose }: AgentSandboxProps) {
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const modelOptions = (agent.availableModels && agent.availableModels.length > 0)
-    ? agent.availableModels.filter((m: string) => !m.toLowerCase().includes('embedding'))
-    : COMMON_MODELS;
+  const filteredModels = (agent.availableModels ?? []).filter(
+    (m: string) => !m.toLowerCase().includes('embedding')
+  );
+  const modelOptions = filteredModels.length > 0 ? filteredModels : COMMON_MODELS;
+  const hasStrictAllowlist = filteredModels.length > 0;
 
   const [model, setModel] = useState(modelOptions[0] ?? 'gpt-4o-mini');
   const [memoryEnabled, setMemoryEnabled] = useState(false);
@@ -45,8 +47,6 @@ export default function AgentSandbox({ agent, onClose }: AgentSandboxProps) {
   // KB info
   const [kbInfo, setKbInfo] = useState<{ name: string; chunkCount: number; sources: Array<{ sourcePath: string; chunkCount: number }> } | null>(null);
   const [showKbDetail, setShowKbDetail] = useState(false);
-
-  const activeModel = model || modelOptions[0] || 'gpt-4o-mini';
 
   // Load KB info if agent has a knowledge base
   const loadKbInfo = useCallback(async () => {
@@ -97,7 +97,7 @@ export default function AgentSandbox({ agent, onClose }: AgentSandboxProps) {
         token,
         agent.id,
         next.map(m => ({ role: m.role, content: m.content })),
-        activeModel,
+        model,
         memoryEnabled ? conversationId : null,
       );
       const latencyMs = Date.now() - startMs;
@@ -177,7 +177,7 @@ export default function AgentSandbox({ agent, onClose }: AgentSandboxProps) {
               options={modelOptions}
               placeholder="e.g. gpt-4o"
               disabled={loading}
-              strict={!!(agent.availableModels && agent.availableModels.length > 0)}
+              strict={hasStrictAllowlist}
             />
           </div>
           {onClose && (
