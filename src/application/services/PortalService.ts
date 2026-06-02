@@ -178,24 +178,30 @@ export class PortalService {
 
     // Resolve provider available models for agents that don't have their own list.
     // Collect unique provider IDs, then batch-load them.
+    const agentsNeedingFallback = agents.filter(
+      a => !a.availableModels || a.availableModels.length === 0,
+    );
+
     const providerIds = new Set<string>();
-    for (const a of agents) {
-      if (!a.availableModels || a.availableModels.length === 0) {
+    let effectiveTenantProviderId: string | null = null;
+
+    if (agentsNeedingFallback.length > 0) {
+      for (const a of agentsNeedingFallback) {
         const pid = this.getAgentProviderId(a);
         if (pid) providerIds.add(pid);
       }
-    }
 
-    // Walk tenant chain so subtenants inherit provider from parent tenants.
-    const tenantChain = await this.loadTenantChain(tenantId);
-    const effectiveTenantProviderId = tenantChain
-      .map(t => {
-        const fkId = (t as any).default_provider_id as string | null;
-        return fkId ?? this.extractProviderId(t.provider_config);
-      })
-      .find(Boolean) ?? null;
-    if (effectiveTenantProviderId) {
-      providerIds.add(effectiveTenantProviderId);
+      // Walk tenant chain so subtenants inherit provider from parent tenants.
+      const tenantChain = await this.loadTenantChain(tenantId);
+      effectiveTenantProviderId = tenantChain
+        .map(t => {
+          const fkId = (t as any).default_provider_id as string | null;
+          return fkId ?? this.extractProviderId(t.provider_config);
+        })
+        .find(Boolean) ?? null;
+      if (effectiveTenantProviderId) {
+        providerIds.add(effectiveTenantProviderId);
+      }
     }
 
     const providerModelsMap = new Map<string, string[]>();
@@ -291,15 +297,6 @@ export class PortalService {
    */
   private getAgentProviderId(agent: Agent): string | null {
     return agent.providerId ?? this.extractProviderId(agent.providerConfig);
-  }
-
-  /**
-   * Extract the provider ID from a tenant.
-   * Prefers `tenant.defaultProviderId` (first-class FK), falls back to `providerConfig.gatewayProviderId`.
-   */
-  private getTenantProviderId(tenant: Tenant | null): string | null {
-    if (!tenant) return null;
-    return tenant.defaultProviderId ?? this.extractProviderId(tenant.providerConfig);
   }
 
   /**
