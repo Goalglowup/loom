@@ -10,6 +10,9 @@ import { User } from '../../domain/entities/User.js';
 import { Tenant } from '../../domain/entities/Tenant.js';
 import { TenantMembership } from '../../domain/entities/TenantMembership.js';
 import { Agent } from '../../domain/entities/Agent.js';
+import { OpenAIProvider } from '../../domain/entities/OpenAIProvider.js';
+import { AzureProvider } from '../../domain/entities/AzureProvider.js';
+import { OllamaProvider } from '../../domain/entities/OllamaProvider.js';
 import { Invite } from '../../domain/entities/Invite.js';
 import { BetaSignup } from '../../domain/entities/BetaSignup.js';
 import { Trace } from '../../domain/entities/Trace.js';
@@ -173,22 +176,72 @@ export class PortalService {
       { orderBy: { createdAt: 'ASC' } },
     );
 
-    return agents.map((a) => ({
-      id: a.id,
-      name: a.name,
-      provider_config: a.providerConfig,
-      system_prompt: a.systemPrompt,
-      skills: a.skills,
-      mcp_endpoints: a.mcpEndpoints,
-      merge_policies: a.mergePolicies,
-      available_models: a.availableModels,
-      conversations_enabled: a.conversationsEnabled,
-      conversation_token_limit: a.conversationTokenLimit,
-      conversation_summary_model: a.conversationSummaryModel,
-      knowledge_base_ref: a.knowledgeBaseRef,
-      created_at: a.createdAt,
-      updated_at: a.updatedAt,
-    }));
+    // Resolve provider available models for agents that don't have their own list.
+    // Collect unique provider IDs, then batch-load them.
+    const agentsNeedingFallback = agents.filter(
+      (a) => !a.availableModels || a.availableModels.length === 0,
+    );
+
+    const providerIds = new Set<string>();
+    let effectiveTenantProviderId: string | null = null;
+
+    if (agentsNeedingFallback.length > 0) {
+      for (const a of agentsNeedingFallback) {
+        const pid = this.getAgentProviderId(a);
+        if (pid) providerIds.add(pid);
+      }
+
+      // Walk tenant chain so subtenants inherit provider from parent tenants.
+      const tenantChain = await this.loadTenantChain(tenantId);
+      effectiveTenantProviderId = tenantChain
+        .map((t) => t.default_provider_id ?? this.extractProviderId(t.provider_config))
+        .find(Boolean) ?? null;
+      if (effectiveTenantProviderId) {
+        providerIds.add(effectiveTenantProviderId);
+      }
+    }
+
+    const providerModelsMap = new Map<string, string[]>();
+    if (providerIds.size > 0) {
+      for (const ProviderClass of [OpenAIProvider, AzureProvider, OllamaProvider]) {
+        const providers = await this.em.find(ProviderClass, { id: { $in: [...providerIds] } });
+        for (const p of providers) {
+          if (p.availableModels && p.availableModels.length > 0) {
+            providerModelsMap.set(p.id, p.availableModels);
+          }
+        }
+      }
+    }
+
+    return agents.map((a) => {
+      // Resolve effective available models: agent's own → agent's provider → tenant default provider
+      let effectiveModels = a.availableModels;
+      if (!effectiveModels || effectiveModels.length === 0) {
+        const pid = this.getAgentProviderId(a);
+        if (pid && providerModelsMap.has(pid)) {
+          effectiveModels = providerModelsMap.get(pid)!;
+        } else if (effectiveTenantProviderId && providerModelsMap.has(effectiveTenantProviderId)) {
+          effectiveModels = providerModelsMap.get(effectiveTenantProviderId)!;
+        }
+      }
+
+      return {
+        id: a.id,
+        name: a.name,
+        provider_config: a.providerConfig,
+        system_prompt: a.systemPrompt,
+        skills: a.skills,
+        mcp_endpoints: a.mcpEndpoints,
+        merge_policies: a.mergePolicies,
+        available_models: effectiveModels,
+        conversations_enabled: a.conversationsEnabled,
+        conversation_token_limit: a.conversationTokenLimit,
+        conversation_summary_model: a.conversationSummaryModel,
+        knowledge_base_ref: a.knowledgeBaseRef,
+        created_at: a.createdAt,
+        updated_at: a.updatedAt,
+      };
+    });
   }
 
   async getAgent(agentId: string, userId: string) {
@@ -202,6 +255,9 @@ export class PortalService {
     });
     if (!membership) return null;
 
+    // Resolve effective available models from provider chain
+    const effectiveModels = await this.resolveAgentAvailableModels(agent);
+
     return {
       id: agent.id,
       name: agent.name,
@@ -210,7 +266,7 @@ export class PortalService {
       skills: agent.skills,
       mcp_endpoints: agent.mcpEndpoints,
       merge_policies: agent.mergePolicies,
-      available_models: agent.availableModels,
+      available_models: effectiveModels,
       conversations_enabled: agent.conversationsEnabled,
       conversation_token_limit: agent.conversationTokenLimit,
       conversation_summary_model: agent.conversationSummaryModel,
@@ -218,6 +274,71 @@ export class PortalService {
       created_at: agent.createdAt,
       updated_at: agent.updatedAt,
     };
+  }
+
+  /**
+   * Extract the effective provider ID from a providerConfig object.
+   * Returns null if cfg is not an object, lacks gatewayProviderId, or the value is not a non-empty string.
+   */
+  private extractProviderId(cfg: any): string | null {
+    if (cfg && typeof cfg === 'object' && 'gatewayProviderId' in cfg) {
+      const val = cfg.gatewayProviderId;
+      return typeof val === 'string' && val.length > 0 ? val : null;
+    }
+    return null;
+  }
+
+  /**
+   * Extract the effective provider ID for an agent.
+   * Prefers `agent.providerId` (first-class FK), falls back to `providerConfig.gatewayProviderId`.
+   */
+  private getAgentProviderId(agent: Agent): string | null {
+    return agent.providerId ?? this.extractProviderId(agent.providerConfig);
+  }
+
+  /**
+   * Resolve effective available models for an agent.
+   * Falls back: agent's own list → agent's provider → tenant's provider.
+   */
+  private async resolveAgentAvailableModels(agent: Agent): Promise<string[] | null> {
+    if (agent.availableModels && agent.availableModels.length > 0) {
+      return agent.availableModels;
+    }
+
+    const agentProviderId = this.getAgentProviderId(agent);
+    const providerIds: string[] = [];
+    if (agentProviderId) providerIds.push(agentProviderId);
+
+    const tenantId = (agent.tenant as any)?.id ?? agent.tenant;
+    const tenantChain = await this.loadTenantChain(tenantId);
+    const effectiveTenantProviderId = tenantChain
+      .map((t) => t.default_provider_id ?? this.extractProviderId(t.provider_config))
+      .find(Boolean) ?? null;
+    if (effectiveTenantProviderId && effectiveTenantProviderId !== agentProviderId) {
+      providerIds.push(effectiveTenantProviderId);
+    }
+
+    const providerModelsMap = new Map<string, string[]>();
+    if (providerIds.length > 0) {
+      for (const ProviderClass of [OpenAIProvider, AzureProvider, OllamaProvider]) {
+        const providers = await this.em.find(ProviderClass, { id: { $in: providerIds } });
+        for (const p of providers) {
+          if (p.availableModels && p.availableModels.length > 0) {
+            providerModelsMap.set(p.id, p.availableModels);
+          }
+        }
+      }
+    }
+
+    // Return models in priority order: agent's provider first, then tenant chain provider.
+    if (agentProviderId && providerModelsMap.has(agentProviderId)) {
+      return providerModelsMap.get(agentProviderId)!;
+    }
+    if (effectiveTenantProviderId && providerModelsMap.has(effectiveTenantProviderId)) {
+      return providerModelsMap.get(effectiveTenantProviderId)!;
+    }
+
+    return null;
   }
 
   async getAgentResolved(agentId: string, userId: string) {
@@ -287,6 +408,7 @@ export class PortalService {
   private async loadTenantChain(tenantId: string): Promise<Array<{
     id: string; name: string;
     provider_config: Record<string, unknown> | null;
+    default_provider_id: string | null;
     system_prompt: string | null;
     skills: unknown[] | null;
     mcp_endpoints: unknown[] | null;
@@ -295,14 +417,14 @@ export class PortalService {
     const knex = (this.em as any).getKnex();
     const result = await knex.raw(
       `WITH RECURSIVE tenant_chain AS (
-         SELECT id, name, parent_id, provider_config, system_prompt, skills, mcp_endpoints, 0 AS depth
+         SELECT id, name, parent_id, provider_config, default_provider_id, system_prompt, skills, mcp_endpoints, 0 AS depth
          FROM tenants WHERE id = ?
          UNION ALL
-         SELECT t.id, t.name, t.parent_id, t.provider_config, t.system_prompt, t.skills, t.mcp_endpoints, tc.depth + 1
+         SELECT t.id, t.name, t.parent_id, t.provider_config, t.default_provider_id, t.system_prompt, t.skills, t.mcp_endpoints, tc.depth + 1
          FROM tenants t
          JOIN tenant_chain tc ON t.id = tc.parent_id
        )
-       SELECT id, name, provider_config, system_prompt, skills, mcp_endpoints, depth
+       SELECT id, name, provider_config, default_provider_id, system_prompt, skills, mcp_endpoints, depth
        FROM tenant_chain ORDER BY depth ASC`,
       [tenantId],
     );
