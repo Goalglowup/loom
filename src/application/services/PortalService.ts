@@ -179,7 +179,7 @@ export class PortalService {
     // Resolve provider available models for agents that don't have their own list.
     // Collect unique provider IDs, then batch-load them.
     const agentsNeedingFallback = agents.filter(
-      a => !a.availableModels || a.availableModels.length === 0,
+      (a) => !a.availableModels || a.availableModels.length === 0,
     );
 
     const providerIds = new Set<string>();
@@ -194,10 +194,7 @@ export class PortalService {
       // Walk tenant chain so subtenants inherit provider from parent tenants.
       const tenantChain = await this.loadTenantChain(tenantId);
       effectiveTenantProviderId = tenantChain
-        .map(t => {
-          const fkId = (t as any).default_provider_id as string | null;
-          return fkId ?? this.extractProviderId(t.provider_config);
-        })
+        .map((t) => t.default_provider_id ?? this.extractProviderId(t.provider_config))
         .find(Boolean) ?? null;
       if (effectiveTenantProviderId) {
         providerIds.add(effectiveTenantProviderId);
@@ -315,22 +312,30 @@ export class PortalService {
     const tenantId = (agent.tenant as any)?.id ?? agent.tenant;
     const tenantChain = await this.loadTenantChain(tenantId);
     const effectiveTenantProviderId = tenantChain
-      .map(t => {
-        const fkId = (t as any).default_provider_id as string | null;
-        return fkId ?? this.extractProviderId(t.provider_config);
-      })
+      .map((t) => t.default_provider_id ?? this.extractProviderId(t.provider_config))
       .find(Boolean) ?? null;
     if (effectiveTenantProviderId && effectiveTenantProviderId !== agentProviderId) {
       providerIds.push(effectiveTenantProviderId);
     }
 
-    for (const pid of providerIds) {
+    const providerModelsMap = new Map<string, string[]>();
+    if (providerIds.length > 0) {
       for (const ProviderClass of [OpenAIProvider, AzureProvider, OllamaProvider]) {
-        const provider = await this.em.findOne(ProviderClass, { id: pid });
-        if (provider?.availableModels && provider.availableModels.length > 0) {
-          return provider.availableModels;
+        const providers = await this.em.find(ProviderClass, { id: { $in: providerIds } });
+        for (const p of providers) {
+          if (p.availableModels && p.availableModels.length > 0) {
+            providerModelsMap.set(p.id, p.availableModels);
+          }
         }
       }
+    }
+
+    // Return models in priority order: agent's provider first, then tenant chain provider.
+    if (agentProviderId && providerModelsMap.has(agentProviderId)) {
+      return providerModelsMap.get(agentProviderId)!;
+    }
+    if (effectiveTenantProviderId && providerModelsMap.has(effectiveTenantProviderId)) {
+      return providerModelsMap.get(effectiveTenantProviderId)!;
     }
 
     return null;
